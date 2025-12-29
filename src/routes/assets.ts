@@ -1,4 +1,4 @@
-import { mkdir, stat } from "fs/promises";
+import { mkdir } from "fs/promises";
 import { join, extname } from "path";
 import { randomUUID } from "crypto";
 import { isAdmin } from "../config";
@@ -8,51 +8,35 @@ export const ASSETS_ROOT = join(import.meta.dir, "../../assets");
 const MAX_SIZE_USER = 50 * 1024 * 1024; // 50MB
 const MAX_SIZE_ADMIN = 256 * 1024 * 1024; // 256MB
 
-const ALLOWED_IMAGE_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "image/svg+xml",
+// Blocked extensions for security (executables, scripts)
+// Admins bypass this check
+const BLOCKED_EXTENSIONS = new Set([
+  ".exe", ".bat", ".cmd", ".com", ".msi", ".scr",
+  ".ps1", ".vbs", ".vbe", ".js", ".jse", ".ws", ".wsf",
+  ".sh", ".bash", ".zsh", ".csh",
+  ".app", ".dmg", ".pkg",
+  ".dll", ".so", ".dylib",
 ]);
 
-const ALLOWED_FILE_TYPES = new Set([
-  ...ALLOWED_IMAGE_TYPES,
-  "application/pdf",
-  "text/plain",
-  "text/csv",
-  "application/json",
-  "application/zip",
-  "application/x-zip-compressed",
+// Image extensions for isImage flag
+const IMAGE_EXTENSIONS = new Set([
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico",
 ]);
 
-function inferExtension(mime: string, originalName?: string): string {
-  const originalExt = originalName ? extname(originalName).toLowerCase() : "";
-  if (originalExt) return originalExt;
+function getExtension(filename?: string): string {
+  if (!filename) return "";
+  return extname(filename).toLowerCase();
+}
 
-  const mimeToExt: Record<string, string> = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-    "image/svg+xml": ".svg",
-    "application/pdf": ".pdf",
-    "text/plain": ".txt",
-    "text/csv": ".csv",
-    "application/json": ".json",
-    "application/zip": ".zip",
-    "application/x-zip-compressed": ".zip",
-  };
-  return mimeToExt[mime] ?? ".bin";
+function isImageFile(filename?: string, mime?: string): boolean {
+  const ext = getExtension(filename);
+  if (IMAGE_EXTENSIONS.has(ext)) return true;
+  return mime?.startsWith("image/") ?? false;
 }
 
 function getDateFolder(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
-function isImageType(mime: string): boolean {
-  return ALLOWED_IMAGE_TYPES.has(mime);
 }
 
 export async function handleAssetUpload(req: Request, session: Session | null): Promise<Response> {
@@ -74,14 +58,16 @@ export async function handleAssetUpload(req: Request, session: Session | null): 
 
   const file = fileEntry as File;
   const mime = file.type || "application/octet-stream";
+  const ext = getExtension(file.name) || ".bin";
+  const userIsAdmin = isAdmin(session.npub);
 
-  // Validate file type
-  if (!ALLOWED_FILE_TYPES.has(mime)) {
-    return Response.json({ error: `File type ${mime} not allowed` }, { status: 400 });
+  // Block dangerous file types (admins bypass this)
+  if (!userIsAdmin && BLOCKED_EXTENSIONS.has(ext)) {
+    return Response.json({ error: `File type ${ext} not allowed` }, { status: 400 });
   }
 
   // Check size limit based on admin status
-  const maxSize = isAdmin(session.npub) ? MAX_SIZE_ADMIN : MAX_SIZE_USER;
+  const maxSize = userIsAdmin ? MAX_SIZE_ADMIN : MAX_SIZE_USER;
   if (file.size > maxSize) {
     const limitMb = maxSize / (1024 * 1024);
     return Response.json({ error: `File exceeds ${limitMb}MB limit` }, { status: 413 });
@@ -97,8 +83,7 @@ export async function handleAssetUpload(req: Request, session: Session | null): 
     return Response.json({ error: "Failed to prepare storage" }, { status: 500 });
   }
 
-  // Generate unique filename
-  const ext = inferExtension(mime, file.name);
+  // Generate unique filename preserving original extension
   const filename = `${randomUUID()}${ext}`;
   const filePath = join(userDir, filename);
 
@@ -119,7 +104,7 @@ export async function handleAssetUpload(req: Request, session: Session | null): 
     name: file.name,
     type: mime,
     size: file.size,
-    isImage: isImageType(mime),
+    isImage: isImageFile(file.name, mime),
   });
 }
 

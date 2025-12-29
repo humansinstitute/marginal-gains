@@ -1,7 +1,8 @@
 import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
 import { loadNostrLibs } from "./nostr.js";
-import { addDmChannel, addMessage, getActiveChannelMessages, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateAllChannels, upsertChannel, setChannelMessages } from "./state.js";
+import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent } from "./liveUpdates.js";
+import { addDmChannel, addMessage, getActiveChannelMessages, removeMessageFromChannel, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateAllChannels, upsertChannel, setChannelMessages, refreshUI } from "./state.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();
@@ -11,6 +12,51 @@ const npubToPubkeyCache = new Map();
 
 // Track currently open thread
 let openThreadId = null;
+
+// Track if we should scroll to bottom (only on initial load or explicit action)
+let shouldScrollToBottom = false;
+
+// Scroll a container to the bottom
+function scrollToBottom(container) {
+  if (container) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+// Check if container is scrolled near bottom (within 100px)
+function isNearBottom(container) {
+  if (!container) return true;
+  const threshold = 100;
+  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+}
+
+// Show/hide the "new message" indicator
+function showNewMessageIndicator() {
+  let indicator = document.querySelector("[data-new-message-indicator]");
+  if (!indicator && el.chatThreadList) {
+    // Create indicator if it doesn't exist
+    indicator = document.createElement("button");
+    indicator.className = "new-message-indicator";
+    indicator.setAttribute("data-new-message-indicator", "");
+    indicator.textContent = "New message ↓";
+    indicator.addEventListener("click", () => {
+      scrollToBottom(el.chatThreadList);
+      hideNewMessageIndicator();
+    });
+    // Insert before the thread list
+    el.chatThreadList.parentElement?.insertBefore(indicator, el.chatThreadList);
+  }
+  if (indicator) {
+    indicator.style.display = "block";
+  }
+}
+
+function hideNewMessageIndicator() {
+  const indicator = document.querySelector("[data-new-message-indicator]");
+  if (indicator) {
+    indicator.style.display = "none";
+  }
+}
 
 // Mention autocomplete state
 let mentionQuery = null; // Current @query being typed (null if not active)
@@ -171,6 +217,93 @@ async function fetchUserInfo() {
   }
 }
 
+// Set up handlers for live update events
+function setupLiveUpdateHandlers() {
+  // When initial sync completes, render channels
+  onEvent("sync:init", () => {
+    renderChannels();
+  });
+
+  // When a new message arrives
+  onEvent("message:new", (data) => {
+    // If viewing this channel, handle the new message
+    if (state.chat.selectedChannelId === String(data.channelId)) {
+      // Check if user is near bottom before re-rendering
+      const wasNearBottom = isNearBottom(el.chatThreadList);
+
+      renderThreads();
+
+      // If user was near bottom, scroll to show new message
+      // Otherwise show the "new message" indicator
+      if (wasNearBottom) {
+        scrollToBottom(el.chatThreadList);
+        hideNewMessageIndicator();
+      } else {
+        showNewMessageIndicator();
+      }
+
+      // If thread panel is open for a parent message that just got a reply, update it
+      // Compare as strings since openThreadId is a string and data.parent_id is a number
+      const parentId = data.parent_id ? String(data.parent_id) : null;
+      if (openThreadId && parentId === openThreadId) {
+        renderThreadPanel(openThreadId);
+      }
+    }
+  });
+
+  // When a new channel is created
+  onEvent("channel:new", () => {
+    renderChannels();
+  });
+
+  // When a channel is updated
+  onEvent("channel:update", (data) => {
+    renderChannels();
+    // Update active channel chip if this is the selected channel
+    if (state.chat.selectedChannelId === String(data.id) && el.activeChannel) {
+      el.activeChannel.textContent = data.displayName || data.name;
+    }
+  });
+
+  // When a channel is deleted
+  onEvent("channel:delete", (data) => {
+    renderChannels();
+    // If viewing this channel, clear the view
+    if (state.chat.selectedChannelId === String(data.id)) {
+      if (el.threadList) {
+        el.threadList.innerHTML = `<p class="chat-placeholder">This channel was deleted.</p>`;
+      }
+      if (el.activeChannel) {
+        el.activeChannel.textContent = "Pick a channel";
+      }
+    }
+  });
+
+  // When a new DM is created
+  onEvent("dm:new", () => {
+    renderChannels();
+  });
+
+  // When a message is deleted
+  onEvent("message:delete", (data) => {
+    const channelId = String(data.channelId);
+    const messageId = String(data.messageId);
+
+    // Remove message from state
+    removeMessageFromChannel(channelId, messageId);
+
+    // Re-render if viewing this channel
+    if (state.chat.selectedChannelId === channelId) {
+      renderThreads();
+
+      // Close thread panel if the deleted message was the open thread root
+      if (openThreadId === messageId) {
+        closeThreadPanel();
+      }
+    }
+  });
+}
+
 export const initChat = async () => {
   // Check if we're on the chat page
   const isChatPage = window.__CHAT_PAGE__ === true;
@@ -184,10 +317,24 @@ export const initChat = async () => {
   await Promise.all([fetchLocalUsers(), fetchUserInfo()]);
 
   if (isChatPage && el.chatShell) {
-    // On chat page - show chat immediately and fetch data
+    // On chat page - show chat immediately and connect to live updates
     show(el.chatShell);
     setChatEnabled(true);
-    await fetchChannels();
+
+    // Set up live update event handlers
+    setupLiveUpdateHandlers();
+
+    // Hide new message indicator when user scrolls to bottom
+    el.chatThreadList?.addEventListener("scroll", () => {
+      if (isNearBottom(el.chatThreadList)) {
+        hideNewMessageIndicator();
+      }
+    });
+
+    // Connect to SSE - this will provide initial sync and live updates
+    await connectLiveUpdates();
+
+    // Fetch messages for initially selected channel (if any)
     if (state.chat.selectedChannelId) {
       await fetchMessages(state.chat.selectedChannelId);
     }
@@ -263,6 +410,11 @@ async function fetchMessages(channelId) {
       parentId: m.parent_id ? String(m.parent_id) : null,
     }));
     setChannelMessages(channelId, mapped);
+
+    // Scroll to bottom on initial load of channel messages
+    shouldScrollToBottom = true;
+    // Hide any existing new message indicator
+    hideNewMessageIndicator();
 
     // Prefetch author profiles in background, then re-render to show names
     prefetchAuthorProfiles(mapped).then(() => {
@@ -561,6 +713,50 @@ function wireComposer() {
     }
   });
 
+  // Message menu: toggle dropdown, close others, and handle delete
+  document.addEventListener("click", async (event) => {
+    const trigger = event.target.closest("[data-message-menu]");
+    const deleteBtn = event.target.closest("[data-delete-message]");
+
+    // Handle menu trigger click
+    if (trigger) {
+      event.stopPropagation();
+      const id = trigger.dataset.messageMenu;
+      // Close all other open menus
+      document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
+        if (d.dataset.messageDropdown !== id) d.hidden = true;
+      });
+      // Toggle this menu
+      const dropdown = document.querySelector(`[data-message-dropdown="${id}"]`);
+      if (dropdown) dropdown.hidden = !dropdown.hidden;
+      return;
+    }
+
+    // Handle delete button click
+    if (deleteBtn) {
+      event.stopPropagation();
+      const messageId = deleteBtn.dataset.deleteMessage;
+      if (!confirm("Delete this message? Thread replies will also be removed.")) return;
+
+      try {
+        const res = await fetch(`/chat/messages/${messageId}`, { method: "DELETE" });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(err.error || "Failed to delete message");
+        }
+        // Success: SSE broadcast handles UI update, no need to do anything here
+      } catch (_err) {
+        alert("Failed to delete message");
+      }
+      return;
+    }
+
+    // Close all menus when clicking elsewhere
+    document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
+      d.hidden = true;
+    });
+  });
+
   el.chatSendBtn?.addEventListener("click", sendMessage);
 }
 
@@ -584,13 +780,14 @@ function extractUploadableFiles(items) {
   return files;
 }
 
-// Upload files and insert markdown into input
-async function uploadFiles(files) {
-  if (!state.session || !el.chatInput || isUploading) return;
+// Upload files and insert markdown into a specific input element
+async function uploadFilesToInput(files, inputEl, sendBtn, defaultPlaceholder) {
+  if (!state.session || !inputEl || isUploading) return;
 
   for (const file of files) {
     isUploading = true;
-    updateUploadingState(true);
+    sendBtn?.setAttribute("disabled", "disabled");
+    inputEl.setAttribute("placeholder", "Uploading...");
 
     try {
       const form = new FormData();
@@ -612,51 +809,46 @@ async function uploadFiles(files) {
         ? `![${file.name}](${payload.url})`
         : `[${file.name}](${payload.url})`;
 
-      insertTextAtCursor(markdown);
+      insertTextAtCursorIn(inputEl, markdown);
     } catch (error) {
       console.error("[Chat] Upload failed:", error);
       alert("Upload failed");
     } finally {
       isUploading = false;
-      updateUploadingState(false);
+      inputEl.setAttribute("placeholder", defaultPlaceholder);
+      // Trigger input event to update send button state
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
 }
 
-// Insert text at cursor position
-function insertTextAtCursor(text) {
-  if (!el.chatInput) return;
-  const start = el.chatInput.selectionStart ?? el.chatInput.value.length;
-  const end = el.chatInput.selectionEnd ?? el.chatInput.value.length;
-  const before = el.chatInput.value.slice(0, start);
-  const after = el.chatInput.value.slice(end);
+// Wrapper for main chat input
+async function uploadFiles(files) {
+  await uploadFilesToInput(files, el.chatInput, el.chatSendBtn, "Share an update, @name to mention");
+}
+
+// Insert text at cursor position in a specific input element
+function insertTextAtCursorIn(inputEl, text) {
+  if (!inputEl) return;
+  const start = inputEl.selectionStart ?? inputEl.value.length;
+  const end = inputEl.selectionEnd ?? inputEl.value.length;
+  const before = inputEl.value.slice(0, start);
+  const after = inputEl.value.slice(end);
 
   // Add newlines around markdown if needed
   const prefix = before.length > 0 && !before.endsWith("\n") ? "\n" : "";
   const suffix = after.length > 0 && !after.startsWith("\n") ? "\n" : "";
 
-  el.chatInput.value = before + prefix + text + suffix + after;
+  inputEl.value = before + prefix + text + suffix + after;
   const newPos = start + prefix.length + text.length + suffix.length;
-  el.chatInput.selectionStart = el.chatInput.selectionEnd = newPos;
-  el.chatInput.focus();
-
-  // Trigger input event to update send button state
-  el.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+  inputEl.selectionStart = inputEl.selectionEnd = newPos;
+  inputEl.focus();
 }
 
-// Update UI during upload
-function updateUploadingState(uploading) {
-  if (uploading) {
-    el.chatSendBtn?.setAttribute("disabled", "disabled");
-    el.chatInput?.setAttribute("placeholder", "Uploading...");
-  } else {
-    el.chatInput?.setAttribute("placeholder", "Share an update, @name to mention");
-    // Re-evaluate send button
-    const hasText = Boolean(el.chatInput?.value.trim());
-    if (hasText && state.chat.selectedChannelId) {
-      el.chatSendBtn?.removeAttribute("disabled");
-    }
-  }
+// Legacy wrapper for main chat input
+function insertTextAtCursor(text) {
+  insertTextAtCursorIn(el.chatInput, text);
+  el.chatInput?.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 async function sendMessage() {
@@ -835,6 +1027,12 @@ function renderThreads() {
     .map((message) => renderCollapsedThread(message, byParent))
     .join("");
 
+  // Only scroll to bottom on initial load, not on every re-render
+  if (shouldScrollToBottom) {
+    scrollToBottom(el.chatThreadList);
+    shouldScrollToBottom = false;
+  }
+
   // Wire up thread click handlers
   el.chatThreadList.querySelectorAll("[data-thread-id]").forEach((thread) => {
     const handler = (e) => {
@@ -954,11 +1152,25 @@ function getFileIcon(ext) {
   return icons[ext] || icons.default;
 }
 
+// Render message action menu (delete option for author or admin)
+function renderMessageMenu(message) {
+  const canDelete = state.session?.npub === message.author || state.isAdmin;
+  if (!canDelete) return '';
+
+  return `<div class="message-menu">
+    <button class="message-menu-trigger" data-message-menu="${message.id}" aria-label="Message options">&#8942;</button>
+    <div class="message-menu-dropdown" data-message-dropdown="${message.id}" hidden>
+      <button class="message-menu-item danger" data-delete-message="${message.id}">Delete</button>
+    </div>
+  </div>`;
+}
+
 function renderMessageCompact(message, { showAvatar = false } = {}) {
   const avatarHtml = showAvatar
     ? `<img class="chat-message-avatar" src="${escapeHtml(getAuthorAvatarUrl(message.author))}" alt="" loading="lazy" />`
     : '';
-  return `<div class="chat-message${showAvatar ? ' chat-message-with-avatar' : ''}">
+  const menuHtml = renderMessageMenu(message);
+  return `<div class="chat-message${showAvatar ? ' chat-message-with-avatar' : ''}" data-message-id="${message.id}">
     ${avatarHtml}
     <div class="chat-message-content">
       <div class="chat-message-meta">
@@ -966,13 +1178,15 @@ function renderMessageCompact(message, { showAvatar = false } = {}) {
         <time>${new Date(message.createdAt).toLocaleTimeString()}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
+      ${menuHtml}
     </div>
   </div>`;
 }
 
 function renderMessageFull(message) {
   const avatarUrl = getAuthorAvatarUrl(message.author);
-  return `<div class="chat-message chat-message-with-avatar">
+  const menuHtml = renderMessageMenu(message);
+  return `<div class="chat-message chat-message-with-avatar" data-message-id="${message.id}">
     <img class="chat-thread-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
     <div class="chat-message-content">
       <div class="chat-message-meta">
@@ -980,6 +1194,7 @@ function renderMessageFull(message) {
         <time>${new Date(message.createdAt).toLocaleTimeString()}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
+      ${menuHtml}
     </div>
   </div>`;
 }
@@ -1024,6 +1239,38 @@ function wireThreadSidebar() {
     else el.threadSendBtn?.setAttribute("disabled", "disabled");
   });
 
+  // Paste handler for thread input
+  el.threadInput?.addEventListener("paste", async (event) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    const files = extractUploadableFiles(items);
+    if (files.length > 0) {
+      event.preventDefault();
+      await uploadFilesToInput(files, el.threadInput, el.threadSendBtn, "Reply to thread...");
+    }
+  });
+
+  // Drag and drop for thread composer
+  const threadComposer = el.threadInput?.closest(".chat-thread-panel-composer");
+  threadComposer?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    threadComposer.classList.add("drag-over");
+  });
+  threadComposer?.addEventListener("dragleave", () => {
+    threadComposer.classList.remove("drag-over");
+  });
+  threadComposer?.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    threadComposer.classList.remove("drag-over");
+    const items = event.dataTransfer?.items || event.dataTransfer?.files;
+    if (!items) return;
+    const files = extractUploadableFiles(items);
+    if (files.length > 0) {
+      await uploadFilesToInput(files, el.threadInput, el.threadSendBtn, "Reply to thread...");
+    }
+  });
+
   // Thread send button
   const sendHandler = () => sendThreadReply();
   el.threadSendBtn?.addEventListener("click", sendHandler);
@@ -1052,6 +1299,8 @@ function openThread(threadId, messages, byParent) {
     el.threadMessages.innerHTML = allMessages
       .map((msg) => renderMessageFull(msg))
       .join("");
+    // Scroll to bottom to show latest replies
+    scrollToBottom(el.threadMessages);
   }
 
   // Show inline panel
@@ -1063,6 +1312,14 @@ function openThread(threadId, messages, byParent) {
   }
 
   el.threadInput?.focus();
+}
+
+// Re-render the currently open thread panel (used by SSE updates)
+function renderThreadPanel(threadId) {
+  if (!threadId) return;
+  const messages = getActiveChannelMessages();
+  const byParent = groupByParent(messages);
+  openThread(threadId, messages, byParent);
 }
 
 function closeThreadPanel() {

@@ -1,4 +1,4 @@
-import { canUserAccessChannel, deleteChannel, getOrCreateDmChannel, getOrCreatePersonalChannel, listAllChannels, listDmChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
+import { canUserAccessChannel, deleteChannel, deleteMessage, getDmParticipants, getMessage, getOrCreateDmChannel, getOrCreatePersonalChannel, listAllChannels, listDmChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
 import { isAdmin } from "../config";
 import { jsonResponse, unauthorized } from "../http";
 import { renderChatPage } from "../render/chat";
@@ -10,6 +10,7 @@ import {
   replyToMessage,
   sendMessage,
 } from "../services/chat";
+import { broadcast } from "../services/events";
 
 import type { Session } from "../types";
 
@@ -90,6 +91,20 @@ export async function handleCreateChannel(req: Request, session: Session | null)
     return jsonResponse({ error: "Channel name already exists" }, 409);
   }
 
+  // Broadcast new channel event
+  broadcast({
+    type: "channel:new",
+    data: {
+      id: channel.id,
+      name: channel.name,
+      displayName: channel.display_name,
+      description: channel.description,
+      isPublic: channel.is_public === 1,
+    },
+    // For private channels, we'd need to limit recipients to group members
+    // For now, broadcast to all - client will filter based on access
+  });
+
   return jsonResponse(channel, 201);
 }
 
@@ -123,6 +138,21 @@ export async function handleUpdateChannel(req: Request, session: Session | null,
     newIsPublic
   );
 
+  // Broadcast channel update event
+  if (channel) {
+    broadcast({
+      type: "channel:update",
+      data: {
+        id: channel.id,
+        name: channel.name,
+        displayName: channel.display_name,
+        description: channel.description,
+        isPublic: channel.is_public === 1,
+      },
+      channelId: id,
+    });
+  }
+
   return jsonResponse(channel);
 }
 
@@ -143,6 +173,13 @@ export function handleDeleteChannel(session: Session | null, id: number) {
   if (existing.owner_npub) {
     return forbidden("Cannot delete personal channels");
   }
+
+  // Broadcast before deleting so clients know to remove it
+  broadcast({
+    type: "channel:delete",
+    data: { id },
+    channelId: id,
+  });
 
   deleteChannel(id);
   return jsonResponse({ success: true });
@@ -197,7 +234,64 @@ export async function handleSendMessage(req: Request, session: Session | null, c
     return jsonResponse({ error: "Failed to send message" }, 500);
   }
 
+  // Broadcast new message event
+  // Determine recipients based on channel type
+  let recipientNpubs: string[] | undefined;
+
+  if (channel.owner_npub) {
+    // Personal channel - only owner receives
+    recipientNpubs = [channel.owner_npub];
+  } else if (channel.is_public === 0) {
+    // Private channel or DM - use channel access check
+    // For DMs, get participants
+    const dmParticipants = getDmParticipants(channelId);
+    if (dmParticipants.length > 0) {
+      recipientNpubs = dmParticipants.map(p => p.npub);
+    }
+    // For private group channels, channelId check handles it
+  }
+
+  broadcast({
+    type: "message:new",
+    data: {
+      ...message,
+      channelId,
+    },
+    channelId,
+    recipientNpubs,
+  });
+
   return jsonResponse(message, 201);
+}
+
+export function handleDeleteMessage(session: Session | null, messageId: number) {
+  if (!session) return unauthorized();
+
+  const message = getMessage(messageId);
+  if (!message) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  // Only author or admin can delete
+  const canDelete = message.author === session.npub || isAdmin(session.npub);
+  if (!canDelete) {
+    return forbidden("You can only delete your own messages");
+  }
+
+  // Delete the message (thread replies cascade automatically via foreign key)
+  deleteMessage(messageId);
+
+  // Broadcast deletion event
+  broadcast({
+    type: "message:delete",
+    data: {
+      messageId,
+      channelId: message.channel_id,
+    },
+    channelId: message.channel_id,
+  });
+
+  return jsonResponse({ success: true });
 }
 
 // User endpoints
@@ -263,6 +357,18 @@ export async function handleCreateDm(req: Request, session: Session | null) {
   if (!channel) {
     return jsonResponse({ error: "Failed to create DM channel" }, 500);
   }
+
+  // Broadcast DM channel creation to both participants
+  broadcast({
+    type: "dm:new",
+    data: {
+      id: channel.id,
+      name: channel.name,
+      displayName: channel.display_name,
+      description: channel.description,
+    },
+    recipientNpubs: [session.npub, targetNpub],
+  });
 
   return jsonResponse(channel, 201);
 }

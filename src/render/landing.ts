@@ -20,7 +20,7 @@ ${renderHead()}
 function renderHead() {
   return `<head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>${APP_NAME}</title>
   <meta name="theme-color" content="#111111" />
   <meta name="application-name" content="${APP_NAME}" />

@@ -338,9 +338,12 @@ const latestWeekSummaryStmt = db.query<Summary>(
    LIMIT 1`
 );
 
-// Channel statements (excludes personal channels)
+// Channel statements (excludes personal channels and DM channels)
 const listChannelsStmt = db.query<Channel>(
-  "SELECT * FROM channels WHERE owner_npub IS NULL ORDER BY created_at ASC"
+  `SELECT * FROM channels
+   WHERE owner_npub IS NULL
+   AND NOT EXISTS (SELECT 1 FROM dm_participants WHERE channel_id = id)
+   ORDER BY created_at ASC`
 );
 const getChannelByIdStmt = db.query<Channel>(
   "SELECT * FROM channels WHERE id = ?"
@@ -376,6 +379,7 @@ const insertMessageStmt = db.query<Message>(
 const getMessageByIdStmt = db.query<Message>(
   "SELECT * FROM messages WHERE id = ?"
 );
+const deleteMessageStmt = db.query("DELETE FROM messages WHERE id = ?");
 
 export function listTodos(owner: string | null, filterTags?: string[]) {
   if (!owner) return [];
@@ -551,6 +555,11 @@ export function createMessage(
   return insertMessageStmt.get(channelId, author, body, threadRootId, parentId, quotedMessageId) as Message | undefined ?? null;
 }
 
+export function deleteMessage(id: number): boolean {
+  const result = deleteMessageStmt.run(id);
+  return result.changes > 0;
+}
+
 // User statements
 const listUsersStmt = db.query<User>(
   "SELECT * FROM users ORDER BY updated_at DESC"
@@ -650,10 +659,12 @@ const addChannelGroupStmt = db.query<ChannelGroup>(
 const removeChannelGroupStmt = db.query("DELETE FROM channel_groups WHERE channel_id = ? AND group_id = ?");
 
 // Query for channels visible to a user (public OR user is in a group assigned to the channel)
-// Excludes personal channels (owner_npub IS NOT NULL) - those are fetched separately
+// Excludes personal channels (owner_npub IS NOT NULL) and DM channels - those are fetched separately
 const listVisibleChannelsStmt = db.query<Channel>(
   `SELECT DISTINCT c.* FROM channels c
-   WHERE c.owner_npub IS NULL AND (
+   WHERE c.owner_npub IS NULL
+   AND NOT EXISTS (SELECT 1 FROM dm_participants WHERE channel_id = c.id)
+   AND (
      c.is_public = 1
      OR EXISTS (
        SELECT 1 FROM channel_groups cg
@@ -704,6 +715,11 @@ const insertDmChannelStmt = db.query<Channel>(
 // Add DM participant
 const addDmParticipantStmt = db.query<DmParticipant>(
   `INSERT INTO dm_participants (channel_id, npub) VALUES (?, ?) RETURNING *`
+);
+
+// Get DM participants for a channel
+const getDmParticipantsStmt = db.query<DmParticipant>(
+  `SELECT * FROM dm_participants WHERE channel_id = ?`
 );
 
 // Check if user can access a specific private channel (includes DM check)
@@ -815,6 +831,10 @@ export function listDmChannels(npub: string) {
 
 export function findDmChannel(npub1: string, npub2: string) {
   return findDmChannelStmt.get(npub1, npub2) as Channel | undefined ?? null;
+}
+
+export function getDmParticipants(channelId: number) {
+  return getDmParticipantsStmt.all(channelId);
 }
 
 export function getOrCreateDmChannel(creatorNpub: string, otherNpub: string, displayName: string) {

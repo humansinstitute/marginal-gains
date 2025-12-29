@@ -132,6 +132,9 @@ export const setReplyTarget = (message) => {
 
 export const addMessage = (channelId, message) => {
   const bucket = state.chat.messagesByChannel[channelId] || [];
+  // Check if message already exists (prevent duplicates from SSE + HTTP)
+  const exists = bucket.some((m) => m.id === message.id);
+  if (exists) return;
   state.chat.messagesByChannel[channelId] = [...bucket, message];
   refreshUI();
 };
@@ -144,6 +147,20 @@ export const setChannelMessages = (channelId, messages) => {
 export const getActiveChannelMessages = () => {
   if (!state.chat.selectedChannelId) return [];
   return state.chat.messagesByChannel[state.chat.selectedChannelId] || [];
+};
+
+// Remove a message and all its thread replies from a channel
+export const removeMessageFromChannel = (channelId, messageId) => {
+  const bucket = state.chat.messagesByChannel[channelId];
+  if (!bucket) return;
+
+  // Remove the message and any messages that are part of its thread
+  // (parentId matches or they reference this message as thread root)
+  state.chat.messagesByChannel[channelId] = bucket.filter((m) => {
+    // Keep messages that aren't the deleted one and aren't in its thread
+    return m.id !== messageId && m.parentId !== messageId;
+  });
+  refreshUI();
 };
 
 export const onRefresh = (callback) => {

@@ -24,7 +24,7 @@ ${renderHead()}
 function renderHead() {
   return `<head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Settings - ${APP_NAME}</title>
   <meta name="theme-color" content="#0f172a" />
   <meta name="application-name" content="${APP_NAME}" />
@@ -144,7 +144,7 @@ function renderAccessDenied() {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Access Denied - ${APP_NAME}</title>
   <link rel="stylesheet" href="/app.css?v=3" />
 </head>

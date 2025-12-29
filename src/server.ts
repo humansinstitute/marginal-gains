@@ -17,6 +17,7 @@ import {
   handleCreateChannel,
   handleCreateDm,
   handleDeleteChannel,
+  handleDeleteMessage,
   handleGetChannel,
   handleGetMe,
   handleGetMessages,
@@ -39,6 +40,7 @@ import {
   handleRemoveGroupMember,
   handleUpdateGroup,
 } from "./routes/groups";
+import { handleChatEvents } from "./routes/events";
 import { handleHome, handleTodos } from "./routes/home";
 import { handleAssetUpload, serveAsset } from "./routes/assets";
 import { handleSettings } from "./routes/settings";
@@ -79,6 +81,7 @@ const server = Bun.serve({
 
         // Chat routes
         if (pathname === "/chat") return handleChatPage(session);
+        if (pathname === "/chat/events") return handleChatEvents(req, session);
         if (pathname === "/chat/channels") return handleListChannels(session);
         if (pathname === "/chat/users") return handleListUsers(session);
         if (pathname === "/chat/me") return handleGetMe(session);
@@ -141,6 +144,10 @@ const server = Bun.serve({
       }
 
       if (req.method === "DELETE") {
+        // Message delete (author or admin)
+        const deleteMessageMatch = pathname.match(/^\/chat\/messages\/(\d+)$/);
+        if (deleteMessageMatch) return handleDeleteMessage(session, Number(deleteMessageMatch[1]));
+
         // Channel delete (admin only)
         const deleteChannelMatch = pathname.match(/^\/chat\/channels\/(\d+)$/);
         if (deleteChannelMatch) return handleDeleteChannel(session, Number(deleteChannelMatch[1]));
