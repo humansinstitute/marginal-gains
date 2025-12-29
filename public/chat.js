@@ -3,6 +3,7 @@ import { elements as el, escapeHtml, hide, show } from "./dom.js";
 import { loadNostrLibs } from "./nostr.js";
 import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent } from "./liveUpdates.js";
 import { addDmChannel, addMessage, getActiveChannelMessages, removeMessageFromChannel, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateAllChannels, upsertChannel, setChannelMessages, refreshUI } from "./state.js";
+import { init as initMentions, handleMentionInput, handleMentionKeydown, closeMentionPopup } from "./mentions.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();
@@ -57,12 +58,6 @@ function hideNewMessageIndicator() {
     indicator.style.display = "none";
   }
 }
-
-// Mention autocomplete state
-let mentionQuery = null; // Current @query being typed (null if not active)
-let mentionStartPos = -1; // Position of @ in input
-let mentionSelectedIndex = 0; // Currently highlighted item
-let mentionMatches = []; // Filtered user matches
 
 // Fetch all known users from server
 async function fetchLocalUsers() {
@@ -318,6 +313,9 @@ export const initChat = async () => {
   // Fetch local users and user info from server database
   await Promise.all([fetchLocalUsers(), fetchUserInfo()]);
 
+  // Initialize mentions module with user cache
+  initMentions(localUserCache);
+
   if (isChatPage && el.chatShell) {
     // On chat page - show chat immediately and connect to live updates
     show(el.chatShell);
@@ -492,173 +490,6 @@ function wireChannelModal() {
     hide(el.channelModal);
     event.currentTarget.reset();
   });
-}
-
-// ========== Mention Autocomplete ==========
-
-// Detect if cursor is in a @mention context and extract query
-function detectMentionQuery(input) {
-  const cursorPos = input.selectionStart;
-  const text = input.value.slice(0, cursorPos);
-
-  // Find the last @ that could be a mention start
-  const lastAtPos = text.lastIndexOf('@');
-  if (lastAtPos === -1) return null;
-
-  // Check if @ is at start or preceded by whitespace
-  if (lastAtPos > 0 && !/\s/.test(text[lastAtPos - 1])) return null;
-
-  // Extract the query after @
-  const query = text.slice(lastAtPos + 1);
-
-  // If query contains whitespace, we're not in a mention anymore
-  if (/\s/.test(query)) return null;
-
-  return { query: query.toLowerCase(), startPos: lastAtPos };
-}
-
-// Filter users by query
-function filterUsers(query) {
-  const users = Array.from(localUserCache.values());
-  if (!query) return users.slice(0, 8); // Show first 8 if empty query
-
-  return users
-    .filter(user => {
-      const name = (user.display_name || user.name || '').toLowerCase();
-      const npubShort = user.npub?.slice(5, 15)?.toLowerCase() || '';
-      return name.includes(query) || npubShort.includes(query);
-    })
-    .sort((a, b) => {
-      // Prioritize prefix matches
-      const aName = (a.display_name || a.name || '').toLowerCase();
-      const bName = (b.display_name || b.name || '').toLowerCase();
-      const aPrefix = aName.startsWith(query);
-      const bPrefix = bName.startsWith(query);
-      if (aPrefix && !bPrefix) return -1;
-      if (bPrefix && !aPrefix) return 1;
-      return aName.localeCompare(bName);
-    })
-    .slice(0, 8);
-}
-
-// Render the mention popup
-function renderMentionPopup() {
-  if (!el.mentionPopup) return;
-
-  if (mentionQuery === null || mentionMatches.length === 0) {
-    hide(el.mentionPopup);
-    return;
-  }
-
-  el.mentionPopup.innerHTML = mentionMatches
-    .map((user, index) => {
-      const name = user.display_name || user.name || 'Unknown';
-      const avatarUrl = user.picture || `https://robohash.org/${user.pubkey || user.npub}.png?set=set3`;
-      const npubShort = user.npub ? `${user.npub.slice(0, 8)}…${user.npub.slice(-4)}` : '';
-      const activeClass = index === mentionSelectedIndex ? 'active' : '';
-      return `<div class="mention-item ${activeClass}" data-mention-index="${index}" data-npub="${escapeHtml(user.npub)}">
-        <img class="mention-item-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
-        <span class="mention-item-name">${escapeHtml(name)}</span>
-        <span class="mention-item-npub">${escapeHtml(npubShort)}</span>
-      </div>`;
-    })
-    .join('');
-
-  show(el.mentionPopup);
-
-  // Wire up click handlers
-  el.mentionPopup.querySelectorAll('.mention-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const npub = item.dataset.npub;
-      if (npub) insertMention(npub);
-    });
-  });
-}
-
-// Insert a mention at the current position
-function insertMention(npub) {
-  if (!el.chatInput || mentionStartPos === -1) return;
-
-  const text = el.chatInput.value;
-  const before = text.slice(0, mentionStartPos);
-  const cursorPos = el.chatInput.selectionStart;
-  const after = text.slice(cursorPos);
-
-  // Insert the nostr: mention format
-  const mention = `nostr:${npub} `;
-  el.chatInput.value = before + mention + after;
-
-  // Move cursor after the mention
-  const newCursorPos = mentionStartPos + mention.length;
-  el.chatInput.setSelectionRange(newCursorPos, newCursorPos);
-  el.chatInput.focus();
-
-  // Clear mention state
-  closeMentionPopup();
-
-  // Trigger input event to update send button state
-  el.chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-// Close mention popup and reset state
-function closeMentionPopup() {
-  mentionQuery = null;
-  mentionStartPos = -1;
-  mentionSelectedIndex = 0;
-  mentionMatches = [];
-  hide(el.mentionPopup);
-}
-
-// Handle input changes for mention detection
-function handleMentionInput() {
-  if (!el.chatInput) return;
-
-  const detected = detectMentionQuery(el.chatInput);
-
-  if (detected) {
-    mentionQuery = detected.query;
-    mentionStartPos = detected.startPos;
-    mentionMatches = filterUsers(mentionQuery);
-    mentionSelectedIndex = 0;
-    renderMentionPopup();
-  } else {
-    closeMentionPopup();
-  }
-}
-
-// Handle keyboard navigation in mention popup
-function handleMentionKeydown(event) {
-  if (mentionQuery === null || mentionMatches.length === 0) return false;
-
-  switch (event.key) {
-    case 'ArrowDown':
-      event.preventDefault();
-      mentionSelectedIndex = (mentionSelectedIndex + 1) % mentionMatches.length;
-      renderMentionPopup();
-      return true;
-
-    case 'ArrowUp':
-      event.preventDefault();
-      mentionSelectedIndex = (mentionSelectedIndex - 1 + mentionMatches.length) % mentionMatches.length;
-      renderMentionPopup();
-      return true;
-
-    case 'Enter':
-    case 'Tab':
-      if (mentionMatches[mentionSelectedIndex]) {
-        event.preventDefault();
-        insertMention(mentionMatches[mentionSelectedIndex].npub);
-        return true;
-      }
-      break;
-
-    case 'Escape':
-      event.preventDefault();
-      closeMentionPopup();
-      return true;
-  }
-
-  return false;
 }
 
 function wireComposer() {
