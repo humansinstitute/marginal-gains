@@ -2,6 +2,7 @@ const refreshers = new Set();
 
 export const state = {
   session: window.__NOSTR_SESSION__,
+  isAdmin: false,
   summaries: { day: null, week: null },
   chat: {
     enabled: false,
@@ -17,7 +18,13 @@ export const setSession = (nextSession) => {
   if (!nextSession) {
     state.chat.enabled = false;
     state.chat.selectedChannelId = null;
+    state.isAdmin = false;
   }
+  refreshUI();
+};
+
+export const setIsAdmin = (isAdmin) => {
+  state.isAdmin = isAdmin;
   refreshUI();
 };
 
@@ -38,6 +45,33 @@ export const upsertChannel = (channel) => {
     ? state.chat.channels.map((c) => (c.id === channel.id ? channel : c))
     : [...state.chat.channels, channel];
   if (!state.chat.selectedChannelId) state.chat.selectedChannelId = channel.id;
+  refreshUI();
+};
+
+// Update channels list and clean up messages for removed channels
+export const updateChannelsList = (newChannels) => {
+  const newIds = new Set(newChannels.map((c) => c.id));
+  const oldIds = Object.keys(state.chat.messagesByChannel);
+
+  // Clean up messages for channels user no longer has access to
+  for (const oldId of oldIds) {
+    if (!newIds.has(oldId)) {
+      delete state.chat.messagesByChannel[oldId];
+      // Also clear localStorage cache if any
+      try {
+        localStorage.removeItem(`channel_${oldId}_messages`);
+      } catch (_e) {
+        // Ignore localStorage errors
+      }
+    }
+  }
+
+  // If selected channel was removed, clear selection
+  if (state.chat.selectedChannelId && !newIds.has(state.chat.selectedChannelId)) {
+    state.chat.selectedChannelId = newChannels.length > 0 ? newChannels[0].id : null;
+  }
+
+  state.chat.channels = newChannels;
   refreshUI();
 };
 

@@ -61,6 +61,25 @@ export type User = {
   updated_at: string;
 };
 
+export type Group = {
+  id: number;
+  name: string;
+  description: string;
+  created_by: string;
+  created_at: string;
+};
+
+export type GroupMember = {
+  group_id: number;
+  npub: string;
+  added_at: string;
+};
+
+export type ChannelGroup = {
+  channel_id: number;
+  group_id: number;
+};
+
 const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "do-the-other-stuff.sqlite";
 const db = new Database(dbPath);
 db.run("PRAGMA foreign_keys = ON");
@@ -192,6 +211,40 @@ db.run(`
   )
 `);
 db.run("CREATE INDEX IF NOT EXISTS idx_users_pubkey ON users(pubkey)");
+
+// Groups for permission management
+db.run(`
+  CREATE TABLE IF NOT EXISTS groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS group_members (
+    group_id INTEGER NOT NULL,
+    npub TEXT NOT NULL,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (group_id, npub),
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+  )
+`);
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS channel_groups (
+    channel_id INTEGER NOT NULL,
+    group_id INTEGER NOT NULL,
+    PRIMARY KEY (channel_id, group_id),
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_channel_groups_channel ON channel_groups(channel_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_channel_groups_group ON channel_groups(group_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_group_members_npub ON group_members(npub)");
 
 const listByOwnerStmt = db.query<Todo>(
   "SELECT * FROM todos WHERE deleted = 0 AND owner = ? ORDER BY created_at DESC"
@@ -532,9 +585,145 @@ export function upsertUser(user: {
   ) as User | undefined ?? null;
 }
 
+// Group statements
+const listGroupsStmt = db.query<Group>("SELECT * FROM groups ORDER BY name ASC");
+const getGroupByIdStmt = db.query<Group>("SELECT * FROM groups WHERE id = ?");
+const getGroupByNameStmt = db.query<Group>("SELECT * FROM groups WHERE name = ?");
+const insertGroupStmt = db.query<Group>(
+  `INSERT INTO groups (name, description, created_by) VALUES (?, ?, ?) RETURNING *`
+);
+const updateGroupStmt = db.query<Group>(
+  `UPDATE groups SET name = ?, description = ? WHERE id = ? RETURNING *`
+);
+const deleteGroupStmt = db.query("DELETE FROM groups WHERE id = ?");
+
+// Group member statements
+const listGroupMembersStmt = db.query<GroupMember & { display_name: string | null; picture: string | null }>(
+  `SELECT gm.*, u.display_name, u.picture FROM group_members gm
+   LEFT JOIN users u ON gm.npub = u.npub
+   WHERE gm.group_id = ? ORDER BY gm.added_at ASC`
+);
+const addGroupMemberStmt = db.query<GroupMember>(
+  `INSERT OR IGNORE INTO group_members (group_id, npub) VALUES (?, ?) RETURNING *`
+);
+const removeGroupMemberStmt = db.query("DELETE FROM group_members WHERE group_id = ? AND npub = ?");
+const getGroupsForNpubStmt = db.query<Group>(
+  `SELECT g.* FROM groups g
+   JOIN group_members gm ON g.id = gm.group_id
+   WHERE gm.npub = ?`
+);
+
+// Channel group statements
+const listChannelGroupsStmt = db.query<ChannelGroup & { name: string }>(
+  `SELECT cg.*, g.name FROM channel_groups cg
+   JOIN groups g ON cg.group_id = g.id
+   WHERE cg.channel_id = ?`
+);
+const addChannelGroupStmt = db.query<ChannelGroup>(
+  `INSERT OR IGNORE INTO channel_groups (channel_id, group_id) VALUES (?, ?) RETURNING *`
+);
+const removeChannelGroupStmt = db.query("DELETE FROM channel_groups WHERE channel_id = ? AND group_id = ?");
+
+// Query for channels visible to a user (public OR user is in a group assigned to the channel)
+const listVisibleChannelsStmt = db.query<Channel>(
+  `SELECT DISTINCT c.* FROM channels c
+   WHERE c.is_public = 1
+      OR EXISTS (
+        SELECT 1 FROM channel_groups cg
+        JOIN group_members gm ON gm.group_id = cg.group_id
+        WHERE cg.channel_id = c.id AND gm.npub = ?
+      )
+   ORDER BY c.created_at ASC`
+);
+
+// Check if user can access a specific private channel
+const canAccessChannelStmt = db.query<{ can_access: number }>(
+  `SELECT 1 as can_access FROM channels c
+   WHERE c.id = ? AND (
+     c.is_public = 1
+     OR EXISTS (
+       SELECT 1 FROM channel_groups cg
+       JOIN group_members gm ON gm.group_id = cg.group_id
+       WHERE cg.channel_id = c.id AND gm.npub = ?
+     )
+   )`
+);
+
+// Group functions
+export function listGroups() {
+  return listGroupsStmt.all();
+}
+
+export function getGroup(id: number) {
+  return getGroupByIdStmt.get(id) as Group | undefined ?? null;
+}
+
+export function getGroupByName(name: string) {
+  return getGroupByNameStmt.get(name) as Group | undefined ?? null;
+}
+
+export function createGroup(name: string, description: string, createdBy: string) {
+  return insertGroupStmt.get(name, description, createdBy) as Group | undefined ?? null;
+}
+
+export function updateGroup(id: number, name: string, description: string) {
+  return updateGroupStmt.get(name, description, id) as Group | undefined ?? null;
+}
+
+export function deleteGroup(id: number) {
+  deleteGroupStmt.run(id);
+}
+
+// Group member functions
+export function listGroupMembers(groupId: number) {
+  return listGroupMembersStmt.all(groupId);
+}
+
+export function addGroupMember(groupId: number, npub: string) {
+  return addGroupMemberStmt.get(groupId, npub) as GroupMember | undefined ?? null;
+}
+
+export function removeGroupMember(groupId: number, npub: string) {
+  removeGroupMemberStmt.run(groupId, npub);
+}
+
+export function getGroupsForUser(npub: string) {
+  return getGroupsForNpubStmt.all(npub);
+}
+
+// Channel group functions
+export function listChannelGroups(channelId: number) {
+  return listChannelGroupsStmt.all(channelId);
+}
+
+export function addChannelGroup(channelId: number, groupId: number) {
+  return addChannelGroupStmt.get(channelId, groupId) as ChannelGroup | undefined ?? null;
+}
+
+export function removeChannelGroup(channelId: number, groupId: number) {
+  removeChannelGroupStmt.run(channelId, groupId);
+}
+
+// Channel visibility functions
+export function listVisibleChannels(npub: string) {
+  return listVisibleChannelsStmt.all(npub);
+}
+
+export function listAllChannels() {
+  return listChannelsStmt.all();
+}
+
+export function canUserAccessChannel(channelId: number, npub: string): boolean {
+  const result = canAccessChannelStmt.get(channelId, npub);
+  return result !== undefined;
+}
+
 export function resetDatabase() {
   db.run("DELETE FROM todos");
   db.run("DELETE FROM ai_summaries");
+  db.run("DELETE FROM channel_groups");
+  db.run("DELETE FROM group_members");
+  db.run("DELETE FROM groups");
   db.run("DELETE FROM channels");
   db.run("DELETE FROM channel_members");
   db.run("DELETE FROM messages");
@@ -542,6 +731,6 @@ export function resetDatabase() {
   db.run("DELETE FROM message_reactions");
   db.run("DELETE FROM users");
   db.run(
-    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions')"
+    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups')"
   );
 }

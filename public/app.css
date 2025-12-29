@@ -1057,6 +1057,17 @@ details summary {
   font-weight: 600;
   font-size: 0.9rem;
 }
+.chat-channel.private {
+  background: rgba(139, 92, 246, 0.1);
+}
+.chat-channel.private.active {
+  background: var(--chat-accent);
+}
+.channel-lock {
+  font-size: 0.7rem;
+  margin-right: 0.25rem;
+  opacity: 0.7;
+}
 .chat-channel-desc {
   margin: 0;
   color: var(--chat-text-subtle);

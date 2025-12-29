@@ -1,7 +1,7 @@
 import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
 import { loadNostrLibs } from "./nostr.js";
-import { addMessage, getActiveChannelMessages, selectChannel, setChatEnabled, setReplyTarget, state, upsertChannel, setChannelMessages } from "./state.js";
+import { addMessage, getActiveChannelMessages, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateChannelsList, upsertChannel, setChannelMessages } from "./state.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();
@@ -158,6 +158,19 @@ async function prefetchAuthorProfiles(messages) {
   );
 }
 
+// Fetch current user's admin status
+async function fetchUserInfo() {
+  if (!state.session) return;
+  try {
+    const res = await fetch("/chat/me");
+    if (!res.ok) return;
+    const info = await res.json();
+    setIsAdmin(info.isAdmin === true);
+  } catch (_err) {
+    // Ignore fetch errors
+  }
+}
+
 export const initChat = async () => {
   // Check if we're on the chat page
   const isChatPage = window.__CHAT_PAGE__ === true;
@@ -167,8 +180,8 @@ export const initChat = async () => {
     npubToPubkeyCache.set(state.session.npub, state.session.pubkey);
   }
 
-  // Fetch local users from server database
-  await fetchLocalUsers();
+  // Fetch local users and user info from server database
+  await Promise.all([fetchLocalUsers(), fetchUserInfo()]);
 
   if (isChatPage && el.chatShell) {
     // On chat page - show chat immediately and fetch data
@@ -198,13 +211,15 @@ async function fetchChannels() {
     const res = await fetch("/chat/channels");
     if (!res.ok) return;
     const channels = await res.json();
-    channels.forEach((ch) => upsertChannel({
+    const mapped = channels.map((ch) => ({
       id: String(ch.id),
       name: ch.name,
       displayName: ch.display_name,
       description: ch.description,
       isPublic: ch.is_public === 1,
     }));
+    // Use updateChannelsList to handle cleanup of removed channels
+    updateChannelsList(mapped);
   } catch (_err) {
     // Ignore fetch errors
   }
@@ -244,6 +259,15 @@ function wireChannelModal() {
   el.newChannelTriggers?.forEach((btn) =>
     btn.addEventListener("click", () => {
       if (!state.session) return;
+      // Show/hide private channel option based on admin status
+      const privateField = el.channelModal?.querySelector('[data-admin-only]');
+      if (privateField) {
+        if (state.isAdmin) {
+          privateField.style.display = '';
+        } else {
+          privateField.style.display = 'none';
+        }
+      }
       show(el.channelModal);
     })
   );
@@ -252,11 +276,16 @@ function wireChannelModal() {
     event.preventDefault();
     if (!state.session) return;
     const data = new FormData(event.currentTarget);
+
+    // Only admins can create private channels (isPublic defaults to true if not admin)
+    const isPublicChecked = data.get("isPublic") === "on";
+    const isPublic = state.isAdmin ? isPublicChecked : true;
+
     const payload = {
       name: String(data.get("name") || "").trim().toLowerCase() || "untitled",
       displayName: String(data.get("displayName") || "").trim() || "Untitled channel",
       description: String(data.get("description") || "").trim(),
-      isPublic: data.get("isPublic") === "on",
+      isPublic,
     };
 
     try {
@@ -275,6 +304,9 @@ function wireChannelModal() {
           isPublic: created.is_public === 1,
         });
         selectChannel(String(created.id));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error('[Chat] Failed to create channel:', err.error || res.status);
       }
     } catch (_err) {
       // Ignore errors
@@ -527,9 +559,10 @@ function renderChannels() {
   el.chatChannelList.innerHTML = channels
     .map((channel) => {
       const isActive = channel.id === state.chat.selectedChannelId;
-      return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}">
-        <div class="chat-channel-name">#${channel.name}</div>
-        <p class="chat-channel-desc">${channel.displayName}</p>
+      const lockIcon = channel.isPublic ? '' : '<span class="channel-lock" title="Private channel">&#128274;</span>';
+      return `<button class="chat-channel${isActive ? " active" : ""}${channel.isPublic ? "" : " private"}" data-channel-id="${channel.id}">
+        <div class="chat-channel-name">${lockIcon}#${escapeHtml(channel.name)}</div>
+        <p class="chat-channel-desc">${escapeHtml(channel.displayName)}</p>
       </button>`;
     })
     .join("");

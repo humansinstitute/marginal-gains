@@ -140,9 +140,9 @@ function renderChannelModal() {
           <span>Description</span>
           <textarea name="description" rows="2" placeholder="What is this channel about?"></textarea>
         </label>
-        <label class="chat-checkbox">
+        <label class="chat-checkbox" data-admin-only>
           <input type="checkbox" name="isPublic" checked />
-          <span>Public channel</span>
+          <span>Public channel (uncheck for private)</span>
         </label>
         <div class="chat-form-actions">
           <button type="button" class="ghost" data-close-channel-modal>Cancel</button>

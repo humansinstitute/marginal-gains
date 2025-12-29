@@ -16,6 +16,7 @@ import {
   handleChatPage,
   handleCreateChannel,
   handleGetChannel,
+  handleGetMe,
   handleGetMessages,
   handleListChannels,
   handleListUsers,
@@ -23,6 +24,19 @@ import {
   handleUpdateChannel,
   handleUpdateUser,
 } from "./routes/chat";
+import {
+  handleAddChannelGroups,
+  handleAddGroupMembers,
+  handleCreateGroup,
+  handleDeleteGroup,
+  handleGetGroup,
+  handleListChannelGroups,
+  handleListGroupMembers,
+  handleListGroups,
+  handleRemoveChannelGroup,
+  handleRemoveGroupMember,
+  handleUpdateGroup,
+} from "./routes/groups";
 import { handleHome, handleTodos } from "./routes/home";
 import { handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
 import { AuthService } from "./services/auth";
@@ -59,10 +73,20 @@ const server = Bun.serve({
         if (pathname === "/chat") return handleChatPage(session);
         if (pathname === "/chat/channels") return handleListChannels(session);
         if (pathname === "/chat/users") return handleListUsers(session);
+        if (pathname === "/chat/me") return handleGetMe(session);
         const channelMatch = pathname.match(/^\/chat\/channels\/(\d+)$/);
         if (channelMatch) return handleGetChannel(session, Number(channelMatch[1]));
         const messagesMatch = pathname.match(/^\/chat\/channels\/(\d+)\/messages$/);
         if (messagesMatch) return handleGetMessages(session, Number(messagesMatch[1]));
+        const channelGroupsMatch = pathname.match(/^\/chat\/channels\/(\d+)\/groups$/);
+        if (channelGroupsMatch) return handleListChannelGroups(session, Number(channelGroupsMatch[1]));
+
+        // Group routes (admin only)
+        if (pathname === "/chat/groups") return handleListGroups(session);
+        const groupMatch = pathname.match(/^\/chat\/groups\/(\d+)$/);
+        if (groupMatch) return handleGetGroup(session, Number(groupMatch[1]));
+        const groupMembersMatch = pathname.match(/^\/chat\/groups\/(\d+)\/members$/);
+        if (groupMembersMatch) return handleListGroupMembers(session, Number(groupMembersMatch[1]));
 
         if (pathname === "/") return handleHome(session);
         if (pathname === "/todo") return handleTodos(url, session);
@@ -89,11 +113,42 @@ const server = Bun.serve({
         if (pathname === "/chat/users") return handleUpdateUser(req, session);
         const sendMessageMatch = pathname.match(/^\/chat\/channels\/(\d+)\/messages$/);
         if (sendMessageMatch) return handleSendMessage(req, session, Number(sendMessageMatch[1]));
+        const addChannelGroupsMatch = pathname.match(/^\/chat\/channels\/(\d+)\/groups$/);
+        if (addChannelGroupsMatch) return handleAddChannelGroups(req, session, Number(addChannelGroupsMatch[1]));
+
+        // Group routes (admin only)
+        if (pathname === "/chat/groups") return handleCreateGroup(req, session);
+        const addGroupMembersMatch = pathname.match(/^\/chat\/groups\/(\d+)\/members$/);
+        if (addGroupMembersMatch) return handleAddGroupMembers(req, session, Number(addGroupMembersMatch[1]));
       }
 
       if (req.method === "PATCH") {
         const updateChannelMatch = pathname.match(/^\/chat\/channels\/(\d+)$/);
         if (updateChannelMatch) return handleUpdateChannel(req, session, Number(updateChannelMatch[1]));
+        const updateGroupMatch = pathname.match(/^\/chat\/groups\/(\d+)$/);
+        if (updateGroupMatch) return handleUpdateGroup(req, session, Number(updateGroupMatch[1]));
+      }
+
+      if (req.method === "DELETE") {
+        // Group routes (admin only)
+        const deleteGroupMatch = pathname.match(/^\/chat\/groups\/(\d+)$/);
+        if (deleteGroupMatch) return handleDeleteGroup(session, Number(deleteGroupMatch[1]));
+        const removeGroupMemberMatch = pathname.match(/^\/chat\/groups\/(\d+)\/members\/([^/]+)$/);
+        if (removeGroupMemberMatch) {
+          return handleRemoveGroupMember(
+            session,
+            Number(removeGroupMemberMatch[1]),
+            decodeURIComponent(removeGroupMemberMatch[2])
+          );
+        }
+        const removeChannelGroupMatch = pathname.match(/^\/chat\/channels\/(\d+)\/groups\/(\d+)$/);
+        if (removeChannelGroupMatch) {
+          return handleRemoveChannelGroup(
+            session,
+            Number(removeChannelGroupMatch[1]),
+            Number(removeChannelGroupMatch[2])
+          );
+        }
       }
 
       return new Response("Not found", { status: 404 });

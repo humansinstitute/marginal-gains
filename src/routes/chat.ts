@@ -1,10 +1,10 @@
-import { listUsers, upsertUser } from "../db";
+import { canUserAccessChannel, listAllChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
+import { isAdmin } from "../config";
 import { jsonResponse, unauthorized } from "../http";
 import { renderChatPage } from "../render/chat";
 import {
   createNewChannel,
   editChannel,
-  getAllChannels,
   getChannelById,
   getChannelMessages,
   replyToMessage,
@@ -13,6 +13,10 @@ import {
 
 import type { Session } from "../types";
 
+function forbidden(message = "Forbidden") {
+  return jsonResponse({ error: message }, 403);
+}
+
 export function handleChatPage(session: Session | null) {
   const page = renderChatPage(session);
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -20,16 +24,30 @@ export function handleChatPage(session: Session | null) {
 
 export function handleListChannels(session: Session | null) {
   if (!session) return unauthorized();
-  const channels = getAllChannels();
+
+  // Admins see all channels, regular users see only visible ones
+  const channels = isAdmin(session.npub)
+    ? listAllChannels()
+    : listVisibleChannels(session.npub);
+
   return jsonResponse(channels);
 }
 
 export function handleGetChannel(session: Session | null, id: number) {
   if (!session) return unauthorized();
+
   const channel = getChannelById(id);
   if (!channel) {
     return jsonResponse({ error: "Channel not found" }, 404);
   }
+
+  // Check access for private channels (admins can see all)
+  if (channel.is_public === 0 && !isAdmin(session.npub)) {
+    if (!canUserAccessChannel(id, session.npub)) {
+      return forbidden("You don't have access to this channel");
+    }
+  }
+
   return jsonResponse(channel);
 }
 
@@ -43,13 +61,19 @@ export async function handleCreateChannel(req: Request, session: Session | null)
     return jsonResponse({ error: "Name is required" }, 400);
   }
 
+  // Only admins can create private channels
+  const channelIsPublic = isPublic !== false;
+  if (!channelIsPublic && !isAdmin(session.npub)) {
+    return forbidden("Only admins can create private channels");
+  }
+
   const normalizedName = name.trim().toLowerCase().replace(/\s+/g, "-");
   const channel = createNewChannel(
     normalizedName,
     displayName?.trim() || normalizedName,
     description?.trim() || "",
     session.npub,
-    isPublic !== false
+    channelIsPublic
   );
 
   if (!channel) {
@@ -67,14 +91,26 @@ export async function handleUpdateChannel(req: Request, session: Session | null,
     return jsonResponse({ error: "Channel not found" }, 404);
   }
 
+  // Only admins can modify private channels or change public/private status
+  const userIsAdmin = isAdmin(session.npub);
+  if (existing.is_public === 0 && !userIsAdmin) {
+    return forbidden("Only admins can modify private channels");
+  }
+
   const body = await req.json();
   const { displayName, description, isPublic } = body;
+
+  // Only admins can change public/private status
+  let newIsPublic = existing.is_public === 1;
+  if (isPublic !== undefined && userIsAdmin) {
+    newIsPublic = isPublic;
+  }
 
   const channel = editChannel(
     id,
     displayName?.trim() || existing.display_name,
     description?.trim() ?? existing.description,
-    isPublic ?? existing.is_public === 1
+    newIsPublic
   );
 
   return jsonResponse(channel);
@@ -88,6 +124,13 @@ export function handleGetMessages(session: Session | null, channelId: number) {
     return jsonResponse({ error: "Channel not found" }, 404);
   }
 
+  // Check access for private channels (admins can see all)
+  if (channel.is_public === 0 && !isAdmin(session.npub)) {
+    if (!canUserAccessChannel(channelId, session.npub)) {
+      return forbidden("You don't have access to this channel");
+    }
+  }
+
   const messages = getChannelMessages(channelId);
   return jsonResponse(messages);
 }
@@ -98,6 +141,13 @@ export async function handleSendMessage(req: Request, session: Session | null, c
   const channel = getChannelById(channelId);
   if (!channel) {
     return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check access for private channels (admins can post to all)
+  if (channel.is_public === 0 && !isAdmin(session.npub)) {
+    if (!canUserAccessChannel(channelId, session.npub)) {
+      return forbidden("You don't have access to this channel");
+    }
   }
 
   const body = await req.json();
@@ -123,6 +173,16 @@ export function handleListUsers(session: Session | null) {
   if (!session) return unauthorized();
   const users = listUsers();
   return jsonResponse(users);
+}
+
+// Get current user's info including admin status
+export function handleGetMe(session: Session | null) {
+  if (!session) return unauthorized();
+  return jsonResponse({
+    npub: session.npub,
+    pubkey: session.pubkey,
+    isAdmin: isAdmin(session.npub),
+  });
 }
 
 export async function handleUpdateUser(req: Request, session: Session | null) {
