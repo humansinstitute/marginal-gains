@@ -38,6 +38,7 @@ import {
   handleUpdateGroup,
 } from "./routes/groups";
 import { handleHome, handleTodos } from "./routes/home";
+import { handleSettings } from "./routes/settings";
 import { handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
 import { AuthService } from "./services/auth";
 import { serveStatic } from "./static";
@@ -90,6 +91,7 @@ const server = Bun.serve({
 
         if (pathname === "/") return handleHome(session);
         if (pathname === "/todo") return handleTodos(url, session);
+        if (pathname === "/settings") return handleSettings(session);
       }
 
       if (req.method === "POST") {

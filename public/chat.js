@@ -203,6 +203,8 @@ export const initChat = async () => {
   wireChannelModal();
   wireComposer();
   wireThreadSidebar();
+  wireChannelSettingsModal();
+  updateChannelSettingsCog();
 };
 
 async function fetchChannels() {
@@ -559,10 +561,10 @@ function renderChannels() {
   el.chatChannelList.innerHTML = channels
     .map((channel) => {
       const isActive = channel.id === state.chat.selectedChannelId;
-      const lockIcon = channel.isPublic ? '' : '<span class="channel-lock" title="Private channel">&#128274;</span>';
-      return `<button class="chat-channel${isActive ? " active" : ""}${channel.isPublic ? "" : " private"}" data-channel-id="${channel.id}">
-        <div class="chat-channel-name">${lockIcon}#${escapeHtml(channel.name)}</div>
-        <p class="chat-channel-desc">${escapeHtml(channel.displayName)}</p>
+      const lockIcon = channel.isPublic ? '' : '<span class="channel-lock" title="Private">&#128274;</span>';
+      return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}">
+        <div class="chat-channel-name">#${escapeHtml(channel.name)}</div>
+        <p class="chat-channel-desc">${lockIcon}${escapeHtml(channel.displayName)}</p>
       </button>`;
     })
     .join("");
@@ -570,6 +572,7 @@ function renderChannels() {
     const handler = async () => {
       const channelId = btn.dataset.channelId;
       selectChannel(channelId);
+      updateChannelSettingsCog();
       await fetchMessages(channelId);
       // Always set mobile view - CSS only applies at mobile widths
       setMobileView("messages");
@@ -831,4 +834,228 @@ async function sendThreadReply() {
   } catch (_err) {
     // Ignore errors
   }
+}
+
+// ========== Channel Settings Modal ==========
+
+// State for channel settings
+let channelSettingsGroups = [];
+let allGroups = [];
+
+// Update cog button visibility based on admin status and selected channel
+export function updateChannelSettingsCog() {
+  if (!el.channelSettingsBtn) return;
+
+  // Show cog only for admins when a channel is selected
+  if (state.isAdmin && state.chat.selectedChannelId) {
+    show(el.channelSettingsBtn);
+  } else {
+    hide(el.channelSettingsBtn);
+  }
+}
+
+// Fetch all groups for the dropdown
+async function fetchAllGroups() {
+  try {
+    const res = await fetch("/chat/groups");
+    if (!res.ok) return;
+    allGroups = await res.json();
+  } catch (_err) {
+    console.error("[Chat] Failed to fetch groups");
+  }
+}
+
+// Fetch groups assigned to a channel
+async function fetchChannelGroups(channelId) {
+  try {
+    const res = await fetch(`/chat/channels/${channelId}/groups`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (_err) {
+    console.error("[Chat] Failed to fetch channel groups");
+    return [];
+  }
+}
+
+// Open channel settings modal
+async function openChannelSettingsModal() {
+  if (!state.chat.selectedChannelId) return;
+
+  const channel = state.chat.channels.find((c) => c.id === state.chat.selectedChannelId);
+  if (!channel) return;
+
+  // Populate form
+  if (el.channelSettingsId) el.channelSettingsId.value = channel.id;
+  if (el.channelSettingsDisplayName) el.channelSettingsDisplayName.value = channel.displayName || "";
+  if (el.channelSettingsDescription) el.channelSettingsDescription.value = channel.description || "";
+  if (el.channelSettingsPublic) el.channelSettingsPublic.checked = channel.isPublic;
+
+  // Show/hide public toggle and groups section based on admin status
+  if (el.channelPublicToggle) {
+    el.channelPublicToggle.style.display = state.isAdmin ? "" : "none";
+  }
+
+  // Fetch groups data
+  await fetchAllGroups();
+  channelSettingsGroups = await fetchChannelGroups(channel.id);
+
+  // Show groups section for private channels
+  updateGroupsSection(!channel.isPublic);
+
+  show(el.channelSettingsModal);
+}
+
+// Update groups section visibility and content
+function updateGroupsSection(isPrivate) {
+  if (!el.channelGroupsSection) return;
+
+  if (isPrivate && state.isAdmin) {
+    show(el.channelGroupsSection);
+    renderChannelGroups();
+    updateGroupDropdown();
+  } else {
+    hide(el.channelGroupsSection);
+  }
+}
+
+// Render assigned groups list
+function renderChannelGroups() {
+  if (!el.channelGroupsList) return;
+
+  if (channelSettingsGroups.length === 0) {
+    el.channelGroupsList.innerHTML = `<p class="channel-groups-empty">No groups assigned</p>`;
+    return;
+  }
+
+  el.channelGroupsList.innerHTML = channelSettingsGroups
+    .map((group) => `<div class="channel-group-chip" data-group-id="${group.id}">
+      <span>${escapeHtml(group.name)}</span>
+      <button type="button" data-remove-channel-group="${group.id}" title="Remove group">&times;</button>
+    </div>`)
+    .join("");
+
+  // Wire remove handlers
+  el.channelGroupsList.querySelectorAll("[data-remove-channel-group]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const groupId = Number(btn.dataset.removeChannelGroup);
+      await removeChannelGroup(groupId);
+    });
+  });
+}
+
+// Update group dropdown (exclude already assigned groups)
+function updateGroupDropdown() {
+  if (!el.channelAddGroup) return;
+
+  const assignedIds = new Set(channelSettingsGroups.map((g) => g.id));
+  const available = allGroups.filter((g) => !assignedIds.has(g.id));
+
+  el.channelAddGroup.innerHTML = `<option value="">Add a group...</option>` +
+    available.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
+}
+
+// Add a group to the channel
+async function addChannelGroup(groupId) {
+  if (!state.chat.selectedChannelId || !groupId) return;
+
+  try {
+    const res = await fetch(`/chat/channels/${state.chat.selectedChannelId}/groups`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupIds: [groupId] }),
+    });
+    if (res.ok) {
+      channelSettingsGroups = await fetchChannelGroups(state.chat.selectedChannelId);
+      renderChannelGroups();
+      updateGroupDropdown();
+    }
+  } catch (_err) {
+    console.error("[Chat] Failed to add group to channel");
+  }
+}
+
+// Remove a group from the channel
+async function removeChannelGroup(groupId) {
+  if (!state.chat.selectedChannelId) return;
+
+  try {
+    const res = await fetch(`/chat/channels/${state.chat.selectedChannelId}/groups/${groupId}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      channelSettingsGroups = channelSettingsGroups.filter((g) => g.id !== groupId);
+      renderChannelGroups();
+      updateGroupDropdown();
+    }
+  } catch (_err) {
+    console.error("[Chat] Failed to remove group from channel");
+  }
+}
+
+// Save channel settings
+async function saveChannelSettings(e) {
+  e.preventDefault();
+  if (!state.chat.selectedChannelId) return;
+
+  const formData = new FormData(e.currentTarget);
+  const displayName = String(formData.get("displayName") || "").trim();
+  const description = String(formData.get("description") || "").trim();
+  const isPublic = formData.get("isPublic") === "on";
+
+  try {
+    const res = await fetch(`/chat/channels/${state.chat.selectedChannelId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName, description, isPublic }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      // Update local state
+      const channel = state.chat.channels.find((c) => c.id === state.chat.selectedChannelId);
+      if (channel) {
+        channel.displayName = updated.display_name;
+        channel.description = updated.description;
+        channel.isPublic = updated.is_public === 1;
+      }
+      renderChannels();
+      renderThreads();
+      hide(el.channelSettingsModal);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Failed to save channel settings");
+    }
+  } catch (_err) {
+    console.error("[Chat] Failed to save channel settings");
+  }
+}
+
+// Wire channel settings modal
+function wireChannelSettingsModal() {
+  // Open modal on cog click
+  el.channelSettingsBtn?.addEventListener("click", openChannelSettingsModal);
+
+  // Close modal
+  const closeModal = () => hide(el.channelSettingsModal);
+  el.closeChannelSettingsBtns?.forEach((btn) => btn.addEventListener("click", closeModal));
+  el.channelSettingsModal?.addEventListener("click", (e) => {
+    if (e.target === el.channelSettingsModal) closeModal();
+  });
+
+  // Handle public toggle to show/hide groups section
+  el.channelSettingsPublic?.addEventListener("change", () => {
+    updateGroupsSection(!el.channelSettingsPublic.checked);
+  });
+
+  // Handle group dropdown selection
+  el.channelAddGroup?.addEventListener("change", async () => {
+    const groupId = Number(el.channelAddGroup.value);
+    if (groupId) {
+      await addChannelGroup(groupId);
+      el.channelAddGroup.value = "";
+    }
+  });
+
+  // Handle form submit
+  el.channelSettingsForm?.addEventListener("submit", saveChannelSettings);
 }

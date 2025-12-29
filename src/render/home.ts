@@ -1,4 +1,4 @@
-import { APP_NAME } from "../config";
+import { APP_NAME, isAdmin } from "../config";
 import { ALLOWED_STATE_TRANSITIONS, formatPriorityLabel, formatStateLabel } from "../domain/todos";
 import { escapeHtml } from "../utils/html";
 
@@ -84,11 +84,14 @@ function renderHeader(session: Session | null) {
         </div>
       </div>
     </div>
-    ${renderAppMenu()}
+    ${renderAppMenu(session)}
   </header>`;
 }
 
-function renderAppMenu() {
+function renderAppMenu(session: Session | null) {
+  const settingsLink = session && isAdmin(session.npub)
+    ? `<li><a href="/settings" class="app-menu-item">Settings</a></li>`
+    : "";
   return `<nav class="app-menu" data-app-menu hidden>
     <div class="app-menu-overlay" data-app-menu-overlay></div>
     <div class="app-menu-panel">
@@ -97,6 +100,7 @@ function renderAppMenu() {
         <button type="button" class="app-menu-close" data-app-menu-close>&times;</button>
       </div>
       <ul class="app-menu-list">
+        ${settingsLink}
         <li><a href="/chat" class="app-menu-item">Chat</a></li>
         <li><a href="/todo" class="app-menu-item active">Tasks</a></li>
       </ul>

@@ -70,6 +70,19 @@ export const elements = {
   chatLayout: document.querySelector("[data-chat-layout]"),
   backToChannelsBtn: document.querySelector("[data-back-to-channels]"),
   backToMessagesBtn: document.querySelector("[data-back-to-messages]"),
+  // Channel settings elements
+  channelSettingsBtn: document.querySelector("[data-channel-settings]"),
+  channelSettingsModal: document.querySelector("[data-channel-settings-modal]"),
+  channelSettingsForm: document.querySelector("[data-channel-settings-form]"),
+  channelSettingsId: document.querySelector("[data-channel-settings-id]"),
+  channelSettingsDisplayName: document.querySelector("[data-channel-settings-display-name]"),
+  channelSettingsDescription: document.querySelector("[data-channel-settings-description]"),
+  channelSettingsPublic: document.querySelector("[data-channel-settings-public]"),
+  channelPublicToggle: document.querySelector("[data-channel-public-toggle]"),
+  channelGroupsSection: document.querySelector("[data-channel-groups-section]"),
+  channelGroupsList: document.querySelector("[data-channel-groups-list]"),
+  channelAddGroup: document.querySelector("[data-channel-add-group]"),
+  closeChannelSettingsBtns: document.querySelectorAll("[data-close-channel-settings]"),
 };
 
 export const show = (el) => el?.removeAttribute("hidden");

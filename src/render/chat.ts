@@ -1,4 +1,4 @@
-import { APP_NAME } from "../config";
+import { APP_NAME, isAdmin } from "../config";
 import type { Session } from "../types";
 
 export function renderChatPage(session: Session | null) {
@@ -41,11 +41,14 @@ function renderChatHeader(session: Session | null) {
     <div class="header-right">
       ${session ? renderAvatarMenu(session) : ""}
     </div>
-    ${renderAppMenu()}
+    ${renderAppMenu(session)}
   </header>`;
 }
 
-function renderAppMenu() {
+function renderAppMenu(session: Session | null) {
+  const settingsLink = session && isAdmin(session.npub)
+    ? `<li><a href="/settings" class="app-menu-item">Settings</a></li>`
+    : "";
   return `<nav class="app-menu" data-app-menu hidden>
     <div class="app-menu-overlay" data-app-menu-overlay></div>
     <div class="app-menu-panel">
@@ -54,6 +57,7 @@ function renderAppMenu() {
         <button type="button" class="app-menu-close" data-app-menu-close>&times;</button>
       </div>
       <ul class="app-menu-list">
+        ${settingsLink}
         <li><a href="/chat" class="app-menu-item active">Chat</a></li>
         <li><a href="/todo" class="app-menu-item">Tasks</a></li>
       </ul>
@@ -91,6 +95,7 @@ function renderChatContent() {
         <header class="chat-messages-header">
           <button type="button" class="chat-back-btn" data-back-to-channels>Channels</button>
           <div class="chat-channel-chip" data-active-channel>Pick a channel</div>
+          <button type="button" class="channel-settings-btn" data-channel-settings hidden title="Channel settings">&#9881;</button>
           <button type="button" class="primary" data-new-channel-trigger>Create channel</button>
         </header>
         <div class="chat-threads" data-thread-list>
@@ -116,6 +121,7 @@ function renderChatContent() {
       </aside>
     </div>
     ${renderChannelModal()}
+    ${renderChannelSettingsModal()}
     ${renderProfileModal()}
   </section>`;
 }
@@ -147,6 +153,49 @@ function renderChannelModal() {
         <div class="chat-form-actions">
           <button type="button" class="ghost" data-close-channel-modal>Cancel</button>
           <button type="submit" class="primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+function renderChannelSettingsModal() {
+  return `<div class="chat-modal" data-channel-settings-modal hidden>
+    <div class="chat-modal-body channel-settings-body">
+      <header class="chat-modal-header">
+        <h3>Channel Settings</h3>
+        <button type="button" class="ghost" data-close-channel-settings>&times;</button>
+      </header>
+      <form class="chat-form" data-channel-settings-form>
+        <input type="hidden" name="channelId" data-channel-settings-id />
+        <label>
+          <span>Display name</span>
+          <input name="displayName" required placeholder="General" data-channel-settings-display-name />
+        </label>
+        <label>
+          <span>Description</span>
+          <textarea name="description" rows="2" placeholder="What is this channel about?" data-channel-settings-description></textarea>
+        </label>
+        <label class="chat-checkbox" data-channel-public-toggle>
+          <input type="checkbox" name="isPublic" data-channel-settings-public />
+          <span>Public channel</span>
+        </label>
+        <div class="channel-groups-section" data-channel-groups-section hidden>
+          <label>
+            <span>Assigned Groups</span>
+          </label>
+          <div class="channel-groups-list" data-channel-groups-list>
+            <p class="channel-groups-empty">No groups assigned</p>
+          </div>
+          <div class="channel-groups-add">
+            <select data-channel-add-group>
+              <option value="">Add a group...</option>
+            </select>
+          </div>
+        </div>
+        <div class="chat-form-actions">
+          <button type="button" class="ghost" data-close-channel-settings>Cancel</button>
+          <button type="submit" class="primary">Save</button>
         </div>
       </form>
     </div>

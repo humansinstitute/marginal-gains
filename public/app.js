@@ -5,6 +5,7 @@ import { initTagInputs } from "./tag-inputs.js";
 import { initUI } from "./ui.js";
 import { initChat } from "./chat.js";
 import { initAppMenu } from "./menu.js";
+import { initSettings } from "./settings.js";
 
 window.addEventListener("load", focusHeroInput);
 
@@ -14,3 +15,4 @@ initUI();
 initAuth();
 initTagInputs();
 initChat();
+initSettings();
