@@ -36,6 +36,7 @@ const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
 // Event handlers that can be registered by the app
 const eventHandlers = {
   "message:new": [],
+  "message:delete": [],
   "channel:new": [],
   "channel:update": [],
   "channel:delete": [],

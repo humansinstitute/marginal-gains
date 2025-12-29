@@ -14,6 +14,8 @@ pnpm-lock.yaml
 # build output
 dist/
 build/
+assets/
+assets/*
 
 # environment files
 .env

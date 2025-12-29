@@ -19,7 +19,7 @@ ${renderHead()}
 function renderHead() {
   return `<head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, interactive-widget=resizes-content" />
   <title>Chat - ${APP_NAME}</title>
   <meta name="theme-color" content="#6b3a6b" />
   <meta name="application-name" content="${APP_NAME}" />
@@ -102,7 +102,6 @@ function renderChatContent() {
           <button type="button" class="chat-back-btn" data-back-to-channels>Channels</button>
           <div class="chat-channel-chip" data-active-channel>Pick a channel</div>
           <button type="button" class="channel-settings-btn" data-channel-settings hidden title="Channel settings">&#9881;</button>
-          <button type="button" class="primary" data-new-channel-trigger>Create channel</button>
         </header>
         <div class="chat-threads" data-thread-list>
           <p class="chat-placeholder">Pick or create a channel to start chatting.</p>
