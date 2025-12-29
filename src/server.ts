@@ -16,6 +16,7 @@ import {
   handleChatPage,
   handleCreateChannel,
   handleCreateDm,
+  handleDeleteChannel,
   handleGetChannel,
   handleGetMe,
   handleGetMessages,
@@ -39,6 +40,7 @@ import {
   handleUpdateGroup,
 } from "./routes/groups";
 import { handleHome, handleTodos } from "./routes/home";
+import { handleAssetUpload, serveAsset } from "./routes/assets";
 import { handleSettings } from "./routes/settings";
 import { handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
 import { AuthService } from "./services/auth";
@@ -66,6 +68,10 @@ const server = Bun.serve({
       if (req.method === "GET") {
         const staticResponse = await serveStatic(pathname);
         if (staticResponse) return staticResponse;
+
+        // Serve uploaded assets
+        const assetResponse = await serveAsset(pathname);
+        if (assetResponse) return assetResponse;
 
         const aiTasksMatch = pathname.match(/^\/ai\/tasks\/(\d+)(?:\/(yes|no))?$/);
         if (aiTasksMatch) return handleAiTasks(url, aiTasksMatch);
@@ -98,6 +104,7 @@ const server = Bun.serve({
       if (req.method === "POST") {
         if (pathname === "/auth/login") return login(req);
         if (pathname === "/auth/logout") return logout(req);
+        if (pathname === "/api/assets/upload") return handleAssetUpload(req, session);
         if (pathname === "/ai/summary") return handleSummaryPost(req);
         if (pathname === "/ai/tasks") return handleAiTasksPost(req);
         if (pathname === "/todos") return handleTodoCreate(req, session);
@@ -134,6 +141,10 @@ const server = Bun.serve({
       }
 
       if (req.method === "DELETE") {
+        // Channel delete (admin only)
+        const deleteChannelMatch = pathname.match(/^\/chat\/channels\/(\d+)$/);
+        if (deleteChannelMatch) return handleDeleteChannel(session, Number(deleteChannelMatch[1]));
+
         // Group routes (admin only)
         const deleteGroupMatch = pathname.match(/^\/chat\/groups\/(\d+)$/);
         if (deleteGroupMatch) return handleDeleteGroup(session, Number(deleteGroupMatch[1]));

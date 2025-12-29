@@ -1210,6 +1210,56 @@ details summary {
   color: var(--chat-accent);
   font-weight: 600;
 }
+
+/* Images in messages */
+.chat-image-container {
+  margin: 0.5rem 0;
+}
+.chat-image {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.chat-image:hover {
+  opacity: 0.9;
+}
+
+/* File attachments in messages */
+.chat-file-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.35rem 0;
+  background: var(--chat-surface);
+  border: 1px solid var(--chat-border);
+  border-radius: var(--radius-md);
+  color: var(--chat-text);
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: background 0.15s;
+}
+.chat-file-attachment:hover {
+  background: var(--chat-hover);
+}
+.chat-file-icon {
+  font-size: 1.25rem;
+}
+.chat-file-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Drag-over state for composer */
+.chat-composer.drag-over {
+  background: var(--chat-hover);
+  border-color: var(--chat-accent);
+}
+
 /* Mention autocomplete popup */
 .chat-composer {
   position: relative;
@@ -1407,12 +1457,12 @@ body.chat-page {
 /* New chat layout - 3 column */
 .chat-layout {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: 240px 1fr;
   height: 100%;
   overflow: hidden;
 }
 .chat-layout:has(.chat-thread-panel:not([hidden])) {
-  grid-template-columns: 200px 1fr 380px;
+  grid-template-columns: 240px 1fr 380px;
 }
 .chat-channels-sidebar {
   background: var(--surface);
@@ -1431,6 +1481,10 @@ body.chat-page {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
+  white-space: nowrap;
+}
+.chat-channels-sidebar .chat-section-header .text-btn {
+  white-space: nowrap;
 }
 .chat-messages-area {
   display: flex;
@@ -1634,6 +1688,24 @@ body.chat-page {
 .chat-shell-page .chat-form-actions .primary {
   background: var(--text);
   color: var(--surface);
+}
+/* Channel settings danger zone */
+.channel-danger-zone {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.channel-danger-zone .danger {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.channel-danger-zone .danger:hover {
+  background: #b91c1c;
 }
 /* Thread collapsed view */
 .chat-thread-collapsed {

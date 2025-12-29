@@ -522,6 +522,38 @@ function wireComposer() {
     if (handleMentionKeydown(event)) return;
   });
 
+  // Paste handler for images/files
+  el.chatInput?.addEventListener("paste", async (event) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    const files = extractUploadableFiles(items);
+    if (files.length > 0) {
+      event.preventDefault();
+      await uploadFiles(files);
+    }
+  });
+
+  // Drag and drop handler
+  const composer = el.chatInput?.closest(".chat-composer");
+  composer?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    composer.classList.add("drag-over");
+  });
+  composer?.addEventListener("dragleave", () => {
+    composer.classList.remove("drag-over");
+  });
+  composer?.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    composer.classList.remove("drag-over");
+    const items = event.dataTransfer?.items || event.dataTransfer?.files;
+    if (!items) return;
+    const files = extractUploadableFiles(items);
+    if (files.length > 0) {
+      await uploadFiles(files);
+    }
+  });
+
   // Close mention popup when clicking outside
   document.addEventListener("click", (event) => {
     if (!el.mentionPopup?.contains(event.target) && event.target !== el.chatInput) {
@@ -530,6 +562,101 @@ function wireComposer() {
   });
 
   el.chatSendBtn?.addEventListener("click", sendMessage);
+}
+
+// ========== File Upload Handling ==========
+
+// Track upload state
+let isUploading = false;
+
+// Extract files from clipboard or drop event
+function extractUploadableFiles(items) {
+  const files = [];
+  for (const item of Array.from(items)) {
+    if (!item) continue;
+    if (item.kind === "file") {
+      const file = item.getAsFile?.();
+      if (file) files.push(file);
+    } else if (item instanceof File) {
+      files.push(item);
+    }
+  }
+  return files;
+}
+
+// Upload files and insert markdown into input
+async function uploadFiles(files) {
+  if (!state.session || !el.chatInput || isUploading) return;
+
+  for (const file of files) {
+    isUploading = true;
+    updateUploadingState(true);
+
+    try {
+      const form = new FormData();
+      form.append("file", file, file.name);
+
+      const res = await fetch("/api/assets/upload", {
+        method: "POST",
+        body: form,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Upload failed");
+        continue;
+      }
+
+      const payload = await res.json();
+      const markdown = payload.isImage
+        ? `![${file.name}](${payload.url})`
+        : `[${file.name}](${payload.url})`;
+
+      insertTextAtCursor(markdown);
+    } catch (error) {
+      console.error("[Chat] Upload failed:", error);
+      alert("Upload failed");
+    } finally {
+      isUploading = false;
+      updateUploadingState(false);
+    }
+  }
+}
+
+// Insert text at cursor position
+function insertTextAtCursor(text) {
+  if (!el.chatInput) return;
+  const start = el.chatInput.selectionStart ?? el.chatInput.value.length;
+  const end = el.chatInput.selectionEnd ?? el.chatInput.value.length;
+  const before = el.chatInput.value.slice(0, start);
+  const after = el.chatInput.value.slice(end);
+
+  // Add newlines around markdown if needed
+  const prefix = before.length > 0 && !before.endsWith("\n") ? "\n" : "";
+  const suffix = after.length > 0 && !after.startsWith("\n") ? "\n" : "";
+
+  el.chatInput.value = before + prefix + text + suffix + after;
+  const newPos = start + prefix.length + text.length + suffix.length;
+  el.chatInput.selectionStart = el.chatInput.selectionEnd = newPos;
+  el.chatInput.focus();
+
+  // Trigger input event to update send button state
+  el.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+// Update UI during upload
+function updateUploadingState(uploading) {
+  if (uploading) {
+    el.chatSendBtn?.setAttribute("disabled", "disabled");
+    el.chatInput?.setAttribute("placeholder", "Uploading...");
+  } else {
+    el.chatInput?.setAttribute("placeholder", "Share an update, @name to mention");
+    // Re-evaluate send button
+    const hasText = Boolean(el.chatInput?.value.trim());
+    if (hasText && state.chat.selectedChannelId) {
+      el.chatSendBtn?.removeAttribute("disabled");
+    }
+  }
 }
 
 async function sendMessage() {
@@ -769,7 +896,7 @@ function renderReplyPreview(reply, replyCount) {
   </div>`;
 }
 
-// Parse message body and render mentions as styled display names
+// Parse message body and render mentions, images, and file links
 function renderMessageBody(body) {
   // First escape the whole body
   let html = escapeHtml(body);
@@ -783,7 +910,48 @@ function renderMessageBody(body) {
     return `<span class="mention">@${escapeHtml(displayName)}</span>`;
   });
 
+  // Match markdown images: ![alt](url) - render as actual images
+  const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  html = html.replace(imageRegex, (_match, alt, url) => {
+    const safeUrl = url.replace(/"/g, "&quot;");
+    const safeAlt = alt || "image";
+    return `<div class="chat-image-container"><img class="chat-image" src="${safeUrl}" alt="${safeAlt}" loading="lazy" onclick="window.open('${safeUrl}', '_blank')" /></div>`;
+  });
+
+  // Match markdown links: [name](url) - render as file thumbnails for assets, regular links otherwise
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  html = html.replace(linkRegex, (_match, name, url) => {
+    const safeUrl = url.replace(/"/g, "&quot;");
+    const safeName = escapeHtml(name);
+
+    // Check if it's an internal asset link
+    if (url.startsWith("/assets/")) {
+      const ext = url.split(".").pop()?.toLowerCase() || "";
+      const icon = getFileIcon(ext);
+      return `<a class="chat-file-attachment" href="${safeUrl}" target="_blank" download>
+        <span class="chat-file-icon">${icon}</span>
+        <span class="chat-file-name">${safeName}</span>
+      </a>`;
+    }
+
+    // Regular external link
+    return `<a href="${safeUrl}" target="_blank" rel="noopener">${safeName}</a>`;
+  });
+
   return html;
+}
+
+// Get icon for file type
+function getFileIcon(ext) {
+  const icons = {
+    pdf: "&#128196;", // page
+    txt: "&#128196;",
+    csv: "&#128200;", // chart
+    json: "&#128196;",
+    zip: "&#128230;", // package
+    default: "&#128190;", // floppy disk
+  };
+  return icons[ext] || icons.default;
 }
 
 function renderMessageCompact(message, { showAvatar = false } = {}) {
@@ -1004,6 +1172,12 @@ async function openChannelSettingsModal() {
   // Show groups section for private channels
   updateGroupsSection(!channel.isPublic);
 
+  // Show danger zone only for admins and non-personal channels
+  if (el.channelDangerZone) {
+    const isPersonalChannel = !!channel.ownerNpub;
+    el.channelDangerZone.style.display = state.isAdmin && !isPersonalChannel ? "" : "none";
+  }
+
   show(el.channelSettingsModal);
 }
 
@@ -1132,6 +1306,48 @@ async function saveChannelSettings(e) {
   }
 }
 
+// Delete channel with confirmation
+async function deleteChannel() {
+  if (!state.chat.selectedChannelId) return;
+
+  const channel = state.chat.channels.find((c) => c.id === state.chat.selectedChannelId);
+  if (!channel) return;
+
+  const confirmed = confirm(`Are you sure you want to delete "${channel.displayName || channel.name}"?\n\nThis will permanently delete the channel and all its messages.`);
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch(`/chat/channels/${channel.id}`, {
+      method: "DELETE",
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || "Failed to delete channel");
+      return;
+    }
+
+    // Close modal
+    hide(el.channelSettingsModal);
+
+    // Remove channel from state and re-render
+    state.chat.channels = state.chat.channels.filter((c) => c.id !== channel.id);
+    state.chat.selectedChannelId = null;
+    renderChannels();
+
+    // Clear messages area
+    if (el.threadList) {
+      el.threadList.innerHTML = `<p class="chat-placeholder">Pick or create a channel to start chatting.</p>`;
+    }
+    if (el.activeChannel) {
+      el.activeChannel.textContent = "Pick a channel";
+    }
+  } catch (_err) {
+    console.error("[Chat] Failed to delete channel");
+    alert("Failed to delete channel");
+  }
+}
+
 // Wire channel settings modal
 function wireChannelSettingsModal() {
   // Open modal on cog click
@@ -1160,6 +1376,9 @@ function wireChannelSettingsModal() {
 
   // Handle form submit
   el.channelSettingsForm?.addEventListener("submit", saveChannelSettings);
+
+  // Handle delete channel
+  el.deleteChannelBtn?.addEventListener("click", deleteChannel);
 }
 
 // ========== DM Modal ==========

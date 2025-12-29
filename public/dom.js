@@ -83,6 +83,8 @@ export const elements = {
   channelGroupsList: document.querySelector("[data-channel-groups-list]"),
   channelAddGroup: document.querySelector("[data-channel-add-group]"),
   closeChannelSettingsBtns: document.querySelectorAll("[data-close-channel-settings]"),
+  channelDangerZone: document.querySelector("[data-channel-danger-zone]"),
+  deleteChannelBtn: document.querySelector("[data-delete-channel]"),
   // DM elements
   dmList: document.querySelector("[data-dm-list]"),
   personalSection: document.querySelector("[data-personal-section]"),

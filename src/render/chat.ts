@@ -205,6 +205,9 @@ function renderChannelSettingsModal() {
           <button type="submit" class="primary">Save</button>
         </div>
       </form>
+      <div class="channel-danger-zone" data-channel-danger-zone>
+        <button type="button" class="danger" data-delete-channel>Delete Channel</button>
+      </div>
     </div>
   </div>`;
 }

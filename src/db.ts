@@ -357,6 +357,7 @@ const updateChannelStmt = db.query<Channel>(
   `UPDATE channels SET display_name = ?, description = ?, is_public = ?
    WHERE id = ? RETURNING *`
 );
+const deleteChannelStmt = db.query("DELETE FROM channels WHERE id = ?");
 
 // Message statements
 const listMessagesStmt = db.query<Message>(
@@ -520,6 +521,10 @@ export function createChannel(
 
 export function updateChannel(id: number, displayName: string, description: string, isPublic: boolean) {
   return updateChannelStmt.get(displayName, description, isPublic ? 1 : 0, id) as Channel | undefined ?? null;
+}
+
+export function deleteChannel(id: number) {
+  deleteChannelStmt.run(id);
 }
 
 // Message functions

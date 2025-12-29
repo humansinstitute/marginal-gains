@@ -1,4 +1,4 @@
-import { canUserAccessChannel, getOrCreateDmChannel, getOrCreatePersonalChannel, listAllChannels, listDmChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
+import { canUserAccessChannel, deleteChannel, getOrCreateDmChannel, getOrCreatePersonalChannel, listAllChannels, listDmChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
 import { isAdmin } from "../config";
 import { jsonResponse, unauthorized } from "../http";
 import { renderChatPage } from "../render/chat";
@@ -124,6 +124,28 @@ export async function handleUpdateChannel(req: Request, session: Session | null,
   );
 
   return jsonResponse(channel);
+}
+
+export function handleDeleteChannel(session: Session | null, id: number) {
+  if (!session) return unauthorized();
+
+  // Only admins can delete channels
+  if (!isAdmin(session.npub)) {
+    return forbidden("Only admins can delete channels");
+  }
+
+  const existing = getChannelById(id);
+  if (!existing) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Prevent deletion of personal channels (Note to self)
+  if (existing.owner_npub) {
+    return forbidden("Cannot delete personal channels");
+  }
+
+  deleteChannel(id);
+  return jsonResponse({ success: true });
 }
 
 export function handleGetMessages(session: Session | null, channelId: number) {
