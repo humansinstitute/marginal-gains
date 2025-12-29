@@ -49,6 +49,18 @@ export type Message = {
   edited_at: string | null;
 };
 
+export type User = {
+  npub: string;
+  pubkey: string;
+  display_name: string | null;
+  name: string | null;
+  about: string | null;
+  picture: string | null;
+  nip05: string | null;
+  last_login: string | null;
+  updated_at: string;
+};
+
 const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "do-the-other-stuff.sqlite";
 const db = new Database(dbPath);
 db.run("PRAGMA foreign_keys = ON");
@@ -165,6 +177,21 @@ db.run(`
     UNIQUE(message_id, reactor, emoji)
   )
 `);
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS users (
+    npub TEXT PRIMARY KEY,
+    pubkey TEXT NOT NULL,
+    display_name TEXT,
+    name TEXT,
+    about TEXT,
+    picture TEXT,
+    nip05 TEXT,
+    last_login TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_users_pubkey ON users(pubkey)");
 
 const listByOwnerStmt = db.query<Todo>(
   "SELECT * FROM todos WHERE deleted = 0 AND owner = ? ORDER BY created_at DESC"
@@ -446,6 +473,65 @@ export function createMessage(
   return insertMessageStmt.get(channelId, author, body, threadRootId, parentId, quotedMessageId) as Message | undefined ?? null;
 }
 
+// User statements
+const listUsersStmt = db.query<User>(
+  "SELECT * FROM users ORDER BY updated_at DESC"
+);
+const getUserByNpubStmt = db.query<User>(
+  "SELECT * FROM users WHERE npub = ?"
+);
+const getUserByPubkeyStmt = db.query<User>(
+  "SELECT * FROM users WHERE pubkey = ?"
+);
+const upsertUserStmt = db.query<User>(
+  `INSERT INTO users (npub, pubkey, display_name, name, about, picture, nip05, last_login, updated_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+   ON CONFLICT(npub) DO UPDATE SET
+     display_name = COALESCE(excluded.display_name, users.display_name),
+     name = COALESCE(excluded.name, users.name),
+     about = COALESCE(excluded.about, users.about),
+     picture = COALESCE(excluded.picture, users.picture),
+     nip05 = COALESCE(excluded.nip05, users.nip05),
+     last_login = COALESCE(excluded.last_login, users.last_login),
+     updated_at = CURRENT_TIMESTAMP
+   RETURNING *`
+);
+
+// User functions
+export function listUsers() {
+  return listUsersStmt.all();
+}
+
+export function getUserByNpub(npub: string) {
+  return getUserByNpubStmt.get(npub) as User | undefined ?? null;
+}
+
+export function getUserByPubkey(pubkey: string) {
+  return getUserByPubkeyStmt.get(pubkey) as User | undefined ?? null;
+}
+
+export function upsertUser(user: {
+  npub: string;
+  pubkey: string;
+  displayName?: string | null;
+  name?: string | null;
+  about?: string | null;
+  picture?: string | null;
+  nip05?: string | null;
+  lastLogin?: string | null;
+}) {
+  return upsertUserStmt.get(
+    user.npub,
+    user.pubkey,
+    user.displayName ?? null,
+    user.name ?? null,
+    user.about ?? null,
+    user.picture ?? null,
+    user.nip05 ?? null,
+    user.lastLogin ?? null
+  ) as User | undefined ?? null;
+}
+
 export function resetDatabase() {
   db.run("DELETE FROM todos");
   db.run("DELETE FROM ai_summaries");
@@ -454,6 +540,7 @@ export function resetDatabase() {
   db.run("DELETE FROM messages");
   db.run("DELETE FROM message_mentions");
   db.run("DELETE FROM message_reactions");
+  db.run("DELETE FROM users");
   db.run(
     "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions')"
   );

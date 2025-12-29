@@ -13,14 +13,17 @@ import { logError } from "./logger";
 import { handleAiTasks, handleAiTasksPost, handleLatestSummary, handleSummaryPost } from "./routes/ai";
 import { createAuthHandlers } from "./routes/auth";
 import {
+  handleChatPage,
   handleCreateChannel,
   handleGetChannel,
   handleGetMessages,
   handleListChannels,
+  handleListUsers,
   handleSendMessage,
   handleUpdateChannel,
+  handleUpdateUser,
 } from "./routes/chat";
-import { handleHome } from "./routes/home";
+import { handleHome, handleTodos } from "./routes/home";
 import { handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
 import { AuthService } from "./services/auth";
 import { serveStatic } from "./static";
@@ -53,13 +56,16 @@ const server = Bun.serve({
         if (pathname === "/ai/summary/latest") return handleLatestSummary(url);
 
         // Chat routes
+        if (pathname === "/chat") return handleChatPage(session);
         if (pathname === "/chat/channels") return handleListChannels(session);
+        if (pathname === "/chat/users") return handleListUsers(session);
         const channelMatch = pathname.match(/^\/chat\/channels\/(\d+)$/);
         if (channelMatch) return handleGetChannel(session, Number(channelMatch[1]));
         const messagesMatch = pathname.match(/^\/chat\/channels\/(\d+)\/messages$/);
         if (messagesMatch) return handleGetMessages(session, Number(messagesMatch[1]));
 
-        if (pathname === "/") return handleHome(url, session);
+        if (pathname === "/") return handleHome(session);
+        if (pathname === "/todo") return handleTodos(url, session);
       }
 
       if (req.method === "POST") {
@@ -80,6 +86,7 @@ const server = Bun.serve({
 
         // Chat routes
         if (pathname === "/chat/channels") return handleCreateChannel(req, session);
+        if (pathname === "/chat/users") return handleUpdateUser(req, session);
         const sendMessageMatch = pathname.match(/^\/chat\/channels\/(\d+)\/messages$/);
         if (sendMessageMatch) return handleSendMessage(req, session, Number(sendMessageMatch[1]));
       }

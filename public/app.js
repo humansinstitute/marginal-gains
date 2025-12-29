@@ -4,9 +4,11 @@ import { focusHeroInput } from "./dom.js";
 import { initTagInputs } from "./tag-inputs.js";
 import { initUI } from "./ui.js";
 import { initChat } from "./chat.js";
+import { initAppMenu } from "./menu.js";
 
 window.addEventListener("load", focusHeroInput);
 
+initAppMenu();
 initAvatarMenu();
 initUI();
 initAuth();

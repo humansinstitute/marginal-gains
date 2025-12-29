@@ -36,13 +36,13 @@ ${renderHead()}
     ${renderHeader(session)}
     ${renderAuth(session)}
     ${renderHero(session)}
-    ${renderChatShell()}
     ${renderWork(pageState)}
     ${renderSummaries()}
     ${renderQrModal()}
+    ${renderProfileModal()}
   </main>
   ${renderSessionSeed(session)}
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>`;
 }
@@ -57,27 +57,51 @@ function renderHead() {
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="/app.css" />
+  <link rel="stylesheet" href="/app.css?v=3" />
 </head>`;
 }
 
 function renderHeader(session: Session | null) {
   return `<header class="page-header">
-    <h1>${APP_NAME}</h1>
-    <div class="session-controls" data-session-controls ${session ? "" : "hidden"}>
-      <button class="avatar-chip" type="button" data-avatar ${session ? "" : "hidden"} title="Account menu">
-        <span class="avatar-fallback" data-avatar-fallback>${session ? formatAvatarFallback(session.npub) : "•••"}</span>
-        <img data-avatar-img alt="Profile photo" loading="lazy" ${session ? "" : "hidden"} />
+    <div class="header-left">
+      <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
+        <span class="hamburger-icon"></span>
       </button>
-      <div class="avatar-menu" data-avatar-menu hidden>
-        <button type="button" data-open-chat ${session ? "" : "hidden"}>Open chat</button>
-        <button type="button" data-export-secret ${session?.method === "ephemeral" ? "" : "hidden"}>Export Secret</button>
-        <button type="button" data-show-login-qr ${session?.method === "ephemeral" ? "" : "hidden"}>Show Login QR</button>
-        <button type="button" data-copy-id ${session ? "" : "hidden"}>Copy ID</button>
-        <button type="button" data-logout>Log out</button>
+      <h1 class="app-title">${APP_NAME}</h1>
+    </div>
+    <div class="header-right">
+      <div class="session-controls" data-session-controls ${session ? "" : "hidden"}>
+        <button class="avatar-chip" type="button" data-avatar ${session ? "" : "hidden"} title="Account menu">
+          <span class="avatar-fallback" data-avatar-fallback>${session ? formatAvatarFallback(session.npub) : "MG"}</span>
+          <img data-avatar-img alt="Profile photo" loading="lazy" ${session ? "" : "hidden"} />
+        </button>
+        <div class="avatar-menu" data-avatar-menu hidden>
+          <button type="button" data-view-profile>View Profile</button>
+          <button type="button" data-export-secret ${session?.method === "ephemeral" ? "" : "hidden"}>Export Secret</button>
+          <button type="button" data-show-login-qr ${session?.method === "ephemeral" ? "" : "hidden"}>Show Login QR</button>
+          <button type="button" data-copy-id ${session ? "" : "hidden"}>Copy ID</button>
+          <button type="button" data-logout>Log out</button>
+        </div>
       </div>
     </div>
+    ${renderAppMenu()}
   </header>`;
+}
+
+function renderAppMenu() {
+  return `<nav class="app-menu" data-app-menu hidden>
+    <div class="app-menu-overlay" data-app-menu-overlay></div>
+    <div class="app-menu-panel">
+      <div class="app-menu-header">
+        <span class="app-menu-title">Menu</span>
+        <button type="button" class="app-menu-close" data-app-menu-close>&times;</button>
+      </div>
+      <ul class="app-menu-list">
+        <li><a href="/chat" class="app-menu-item">Chat</a></li>
+        <li><a href="/todo" class="app-menu-item active">Tasks</a></li>
+      </ul>
+    </div>
+  </nav>`;
 }
 
 function renderAuth(session: Session | null) {
@@ -163,83 +187,57 @@ function renderQrModal() {
   </div>`;
 }
 
+function renderProfileModal() {
+  return `<div class="profile-modal-overlay" data-profile-modal hidden>
+    <div class="profile-modal">
+      <button class="profile-modal-close" type="button" data-profile-close aria-label="Close">&times;</button>
+      <div class="profile-view" data-profile-view>
+        <div class="profile-header">
+          <div class="profile-avatar" data-profile-avatar></div>
+          <div class="profile-identity">
+            <h2 class="profile-name" data-profile-name>Loading...</h2>
+            <p class="profile-nip05" data-profile-nip05></p>
+          </div>
+        </div>
+        <p class="profile-about" data-profile-about></p>
+        <div class="profile-meta">
+          <p class="profile-npub" data-profile-npub></p>
+        </div>
+        <button type="button" class="profile-edit-btn" data-profile-edit>Edit Profile</button>
+      </div>
+      <form class="profile-edit-form" data-profile-edit-form hidden>
+        <label>
+          <span>Display Name</span>
+          <input type="text" name="displayName" data-profile-edit-name placeholder="Your name" />
+        </label>
+        <label>
+          <span>About</span>
+          <textarea name="about" data-profile-edit-about rows="3" placeholder="Tell us about yourself"></textarea>
+        </label>
+        <label>
+          <span>Picture URL</span>
+          <input type="url" name="picture" data-profile-edit-picture placeholder="https://..." />
+        </label>
+        <div class="profile-edit-actions">
+          <button type="button" class="ghost" data-profile-edit-cancel>Cancel</button>
+          <button type="submit" class="primary">Save & Publish</button>
+        </div>
+        <p class="profile-edit-status" data-profile-edit-status hidden></p>
+      </form>
+    </div>
+  </div>`;
+}
+
 function renderSessionSeed(session: Session | null) {
   return `<script>
     window.__NOSTR_SESSION__ = ${JSON.stringify(session ?? null)};
   </script>`;
 }
 
-function renderChatShell() {
-  return `<section class="chat-shell" data-chat-shell hidden>
-    <header class="chat-header">
-      <div>
-        <p class="chat-eyebrow">Chat</p>
-        <h2 class="chat-title">Channels & threads</h2>
-      </div>
-      <div class="chat-actions">
-        <button type="button" class="ghost" data-exit-chat>Back to todos</button>
-        <button type="button" class="primary" data-new-channel-trigger>Create channel</button>
-      </div>
-    </header>
-    <div class="chat-grid">
-      <aside class="chat-sidebar">
-        <div class="chat-section-header">
-          <h3>Channels</h3>
-          <button type="button" class="text-btn" data-new-channel-trigger>+ New</button>
-        </div>
-        <div class="chat-list" data-channel-list></div>
-      </aside>
-      <section class="chat-main">
-        <div class="chat-composer">
-          <div class="chat-channel-chip" data-active-channel>Pick a channel</div>
-          <textarea class="chat-input" placeholder="Share an update, @npub… to mention, > to quote" data-chat-input rows="3"></textarea>
-          <div class="chat-composer-actions">
-            <div class="chat-reply-target" data-reply-target hidden></div>
-            <button type="button" class="primary" data-send-chat disabled>Send</button>
-          </div>
-        </div>
-        <div class="chat-threads" data-thread-list>
-          <p class="chat-placeholder">Pick or create a channel to start chatting.</p>
-        </div>
-      </section>
-    </div>
-    <div class="chat-modal" data-channel-modal hidden>
-      <div class="chat-modal-body">
-        <header class="chat-modal-header">
-          <h3>Create channel</h3>
-          <button type="button" class="ghost" data-close-channel-modal>&times;</button>
-        </header>
-        <form class="chat-form" data-channel-form>
-          <label>
-            <span>Name (slug)</span>
-            <input name="name" required placeholder="general" />
-          </label>
-          <label>
-            <span>Display name</span>
-            <input name="displayName" required placeholder="General" />
-          </label>
-          <label>
-            <span>Description</span>
-            <textarea name="description" rows="2" placeholder="What is this channel about?"></textarea>
-          </label>
-          <label class="chat-checkbox">
-            <input type="checkbox" name="isPublic" checked />
-            <span>Public channel</span>
-          </label>
-          <div class="chat-form-actions">
-            <button type="button" class="ghost" data-close-channel-modal>Cancel</button>
-            <button type="submit" class="primary">Create</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </section>`;
-}
-
 function buildPageState(todos: Todo[], filterTags: string[], showArchive: boolean, session: Session | null): PageState {
   const activeTodos = todos.filter((t) => t.state !== "done");
   const doneTodos = todos.filter((t) => t.state === "done");
-  const archiveHref = showArchive ? "/" : "/?archive=1";
+  const archiveHref = showArchive ? "/todo" : "/todo?archive=1";
   const archiveLabel = showArchive ? "Hide archive" : `Archive (${doneTodos.length})`;
   const tagFilterBar = session ? renderTagFilterBar(todos, filterTags, showArchive) : "";
   const emptyActiveMessage = session ? "No active work. Add something new!" : "Sign in to view your todos.";
@@ -268,7 +266,7 @@ function filterTodos(allTodos: Todo[], filterTags: string[]) {
 }
 
 function renderTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean) {
-  const baseUrl = showArchive ? "/?archive=1" : "/";
+  const baseUrl = showArchive ? "/todo?archive=1" : "/todo";
   const tags = collectTags(allTodos);
   if (tags.length === 0) return "";
 

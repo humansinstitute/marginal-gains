@@ -1,4 +1,6 @@
+import { listUsers, upsertUser } from "../db";
 import { jsonResponse, unauthorized } from "../http";
+import { renderChatPage } from "../render/chat";
 import {
   createNewChannel,
   editChannel,
@@ -10,6 +12,11 @@ import {
 } from "../services/chat";
 
 import type { Session } from "../types";
+
+export function handleChatPage(session: Session | null) {
+  const page = renderChatPage(session);
+  return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
 
 export function handleListChannels(session: Session | null) {
   if (!session) return unauthorized();
@@ -109,4 +116,35 @@ export async function handleSendMessage(req: Request, session: Session | null, c
   }
 
   return jsonResponse(message, 201);
+}
+
+// User endpoints
+export function handleListUsers(session: Session | null) {
+  if (!session) return unauthorized();
+  const users = listUsers();
+  return jsonResponse(users);
+}
+
+export async function handleUpdateUser(req: Request, session: Session | null) {
+  if (!session) return unauthorized();
+
+  const body = await req.json();
+  const { npub, pubkey, displayName, name, about, picture, nip05 } = body;
+
+  if (!npub || !pubkey) {
+    return jsonResponse({ error: "npub and pubkey are required" }, 400);
+  }
+
+  const user = upsertUser({
+    npub,
+    pubkey,
+    displayName: displayName || null,
+    name: name || null,
+    about: about || null,
+    picture: picture || null,
+    nip05: nip05 || null,
+    lastLogin: npub === session.npub ? new Date().toISOString() : null,
+  });
+
+  return jsonResponse(user);
 }

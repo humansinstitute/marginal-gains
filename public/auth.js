@@ -4,7 +4,7 @@ import {
   DEFAULT_RELAYS,
   EPHEMERAL_SECRET_KEY,
 } from "./constants.js";
-import { closeAvatarMenu } from "./avatar.js";
+import { closeAvatarMenu, fetchProfile } from "./avatar.js";
 import { elements as el, hide, show } from "./dom.js";
 import {
   buildUnsignedEvent,
@@ -298,8 +298,34 @@ const completeLogin = async (method, event) => {
   } else {
     clearAutoLogin();
   }
+
+  // Fetch profile from relays and save to server database
+  try {
+    console.log("[Login] Fetching profile for", session.pubkey);
+    const profile = await fetchProfile(session.pubkey);
+    console.log("[Login] Got profile:", profile);
+    const userData = {
+      npub: session.npub,
+      pubkey: session.pubkey,
+      displayName: profile?.displayName || profile?.name || null,
+      name: profile?.name || null,
+      about: profile?.about || null,
+      picture: profile?.picture || null,
+      nip05: profile?.nip05 || null,
+    };
+    console.log("[Login] Saving user data:", userData);
+    const res = await fetch("/chat/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(userData),
+    });
+    console.log("[Login] Save response:", res.status);
+  } catch (err) {
+    console.error("[Login] Failed to save user:", err);
+  }
+
   await fetchSummaries();
-  window.location.reload();
+  window.location.href = "/chat";
 };
 
 const handleExportSecret = async () => {
