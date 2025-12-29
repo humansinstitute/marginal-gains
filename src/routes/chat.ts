@@ -1,4 +1,4 @@
-import { canUserAccessChannel, listAllChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
+import { canUserAccessChannel, getOrCreatePersonalChannel, listAllChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
 import { isAdmin } from "../config";
 import { jsonResponse, unauthorized } from "../http";
 import { renderChatPage } from "../render/chat";
@@ -29,6 +29,12 @@ export function handleListChannels(session: Session | null) {
   const channels = isAdmin(session.npub)
     ? listAllChannels()
     : listVisibleChannels(session.npub);
+
+  // Get or create personal "Note to self" channel and append at end
+  const personalChannel = getOrCreatePersonalChannel(session.npub);
+  if (personalChannel) {
+    channels.push(personalChannel);
+  }
 
   return jsonResponse(channels);
 }

@@ -219,6 +219,7 @@ async function fetchChannels() {
       displayName: ch.display_name,
       description: ch.description,
       isPublic: ch.is_public === 1,
+      ownerNpub: ch.owner_npub || null, // Personal channel owner
     }));
     // Use updateChannelsList to handle cleanup of removed channels
     updateChannelsList(mapped);
@@ -557,17 +558,36 @@ export const refreshChatUI = () => {
 
 function renderChannels() {
   if (!el.chatChannelList) return;
-  const channels = state.chat.channels;
-  el.chatChannelList.innerHTML = channels
+  const allChannels = state.chat.channels;
+
+  // Separate regular channels from personal "Note to self" channel
+  const regularChannels = allChannels.filter((ch) => !ch.ownerNpub);
+  const personalChannel = allChannels.find((ch) => ch.ownerNpub);
+
+  // Render regular channels
+  let html = regularChannels
     .map((channel) => {
       const isActive = channel.id === state.chat.selectedChannelId;
       const lockIcon = channel.isPublic ? '' : '<span class="channel-lock" title="Private">&#128274;</span>';
       return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}">
-        <div class="chat-channel-name">#${escapeHtml(channel.name)}</div>
-        <p class="chat-channel-desc">${lockIcon}${escapeHtml(channel.displayName)}</p>
+        <div class="chat-channel-name">#${escapeHtml(channel.name)} ${lockIcon}</div>
+        <p class="chat-channel-desc">${escapeHtml(channel.displayName)}</p>
       </button>`;
     })
     .join("");
+
+  // Render personal channel at bottom with divider
+  if (personalChannel) {
+    const isActive = personalChannel.id === state.chat.selectedChannelId;
+    html += `
+      <div class="channel-divider"></div>
+      <button class="chat-channel channel-personal${isActive ? " active" : ""}" data-channel-id="${personalChannel.id}">
+        <div class="chat-channel-name"><span class="channel-note-icon" title="Personal notes">&#128221;</span> ${escapeHtml(personalChannel.displayName)}</div>
+        <p class="chat-channel-desc">Your private notes</p>
+      </button>`;
+  }
+
+  el.chatChannelList.innerHTML = html;
   el.chatChannelList.querySelectorAll("[data-channel-id]").forEach((btn) => {
     const handler = async () => {
       const channelId = btn.dataset.channelId;

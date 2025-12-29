@@ -34,6 +34,7 @@ export type Channel = {
   description: string;
   creator: string;
   is_public: number;
+  owner_npub: string | null; // If set, this is a personal channel visible only to this user
   created_at: string;
 };
 
@@ -110,6 +111,9 @@ addColumn("ALTER TABLE todos ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");
 addColumn("ALTER TABLE todos ADD COLUMN owner TEXT NOT NULL DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN scheduled_for TEXT DEFAULT NULL");
 addColumn("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
+
+// Add owner_npub for personal channels (Note to self)
+addColumn("ALTER TABLE channels ADD COLUMN owner_npub TEXT DEFAULT NULL");
 
 db.run(`
   CREATE TABLE IF NOT EXISTS ai_summaries (
@@ -318,9 +322,9 @@ const latestWeekSummaryStmt = db.query<Summary>(
    LIMIT 1`
 );
 
-// Channel statements
+// Channel statements (excludes personal channels)
 const listChannelsStmt = db.query<Channel>(
-  "SELECT * FROM channels ORDER BY created_at ASC"
+  "SELECT * FROM channels WHERE owner_npub IS NULL ORDER BY created_at ASC"
 );
 const getChannelByIdStmt = db.query<Channel>(
   "SELECT * FROM channels WHERE id = ?"
@@ -625,15 +629,30 @@ const addChannelGroupStmt = db.query<ChannelGroup>(
 const removeChannelGroupStmt = db.query("DELETE FROM channel_groups WHERE channel_id = ? AND group_id = ?");
 
 // Query for channels visible to a user (public OR user is in a group assigned to the channel)
+// Excludes personal channels (owner_npub IS NOT NULL) - those are fetched separately
 const listVisibleChannelsStmt = db.query<Channel>(
   `SELECT DISTINCT c.* FROM channels c
-   WHERE c.is_public = 1
-      OR EXISTS (
-        SELECT 1 FROM channel_groups cg
-        JOIN group_members gm ON gm.group_id = cg.group_id
-        WHERE cg.channel_id = c.id AND gm.npub = ?
-      )
+   WHERE c.owner_npub IS NULL AND (
+     c.is_public = 1
+     OR EXISTS (
+       SELECT 1 FROM channel_groups cg
+       JOIN group_members gm ON gm.group_id = cg.group_id
+       WHERE cg.channel_id = c.id AND gm.npub = ?
+     )
+   )
    ORDER BY c.created_at ASC`
+);
+
+// Get personal channel for a user
+const getPersonalChannelStmt = db.query<Channel>(
+  `SELECT * FROM channels WHERE owner_npub = ? LIMIT 1`
+);
+
+// Create personal channel
+const insertPersonalChannelStmt = db.query<Channel>(
+  `INSERT INTO channels (name, display_name, description, creator, is_public, owner_npub)
+   VALUES (?, 'Note to self', 'Your private notes', ?, 0, ?)
+   RETURNING *`
 );
 
 // Check if user can access a specific private channel
@@ -641,6 +660,7 @@ const canAccessChannelStmt = db.query<{ can_access: number }>(
   `SELECT 1 as can_access FROM channels c
    WHERE c.id = ? AND (
      c.is_public = 1
+     OR c.owner_npub = ?
      OR EXISTS (
        SELECT 1 FROM channel_groups cg
        JOIN group_members gm ON gm.group_id = cg.group_id
@@ -714,8 +734,24 @@ export function listAllChannels() {
 }
 
 export function canUserAccessChannel(channelId: number, npub: string): boolean {
-  const result = canAccessChannelStmt.get(channelId, npub);
+  const result = canAccessChannelStmt.get(channelId, npub, npub);
   return result !== undefined;
+}
+
+// Personal channel functions
+export function getPersonalChannel(npub: string) {
+  return getPersonalChannelStmt.get(npub) as Channel | undefined ?? null;
+}
+
+export function getOrCreatePersonalChannel(npub: string) {
+  let channel = getPersonalChannelStmt.get(npub) as Channel | undefined;
+  if (!channel) {
+    // Create a unique name using a short hash of the npub
+    const shortHash = npub.slice(-8);
+    const name = `notes-${shortHash}`;
+    channel = insertPersonalChannelStmt.get(name, npub, npub) as Channel | undefined;
+  }
+  return channel ?? null;
 }
 
 export function resetDatabase() {
