@@ -1,12 +1,12 @@
 {
-  "name": "do-the-other-stuff",
-  "version": "0.1.0",
-  "description": "Minimal Bun + TypeScript + SQLite todo app",
+  "name": "marginal-gains",
+  "version": "1.0.0",
+  "description": "Self-hosted community chat with Nostr ID integration",
   "scripts": {
     "setup": "bun install",
     "start": "bun --hot run src/server.ts",
     "dev": "bun --hot run src/server.ts",
-    "reset-db": "rm -f do-the-other-stuff.sqlite",
+    "reset-db": "rm -f marginal-gains.sqlite",
     "lint": "eslint . && node scripts/check-inline-js.js",
     "lint:fix": "eslint . --fix && node scripts/check-inline-js.js"
   },

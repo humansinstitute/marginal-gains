@@ -86,7 +86,7 @@ export type ChannelGroup = {
   group_id: number;
 };
 
-const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "do-the-other-stuff.sqlite";
+const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "marginal-gains.sqlite";
 const db = new Database(dbPath);
 db.run("PRAGMA foreign_keys = ON");
 

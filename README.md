@@ -1,50 +1,108 @@
-# Do the Other Stuff
+# Marginal Gains
 
-Minimal todo tracker powered by Bun, TypeScript, and SQLite. Runs as a single Bun server that renders HTML directly, so applying a custom skin is just a matter of swapping out styles.
-
-## Getting started
-
-```bash
-bun install
-PORT=4000 bun start
-```
-
-`bun start` runs `src/server.ts`, which boots `Bun.serve` on `PORT` (defaults to `3000`). The app creates `do-the-other-stuff.sqlite` the first time it runs.
+A simple self-hosted community chat (like Slack) with Nostr ID integration. Sign in with your Nostr keys, no email or password required.
 
 ## Features
 
-- Add todos with the input at the top of the page.
-- Toggle completion using the `Done` / `Undo` button next to each item.
-- Remove items entirely with `Delete`.
-- Remaining count updates automatically based on completed items.
+- **Nostr Authentication** - Login with any Nostr browser extension (nos2x, Alby, etc.)
+- **Channels** - Public and private channels with threaded replies
+- **Direct Messages** - Private 1:1 conversations
+- **File Uploads** - Paste or drag-drop images and files directly into chat
+- **@Mentions** - Tag users with autocomplete
+- **Groups** - Control access to private channels via group membership
+- **Admin Panel** - Manage groups and channel settings
 
-The UI is intentionally unstyled beyond a bare minimum so you can drop in any look you want.
+## Getting Started
 
-## Skinning approach
+### Prerequisites
 
-Everything renders from `renderPage` in `src/server.ts`. The markup uses consistent hooks:
+- [Bun](https://bun.sh/) runtime (v1.0+)
 
-- `.app-shell`: Wraps the entire interface.
-- `.todo-form`, `.todo-list`, `.todo-item`, `.todo-title`, `.actions`: Provide structure for layout tweaks.
-- `.done` class sits on completed `li` items.
+### Installation
 
-To build a custom skin you can:
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/marginalgains.git
+cd marginalgains
 
-1. Copy the `<style>` block in `renderPage` into a separate CSS file.
-2. Replace the inline styles with `<link rel="stylesheet" href="/app.css" />` and serve static assets any way you prefer (e.g., add a tiny `Bun.file` handler).
-3. Adjust typography, colors, spacing, or even replace the markup while keeping the form routes (`/todos`, `/todos/:id/toggle`, `/todos/:id/delete`) intact.
+# Install dependencies
+bun install
 
-Because the app is framework-free HTML, you can also render from a template engine or component system later without changing the persistence layer.
+# Start the server
+bun start
+```
 
-## Development helpers
+The app creates `marginal-gains.sqlite` on first run.
 
-- `bun dev` runs the server with `bun --hot` for quick edits.
-- `bun run reset-db` removes the SQLite file if you want to start fresh.
+### Environment Variables
 
-## Folder layout
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `NODE_ENV` | - | Set to `production` for secure cookies |
+| `ADMIN_NPUBS` | - | Comma-separated list of admin npub addresses |
+| `DB_PATH` | `marginal-gains.sqlite` | Path to SQLite database file |
+
+Example:
+```bash
+PORT=4000 ADMIN_NPUBS=npub1abc...,npub1xyz... bun start
+```
+
+## Development
+
+```bash
+# Run with hot reload
+bun dev
+
+# Lint code
+bun run lint
+
+# Reset database
+bun run reset-db
+```
+
+## Project Structure
 
 ```
 src/
-  db.ts        // sqlite helpers
-  server.ts    // Bun HTTP server + HTML rendering
+  config.ts          # App configuration
+  db.ts              # SQLite database schema and queries
+  server.ts          # Bun HTTP server and routing
+  routes/            # API route handlers
+    auth.ts          # Nostr authentication
+    chat.ts          # Channels, messages, DMs
+    groups.ts        # Group management
+    assets.ts        # File uploads
+    settings.ts      # Admin settings
+  render/            # Server-side HTML rendering
+    home.ts          # Home page
+    chat.ts          # Chat interface
+    settings.ts      # Admin settings page
+  services/          # Business logic
+    auth.ts          # Session management
+
+public/
+  app.js             # Main entry point
+  chat.js            # Chat functionality
+  auth.js            # Nostr login flow
+  mentions.js        # @mention autocomplete
+  uploads.js         # File upload handling
+  messageRenderer.js # Message display
+  liveUpdates.js     # Server-sent events
+  app.css            # Main styles
+  mobile.css         # Mobile responsive styles
+  settings.css       # Admin page styles
 ```
+
+## Tech Stack
+
+- **Runtime**: [Bun](https://bun.sh/)
+- **Language**: TypeScript
+- **Database**: SQLite (Bun built-in)
+- **Auth**: Nostr NIP-07 / NIP-98
+- **Frontend**: Vanilla JS with ES modules
+- **Real-time**: Server-Sent Events (SSE)
+
+## License
+
+MIT
