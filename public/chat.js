@@ -4,6 +4,7 @@ import { loadNostrLibs } from "./nostr.js";
 import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent } from "./liveUpdates.js";
 import { addDmChannel, addMessage, getActiveChannelMessages, removeMessageFromChannel, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateAllChannels, upsertChannel, setChannelMessages, refreshUI } from "./state.js";
 import { init as initMentions, handleMentionInput, handleMentionKeydown, closeMentionPopup } from "./mentions.js";
+import { wirePasteAndDrop } from "./uploads.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();
@@ -513,37 +514,8 @@ function wireComposer() {
     }
   });
 
-  // Paste handler for images/files
-  el.chatInput?.addEventListener("paste", async (event) => {
-    const items = event.clipboardData?.items;
-    if (!items) return;
-    const files = extractUploadableFiles(items);
-    if (files.length > 0) {
-      event.preventDefault();
-      await uploadFiles(files);
-    }
-  });
-
-  // Drag and drop handler
-  const composer = el.chatInput?.closest(".chat-composer");
-  composer?.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-    composer.classList.add("drag-over");
-  });
-  composer?.addEventListener("dragleave", () => {
-    composer.classList.remove("drag-over");
-  });
-  composer?.addEventListener("drop", async (event) => {
-    event.preventDefault();
-    composer.classList.remove("drag-over");
-    const items = event.dataTransfer?.items || event.dataTransfer?.files;
-    if (!items) return;
-    const files = extractUploadableFiles(items);
-    if (files.length > 0) {
-      await uploadFiles(files);
-    }
-  });
+  // Wire paste and drop handlers for file uploads
+  wirePasteAndDrop(el.chatInput, el.chatSendBtn, "Share an update, @name to mention", () => !!state.session);
 
   // Close mention popup when clicking outside
   document.addEventListener("click", (event) => {
@@ -597,97 +569,6 @@ function wireComposer() {
   });
 
   el.chatSendBtn?.addEventListener("click", sendMessage);
-}
-
-// ========== File Upload Handling ==========
-
-// Track upload state
-let isUploading = false;
-
-// Extract files from clipboard or drop event
-function extractUploadableFiles(items) {
-  const files = [];
-  for (const item of Array.from(items)) {
-    if (!item) continue;
-    if (item.kind === "file") {
-      const file = item.getAsFile?.();
-      if (file) files.push(file);
-    } else if (item instanceof File) {
-      files.push(item);
-    }
-  }
-  return files;
-}
-
-// Upload files and insert markdown into a specific input element
-async function uploadFilesToInput(files, inputEl, sendBtn, defaultPlaceholder) {
-  if (!state.session || !inputEl || isUploading) return;
-
-  for (const file of files) {
-    isUploading = true;
-    sendBtn?.setAttribute("disabled", "disabled");
-    inputEl.setAttribute("placeholder", "Uploading...");
-
-    try {
-      const form = new FormData();
-      form.append("file", file, file.name);
-
-      const res = await fetch("/api/assets/upload", {
-        method: "POST",
-        body: form,
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || "Upload failed");
-        continue;
-      }
-
-      const payload = await res.json();
-      const markdown = payload.isImage
-        ? `![${file.name}](${payload.url})`
-        : `[${file.name}](${payload.url})`;
-
-      insertTextAtCursorIn(inputEl, markdown);
-    } catch (error) {
-      console.error("[Chat] Upload failed:", error);
-      alert("Upload failed");
-    } finally {
-      isUploading = false;
-      inputEl.setAttribute("placeholder", defaultPlaceholder);
-      // Trigger input event to update send button state
-      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-  }
-}
-
-// Wrapper for main chat input
-async function uploadFiles(files) {
-  await uploadFilesToInput(files, el.chatInput, el.chatSendBtn, "Share an update, @name to mention");
-}
-
-// Insert text at cursor position in a specific input element
-function insertTextAtCursorIn(inputEl, text) {
-  if (!inputEl) return;
-  const start = inputEl.selectionStart ?? inputEl.value.length;
-  const end = inputEl.selectionEnd ?? inputEl.value.length;
-  const before = inputEl.value.slice(0, start);
-  const after = inputEl.value.slice(end);
-
-  // Add newlines around markdown if needed
-  const prefix = before.length > 0 && !before.endsWith("\n") ? "\n" : "";
-  const suffix = after.length > 0 && !after.startsWith("\n") ? "\n" : "";
-
-  inputEl.value = before + prefix + text + suffix + after;
-  const newPos = start + prefix.length + text.length + suffix.length;
-  inputEl.selectionStart = inputEl.selectionEnd = newPos;
-  inputEl.focus();
-}
-
-// Legacy wrapper for main chat input
-function insertTextAtCursor(text) {
-  insertTextAtCursorIn(el.chatInput, text);
-  el.chatInput?.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 async function sendMessage() {
@@ -1086,37 +967,8 @@ function wireThreadSidebar() {
     }
   });
 
-  // Paste handler for thread input
-  el.threadInput?.addEventListener("paste", async (event) => {
-    const items = event.clipboardData?.items;
-    if (!items) return;
-    const files = extractUploadableFiles(items);
-    if (files.length > 0) {
-      event.preventDefault();
-      await uploadFilesToInput(files, el.threadInput, el.threadSendBtn, "Reply to thread...");
-    }
-  });
-
-  // Drag and drop for thread composer
-  const threadComposer = el.threadInput?.closest(".chat-thread-panel-composer");
-  threadComposer?.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-    threadComposer.classList.add("drag-over");
-  });
-  threadComposer?.addEventListener("dragleave", () => {
-    threadComposer.classList.remove("drag-over");
-  });
-  threadComposer?.addEventListener("drop", async (event) => {
-    event.preventDefault();
-    threadComposer.classList.remove("drag-over");
-    const items = event.dataTransfer?.items || event.dataTransfer?.files;
-    if (!items) return;
-    const files = extractUploadableFiles(items);
-    if (files.length > 0) {
-      await uploadFilesToInput(files, el.threadInput, el.threadSendBtn, "Reply to thread...");
-    }
-  });
+  // Wire paste and drop handlers for file uploads
+  wirePasteAndDrop(el.threadInput, el.threadSendBtn, "Reply to thread...", () => !!state.session);
 
   // Thread send button
   const sendHandler = () => sendThreadReply();
