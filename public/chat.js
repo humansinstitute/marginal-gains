@@ -228,10 +228,12 @@ function setupLiveUpdateHandlers() {
   onEvent("message:new", (data) => {
     // If viewing this channel, handle the new message
     if (state.chat.selectedChannelId === String(data.channelId)) {
-      // Check if user is near bottom before re-rendering
-      const wasNearBottom = isNearBottom(el.chatThreadList);
+      // Use pre-captured scroll state from liveUpdates.js
+      // (captured BEFORE the message was added to state and DOM was updated)
+      const { wasNearBottom } = data;
 
-      renderThreads();
+      // Note: renderThreads() was already called by refreshUI() when message was added to state
+      // No need to call it again here
 
       // If user was near bottom, scroll to show new message
       // Otherwise show the "new message" indicator
@@ -672,6 +674,12 @@ function wireComposer() {
   el.chatInput?.addEventListener("keydown", (event) => {
     // Let mention handler take over if active
     if (handleMentionKeydown(event)) return;
+
+    // Enter sends message, Shift+Enter adds new line
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
   });
 
   // Paste handler for images/files
@@ -1237,6 +1245,14 @@ function wireThreadSidebar() {
     const hasText = Boolean(el.threadInput.value.trim());
     if (hasText && openThreadId) el.threadSendBtn?.removeAttribute("disabled");
     else el.threadSendBtn?.setAttribute("disabled", "disabled");
+  });
+
+  // Enter sends reply, Shift+Enter adds new line
+  el.threadInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendThreadReply();
+    }
   });
 
   // Paste handler for thread input

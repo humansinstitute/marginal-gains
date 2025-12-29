@@ -19,6 +19,14 @@ import {
   addMessage as addMessageToState,
   setChannelMessages,
 } from "./state.js";
+import { elements as el } from "./dom.js";
+
+// Check if scroll container is near bottom (within threshold)
+function isNearBottom(container) {
+  if (!container) return true;
+  const threshold = 100;
+  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+}
 
 let eventSource = null;
 let reconnectTimeout = null;
@@ -119,8 +127,9 @@ export async function connect() {
     try {
       const data = JSON.parse(event.data);
       console.log("[LiveUpdates] New message:", data);
-      await handleNewMessage(data);
-      emitEvent("message:new", data);
+      const { wasNearBottom } = await handleNewMessage(data);
+      // Include pre-captured scroll state in the event data
+      emitEvent("message:new", { ...data, wasNearBottom });
     } catch (err) {
       console.error("[LiveUpdates] Error handling message:new:", err);
     }
@@ -266,6 +275,11 @@ async function handleInitialSync(data) {
 async function handleNewMessage(data) {
   const { channelId, ...rawMessage } = data;
 
+  // IMPORTANT: Capture scroll position BEFORE adding to state
+  // (adding to state triggers refreshUI which re-renders the DOM)
+  const isViewingChannel = state.chat.selectedChannelId === String(channelId);
+  const wasNearBottom = isViewingChannel ? isNearBottom(el.chatThreadList) : false;
+
   // Save raw message to local database
   try {
     await saveMessage({ ...rawMessage, channelId });
@@ -287,6 +301,9 @@ async function handleNewMessage(data) {
 
   // Add to app state if this channel's messages are loaded
   addMessageToState(String(channelId), message);
+
+  // Return the pre-captured scroll state for the event handler
+  return { wasNearBottom };
 }
 
 /**
