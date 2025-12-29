@@ -117,20 +117,6 @@ addColumn("ALTER TABLE todos ADD COLUMN owner TEXT NOT NULL DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN scheduled_for TEXT DEFAULT NULL");
 addColumn("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
 
-// Add owner_npub for personal channels (Note to self)
-addColumn("ALTER TABLE channels ADD COLUMN owner_npub TEXT DEFAULT NULL");
-
-// DM participants table - tracks the two users in a DM channel
-db.run(`
-  CREATE TABLE IF NOT EXISTS dm_participants (
-    channel_id INTEGER NOT NULL,
-    npub TEXT NOT NULL,
-    PRIMARY KEY (channel_id, npub),
-    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
-  )
-`);
-db.run("CREATE INDEX IF NOT EXISTS idx_dm_participants_npub ON dm_participants(npub)");
-
 db.run(`
   CREATE TABLE IF NOT EXISTS ai_summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,6 +131,7 @@ db.run(`
   )
 `);
 
+// Create channels table first (other tables reference it)
 db.run(`
   CREATE TABLE IF NOT EXISTS channels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,6 +144,20 @@ db.run(`
     UNIQUE(name)
   )
 `);
+
+// Add owner_npub for personal channels (Note to self) - migration for existing DBs
+addColumn("ALTER TABLE channels ADD COLUMN owner_npub TEXT DEFAULT NULL");
+
+// DM participants table - tracks the two users in a DM channel
+db.run(`
+  CREATE TABLE IF NOT EXISTS dm_participants (
+    channel_id INTEGER NOT NULL,
+    npub TEXT NOT NULL,
+    PRIMARY KEY (channel_id, npub),
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_dm_participants_npub ON dm_participants(npub)");
 
 db.run(`
   CREATE TABLE IF NOT EXISTS channel_members (
