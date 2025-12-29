@@ -1,4 +1,4 @@
-import { canUserAccessChannel, getOrCreatePersonalChannel, listAllChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
+import { canUserAccessChannel, getOrCreateDmChannel, getOrCreatePersonalChannel, listAllChannels, listDmChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
 import { isAdmin } from "../config";
 import { jsonResponse, unauthorized } from "../http";
 import { renderChatPage } from "../render/chat";
@@ -30,13 +30,17 @@ export function handleListChannels(session: Session | null) {
     ? listAllChannels()
     : listVisibleChannels(session.npub);
 
+  // Get DM channels for this user
+  const dmChannels = listDmChannels(session.npub);
+
   // Get or create personal "Note to self" channel and append at end
   const personalChannel = getOrCreatePersonalChannel(session.npub);
-  if (personalChannel) {
-    channels.push(personalChannel);
-  }
 
-  return jsonResponse(channels);
+  return jsonResponse({
+    channels,
+    dmChannels,
+    personalChannel,
+  });
 }
 
 export function handleGetChannel(session: Session | null, id: number) {
@@ -213,4 +217,30 @@ export async function handleUpdateUser(req: Request, session: Session | null) {
   });
 
   return jsonResponse(user);
+}
+
+// DM endpoints
+export async function handleCreateDm(req: Request, session: Session | null) {
+  if (!session) return unauthorized();
+
+  const body = await req.json();
+  const { targetNpub, displayName } = body;
+
+  if (!targetNpub || typeof targetNpub !== "string") {
+    return jsonResponse({ error: "targetNpub is required" }, 400);
+  }
+
+  if (targetNpub === session.npub) {
+    return jsonResponse({ error: "Cannot create DM with yourself" }, 400);
+  }
+
+  // Use provided displayName or a placeholder (frontend should provide the user's name)
+  const dmDisplayName = displayName || "DM";
+
+  const channel = getOrCreateDmChannel(session.npub, targetNpub, dmDisplayName);
+  if (!channel) {
+    return jsonResponse({ error: "Failed to create DM channel" }, 500);
+  }
+
+  return jsonResponse(channel, 201);
 }

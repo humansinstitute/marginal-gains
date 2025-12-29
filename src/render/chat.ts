@@ -90,6 +90,12 @@ function renderChatContent() {
           <button type="button" class="text-btn" data-new-channel-trigger>+ New</button>
         </div>
         <div class="chat-list" data-channel-list></div>
+        <div class="chat-section-header dm-section-header">
+          <h3>Direct Messages</h3>
+          <button type="button" class="text-btn" data-new-dm-trigger>+ New</button>
+        </div>
+        <div class="chat-list" data-dm-list></div>
+        <div class="chat-personal-section" data-personal-section></div>
       </aside>
       <section class="chat-messages-area">
         <header class="chat-messages-header">
@@ -122,6 +128,7 @@ function renderChatContent() {
     </div>
     ${renderChannelModal()}
     ${renderChannelSettingsModal()}
+    ${renderDmModal()}
     ${renderProfileModal()}
   </section>`;
 }
@@ -198,6 +205,21 @@ function renderChannelSettingsModal() {
           <button type="submit" class="primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>`;
+}
+
+function renderDmModal() {
+  return `<div class="chat-modal" data-dm-modal hidden>
+    <div class="chat-modal-body dm-modal-body">
+      <header class="chat-modal-header">
+        <h3>New Direct Message</h3>
+        <button type="button" class="ghost" data-close-dm-modal>&times;</button>
+      </header>
+      <div class="dm-user-search">
+        <input type="text" placeholder="Search users..." data-dm-search autocomplete="off" />
+        <div class="dm-user-list" data-dm-user-list></div>
+      </div>
     </div>
   </div>`;
 }

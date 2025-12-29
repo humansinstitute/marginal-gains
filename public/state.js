@@ -7,6 +7,8 @@ export const state = {
   chat: {
     enabled: false,
     channels: [],
+    dmChannels: [],
+    personalChannel: null,
     selectedChannelId: null,
     replyingTo: null,
     messagesByChannel: {},
@@ -48,7 +50,41 @@ export const upsertChannel = (channel) => {
   refreshUI();
 };
 
-// Update channels list and clean up messages for removed channels
+// Update all channel lists and clean up messages for removed channels
+export const updateAllChannels = (channels, dmChannels, personalChannel) => {
+  // Collect all valid channel IDs
+  const allNewIds = new Set([
+    ...channels.map((c) => c.id),
+    ...dmChannels.map((c) => c.id),
+    ...(personalChannel ? [personalChannel.id] : []),
+  ]);
+
+  const oldIds = Object.keys(state.chat.messagesByChannel);
+
+  // Clean up messages for channels user no longer has access to
+  for (const oldId of oldIds) {
+    if (!allNewIds.has(oldId)) {
+      delete state.chat.messagesByChannel[oldId];
+      try {
+        localStorage.removeItem(`channel_${oldId}_messages`);
+      } catch (_e) {
+        // Ignore localStorage errors
+      }
+    }
+  }
+
+  // If selected channel was removed, clear selection
+  if (state.chat.selectedChannelId && !allNewIds.has(state.chat.selectedChannelId)) {
+    state.chat.selectedChannelId = channels.length > 0 ? channels[0].id : null;
+  }
+
+  state.chat.channels = channels;
+  state.chat.dmChannels = dmChannels;
+  state.chat.personalChannel = personalChannel;
+  refreshUI();
+};
+
+// Legacy function for backwards compatibility
 export const updateChannelsList = (newChannels) => {
   const newIds = new Set(newChannels.map((c) => c.id));
   const oldIds = Object.keys(state.chat.messagesByChannel);
@@ -72,6 +108,14 @@ export const updateChannelsList = (newChannels) => {
   }
 
   state.chat.channels = newChannels;
+  refreshUI();
+};
+
+export const addDmChannel = (channel) => {
+  const exists = state.chat.dmChannels.find((c) => c.id === channel.id);
+  if (!exists) {
+    state.chat.dmChannels = [channel, ...state.chat.dmChannels];
+  }
   refreshUI();
 };
 

@@ -83,6 +83,14 @@ export const elements = {
   channelGroupsList: document.querySelector("[data-channel-groups-list]"),
   channelAddGroup: document.querySelector("[data-channel-add-group]"),
   closeChannelSettingsBtns: document.querySelectorAll("[data-close-channel-settings]"),
+  // DM elements
+  dmList: document.querySelector("[data-dm-list]"),
+  personalSection: document.querySelector("[data-personal-section]"),
+  newDmTrigger: document.querySelector("[data-new-dm-trigger]"),
+  dmModal: document.querySelector("[data-dm-modal]"),
+  dmSearch: document.querySelector("[data-dm-search]"),
+  dmUserList: document.querySelector("[data-dm-user-list]"),
+  closeDmModalBtns: document.querySelectorAll("[data-close-dm-modal]"),
 };
 
 export const show = (el) => el?.removeAttribute("hidden");

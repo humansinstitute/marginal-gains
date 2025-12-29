@@ -38,6 +38,11 @@ export type Channel = {
   created_at: string;
 };
 
+export type DmParticipant = {
+  channel_id: number;
+  npub: string;
+};
+
 export type Message = {
   id: number;
   channel_id: number;
@@ -114,6 +119,17 @@ addColumn("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
 
 // Add owner_npub for personal channels (Note to self)
 addColumn("ALTER TABLE channels ADD COLUMN owner_npub TEXT DEFAULT NULL");
+
+// DM participants table - tracks the two users in a DM channel
+db.run(`
+  CREATE TABLE IF NOT EXISTS dm_participants (
+    channel_id INTEGER NOT NULL,
+    npub TEXT NOT NULL,
+    PRIMARY KEY (channel_id, npub),
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_dm_participants_npub ON dm_participants(npub)");
 
 db.run(`
   CREATE TABLE IF NOT EXISTS ai_summaries (
@@ -655,12 +671,45 @@ const insertPersonalChannelStmt = db.query<Channel>(
    RETURNING *`
 );
 
-// Check if user can access a specific private channel
+// DM channel statements
+// Find existing DM channel between two users
+const findDmChannelStmt = db.query<Channel>(
+  `SELECT c.* FROM channels c
+   JOIN dm_participants dp1 ON dp1.channel_id = c.id AND dp1.npub = ?
+   JOIN dm_participants dp2 ON dp2.channel_id = c.id AND dp2.npub = ?
+   LIMIT 1`
+);
+
+// Get all DM channels for a user (with the other participant's npub)
+const listDmChannelsStmt = db.query<Channel & { other_npub: string }>(
+  `SELECT c.*, dp2.npub as other_npub
+   FROM channels c
+   JOIN dm_participants dp1 ON dp1.channel_id = c.id AND dp1.npub = ?
+   JOIN dm_participants dp2 ON dp2.channel_id = c.id AND dp2.npub != ?
+   ORDER BY c.created_at DESC`
+);
+
+// Create DM channel
+const insertDmChannelStmt = db.query<Channel>(
+  `INSERT INTO channels (name, display_name, description, creator, is_public)
+   VALUES (?, ?, 'Direct message', ?, 0)
+   RETURNING *`
+);
+
+// Add DM participant
+const addDmParticipantStmt = db.query<DmParticipant>(
+  `INSERT INTO dm_participants (channel_id, npub) VALUES (?, ?) RETURNING *`
+);
+
+// Check if user can access a specific private channel (includes DM check)
 const canAccessChannelStmt = db.query<{ can_access: number }>(
   `SELECT 1 as can_access FROM channels c
    WHERE c.id = ? AND (
      c.is_public = 1
      OR c.owner_npub = ?
+     OR EXISTS (
+       SELECT 1 FROM dm_participants dp WHERE dp.channel_id = c.id AND dp.npub = ?
+     )
      OR EXISTS (
        SELECT 1 FROM channel_groups cg
        JOIN group_members gm ON gm.group_id = cg.group_id
@@ -734,7 +783,7 @@ export function listAllChannels() {
 }
 
 export function canUserAccessChannel(channelId: number, npub: string): boolean {
-  const result = canAccessChannelStmt.get(channelId, npub, npub);
+  const result = canAccessChannelStmt.get(channelId, npub, npub, npub);
   return result !== undefined;
 }
 
@@ -754,12 +803,44 @@ export function getOrCreatePersonalChannel(npub: string) {
   return channel ?? null;
 }
 
+// DM channel functions
+export function listDmChannels(npub: string) {
+  return listDmChannelsStmt.all(npub, npub);
+}
+
+export function findDmChannel(npub1: string, npub2: string) {
+  return findDmChannelStmt.get(npub1, npub2) as Channel | undefined ?? null;
+}
+
+export function getOrCreateDmChannel(creatorNpub: string, otherNpub: string, displayName: string) {
+  // Check if DM already exists
+  let channel = findDmChannelStmt.get(creatorNpub, otherNpub) as Channel | undefined;
+  if (channel) {
+    return channel;
+  }
+
+  // Create new DM channel
+  const shortHash1 = creatorNpub.slice(-6);
+  const shortHash2 = otherNpub.slice(-6);
+  const name = `dm-${shortHash1}-${shortHash2}`;
+
+  channel = insertDmChannelStmt.get(name, displayName, creatorNpub) as Channel | undefined;
+  if (channel) {
+    // Add both participants
+    addDmParticipantStmt.run(channel.id, creatorNpub);
+    addDmParticipantStmt.run(channel.id, otherNpub);
+  }
+
+  return channel ?? null;
+}
+
 export function resetDatabase() {
   db.run("DELETE FROM todos");
   db.run("DELETE FROM ai_summaries");
   db.run("DELETE FROM channel_groups");
   db.run("DELETE FROM group_members");
   db.run("DELETE FROM groups");
+  db.run("DELETE FROM dm_participants");
   db.run("DELETE FROM channels");
   db.run("DELETE FROM channel_members");
   db.run("DELETE FROM messages");

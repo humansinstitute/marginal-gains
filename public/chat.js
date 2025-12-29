@@ -1,7 +1,7 @@
 import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
 import { loadNostrLibs } from "./nostr.js";
-import { addMessage, getActiveChannelMessages, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateChannelsList, upsertChannel, setChannelMessages } from "./state.js";
+import { addDmChannel, addMessage, getActiveChannelMessages, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateAllChannels, upsertChannel, setChannelMessages } from "./state.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();
@@ -204,6 +204,7 @@ export const initChat = async () => {
   wireComposer();
   wireThreadSidebar();
   wireChannelSettingsModal();
+  wireDmModal();
   updateChannelSettingsCog();
 };
 
@@ -212,17 +213,36 @@ async function fetchChannels() {
   try {
     const res = await fetch("/chat/channels");
     if (!res.ok) return;
-    const channels = await res.json();
-    const mapped = channels.map((ch) => ({
+    const data = await res.json();
+
+    // Map regular channels
+    const channels = (data.channels || []).map((ch) => ({
       id: String(ch.id),
       name: ch.name,
       displayName: ch.display_name,
       description: ch.description,
       isPublic: ch.is_public === 1,
-      ownerNpub: ch.owner_npub || null, // Personal channel owner
     }));
-    // Use updateChannelsList to handle cleanup of removed channels
-    updateChannelsList(mapped);
+
+    // Map DM channels - include other participant's npub for display
+    const dmChannels = (data.dmChannels || []).map((ch) => ({
+      id: String(ch.id),
+      name: ch.name,
+      displayName: ch.display_name,
+      description: ch.description,
+      otherNpub: ch.other_npub || null,
+    }));
+
+    // Map personal channel
+    const personalChannel = data.personalChannel ? {
+      id: String(data.personalChannel.id),
+      name: data.personalChannel.name,
+      displayName: data.personalChannel.display_name,
+      description: data.personalChannel.description,
+    } : null;
+
+    // Update all channels at once
+    updateAllChannels(channels, dmChannels, personalChannel);
   } catch (_err) {
     // Ignore fetch errors
   }
@@ -557,48 +577,70 @@ export const refreshChatUI = () => {
 };
 
 function renderChannels() {
-  if (!el.chatChannelList) return;
-  const allChannels = state.chat.channels;
-
-  // Separate regular channels from personal "Note to self" channel
-  const regularChannels = allChannels.filter((ch) => !ch.ownerNpub);
-  const personalChannel = allChannels.find((ch) => ch.ownerNpub);
-
   // Render regular channels
-  let html = regularChannels
-    .map((channel) => {
-      const isActive = channel.id === state.chat.selectedChannelId;
-      const lockIcon = channel.isPublic ? '' : '<span class="channel-lock" title="Private">&#128274;</span>';
-      return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}">
-        <div class="chat-channel-name">#${escapeHtml(channel.name)} ${lockIcon}</div>
-        <p class="chat-channel-desc">${escapeHtml(channel.displayName)}</p>
-      </button>`;
-    })
-    .join("");
-
-  // Render personal channel at bottom with divider
-  if (personalChannel) {
-    const isActive = personalChannel.id === state.chat.selectedChannelId;
-    html += `
-      <div class="channel-divider"></div>
-      <button class="chat-channel channel-personal${isActive ? " active" : ""}" data-channel-id="${personalChannel.id}">
-        <div class="chat-channel-name"><span class="channel-note-icon" title="Personal notes">&#128221;</span> ${escapeHtml(personalChannel.displayName)}</div>
-        <p class="chat-channel-desc">Your private notes</p>
-      </button>`;
+  if (el.chatChannelList) {
+    const channels = state.chat.channels;
+    el.chatChannelList.innerHTML = channels
+      .map((channel) => {
+        const isActive = channel.id === state.chat.selectedChannelId;
+        const lockIcon = channel.isPublic ? '' : '<span class="channel-lock" title="Private">&#128274;</span>';
+        return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}">
+          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${lockIcon}</div>
+          <p class="chat-channel-desc">${escapeHtml(channel.displayName)}</p>
+        </button>`;
+      })
+      .join("");
   }
 
-  el.chatChannelList.innerHTML = html;
-  el.chatChannelList.querySelectorAll("[data-channel-id]").forEach((btn) => {
+  // Render DM channels
+  if (el.dmList) {
+    const dmChannels = state.chat.dmChannels;
+    if (dmChannels.length === 0) {
+      el.dmList.innerHTML = `<p class="dm-empty">No conversations yet</p>`;
+    } else {
+      el.dmList.innerHTML = dmChannels
+        .map((dm) => {
+          const isActive = dm.id === state.chat.selectedChannelId;
+          const displayName = getDmDisplayName(dm);
+          const avatarUrl = getAuthorAvatarUrl(dm.otherNpub);
+          return `<button class="chat-channel dm-channel${isActive ? " active" : ""}" data-channel-id="${dm.id}">
+            <img class="dm-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
+            <div class="dm-info">
+              <div class="chat-channel-name">${escapeHtml(displayName)}</div>
+            </div>
+          </button>`;
+        })
+        .join("");
+    }
+  }
+
+  // Render personal channel section
+  if (el.personalSection) {
+    const personalChannel = state.chat.personalChannel;
+    if (personalChannel) {
+      const isActive = personalChannel.id === state.chat.selectedChannelId;
+      el.personalSection.innerHTML = `
+        <div class="channel-divider"></div>
+        <button class="chat-channel channel-personal${isActive ? " active" : ""}" data-channel-id="${personalChannel.id}">
+          <div class="chat-channel-name"><span class="channel-note-icon" title="Personal notes">&#128221;</span> ${escapeHtml(personalChannel.displayName)}</div>
+          <p class="chat-channel-desc">Your private notes</p>
+        </button>`;
+    } else {
+      el.personalSection.innerHTML = '';
+    }
+  }
+
+  // Wire up all channel click handlers
+  const allChannelBtns = document.querySelectorAll("[data-channel-id]");
+  allChannelBtns.forEach((btn) => {
     const handler = async () => {
       const channelId = btn.dataset.channelId;
       selectChannel(channelId);
       updateChannelSettingsCog();
       await fetchMessages(channelId);
-      // Always set mobile view - CSS only applies at mobile widths
       setMobileView("messages");
     };
     btn.addEventListener("click", handler);
-    // Safari mobile sometimes needs touchend
     btn.addEventListener("touchend", (e) => {
       e.preventDefault();
       handler();
@@ -606,18 +648,58 @@ function renderChannels() {
   });
 }
 
+// Get display name for a DM channel
+function getDmDisplayName(dm) {
+  if (!dm.otherNpub) return "DM";
+  const user = localUserCache.get(dm.otherNpub);
+  if (user?.display_name || user?.name) {
+    return user.display_name || user.name;
+  }
+  // Fallback to short npub
+  const trimmed = dm.otherNpub.replace(/^npub1/, "");
+  return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`;
+}
+
+// Find channel by ID across all channel types
+function findChannel(channelId) {
+  return (
+    state.chat.channels.find((c) => c.id === channelId) ||
+    state.chat.dmChannels.find((c) => c.id === channelId) ||
+    (state.chat.personalChannel?.id === channelId ? state.chat.personalChannel : null)
+  );
+}
+
 function renderThreads() {
   if (!el.chatThreadList) return;
-  const channel = state.chat.channels.find((c) => c.id === state.chat.selectedChannelId);
+  const channel = findChannel(state.chat.selectedChannelId);
   if (!channel) {
     el.chatThreadList.innerHTML = `<p class="chat-placeholder">Pick or create a channel to start chatting.</p>`;
     setChatHeader("Pick a channel");
     return;
   }
-  setChatHeader(`#${channel.name}`);
+
+  // Determine header based on channel type
+  const isDm = state.chat.dmChannels.some((c) => c.id === channel.id);
+  const isPersonal = state.chat.personalChannel?.id === channel.id;
+  let headerText;
+  let placeholderText;
+
+  if (isDm) {
+    const dmName = getDmDisplayName(channel);
+    headerText = `DM - ${dmName}`;
+    placeholderText = `Start a conversation with ${dmName}`;
+  } else if (isPersonal) {
+    headerText = "Note to self";
+    placeholderText = "Write your first note";
+  } else {
+    headerText = `#${channel.name}`;
+    placeholderText = `Say hello in #${channel.name}`;
+  }
+
+  setChatHeader(headerText);
   const messages = getActiveChannelMessages();
   if (messages.length === 0) {
-    el.chatThreadList.innerHTML = `<p class="chat-placeholder">No messages yet. Say hello in #${channel.name}.</p>`;
+    el.chatThreadList.innerHTML = `<p class="chat-placeholder">No messages yet. ${placeholderText}.</p>`;
     return;
   }
   const byParent = groupByParent(messages);
@@ -1078,4 +1160,117 @@ function wireChannelSettingsModal() {
 
   // Handle form submit
   el.channelSettingsForm?.addEventListener("submit", saveChannelSettings);
+}
+
+// ========== DM Modal ==========
+
+let dmSearchQuery = "";
+
+// Render user list for DM selection
+function renderDmUserList() {
+  if (!el.dmUserList) return;
+
+  const users = Array.from(localUserCache.values());
+  const query = dmSearchQuery.toLowerCase();
+
+  const filtered = query
+    ? users.filter((user) => {
+        const name = (user.display_name || user.name || "").toLowerCase();
+        const npubShort = user.npub?.slice(5, 15)?.toLowerCase() || "";
+        return name.includes(query) || npubShort.includes(query);
+      })
+    : users;
+
+  // Don't show self
+  const selfNpub = state.session?.npub;
+  const otherUsers = filtered.filter((u) => u.npub !== selfNpub).slice(0, 10);
+
+  if (otherUsers.length === 0) {
+    el.dmUserList.innerHTML = `<p class="dm-user-empty">No users found</p>`;
+    return;
+  }
+
+  el.dmUserList.innerHTML = otherUsers
+    .map((user) => {
+      const name = user.display_name || user.name || "Unknown";
+      const avatarUrl = user.picture || `https://robohash.org/${user.pubkey || user.npub}.png?set=set3`;
+      const npubShort = user.npub ? `${user.npub.slice(0, 8)}…${user.npub.slice(-4)}` : "";
+      return `<button type="button" class="dm-user-item" data-dm-target="${escapeHtml(user.npub)}">
+        <img class="dm-user-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
+        <div class="dm-user-info">
+          <span class="dm-user-name">${escapeHtml(name)}</span>
+          <span class="dm-user-npub">${escapeHtml(npubShort)}</span>
+        </div>
+      </button>`;
+    })
+    .join("");
+
+  // Wire up click handlers
+  el.dmUserList.querySelectorAll("[data-dm-target]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const targetNpub = btn.dataset.dmTarget;
+      await createDmWithUser(targetNpub);
+    });
+  });
+}
+
+// Create or open DM with a user
+async function createDmWithUser(targetNpub) {
+  const user = localUserCache.get(targetNpub);
+  const displayName = user?.display_name || user?.name || "DM";
+
+  try {
+    const res = await fetch("/chat/dm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetNpub, displayName: `DM - ${displayName}` }),
+    });
+
+    if (res.ok) {
+      const channel = await res.json();
+      // Add to DM channels and select it
+      addDmChannel({
+        id: String(channel.id),
+        name: channel.name,
+        displayName: channel.display_name,
+        description: channel.description,
+        otherNpub: targetNpub,
+      });
+      selectChannel(String(channel.id));
+      await fetchMessages(String(channel.id));
+      hide(el.dmModal);
+      setMobileView("messages");
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Failed to create DM");
+    }
+  } catch (_err) {
+    console.error("[Chat] Failed to create DM");
+  }
+}
+
+// Wire DM modal
+function wireDmModal() {
+  // Open modal on + New click
+  el.newDmTrigger?.addEventListener("click", () => {
+    if (!state.session) return;
+    dmSearchQuery = "";
+    if (el.dmSearch) el.dmSearch.value = "";
+    renderDmUserList();
+    show(el.dmModal);
+    el.dmSearch?.focus();
+  });
+
+  // Close modal
+  const closeModal = () => hide(el.dmModal);
+  el.closeDmModalBtns?.forEach((btn) => btn.addEventListener("click", closeModal));
+  el.dmModal?.addEventListener("click", (e) => {
+    if (e.target === el.dmModal) closeModal();
+  });
+
+  // Handle search input
+  el.dmSearch?.addEventListener("input", () => {
+    dmSearchQuery = el.dmSearch.value.trim();
+    renderDmUserList();
+  });
 }

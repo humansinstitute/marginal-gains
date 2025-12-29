@@ -15,6 +15,7 @@ import { createAuthHandlers } from "./routes/auth";
 import {
   handleChatPage,
   handleCreateChannel,
+  handleCreateDm,
   handleGetChannel,
   handleGetMe,
   handleGetMessages,
@@ -112,6 +113,7 @@ const server = Bun.serve({
 
         // Chat routes
         if (pathname === "/chat/channels") return handleCreateChannel(req, session);
+        if (pathname === "/chat/dm") return handleCreateDm(req, session);
         if (pathname === "/chat/users") return handleUpdateUser(req, session);
         const sendMessageMatch = pathname.match(/^\/chat\/channels\/(\d+)\/messages$/);
         if (sendMessageMatch) return handleSendMessage(req, session, Number(sendMessageMatch[1]));
