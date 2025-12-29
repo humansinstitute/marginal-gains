@@ -26,7 +26,7 @@ function renderHead() {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Settings - ${APP_NAME}</title>
-  <meta name="theme-color" content="#0f172a" />
+  <meta name="theme-color" content="#6b3a6b" />
   <meta name="application-name" content="${APP_NAME}" />
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

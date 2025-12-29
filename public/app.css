@@ -1209,6 +1209,8 @@ details summary {
   white-space: pre-wrap;
   line-height: 1.5;
   font-size: 0.95rem;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .chat-message-body .mention {
   color: var(--chat-accent);

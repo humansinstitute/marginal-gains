@@ -84,16 +84,16 @@ export function renderMessageBody(body) {
   return html;
 }
 
-// Render message action menu (delete option for author or admin)
+// Render message action menu (copy for all, delete for author or admin)
 export function renderMessageMenu(message) {
   const ctx = getContext();
   const canDelete = ctx.session?.npub === message.author || ctx.isAdmin;
-  if (!canDelete) return "";
 
   return `<div class="message-menu">
     <button class="message-menu-trigger" data-message-menu="${message.id}" aria-label="Message options">&#8942;</button>
     <div class="message-menu-dropdown" data-message-dropdown="${message.id}" hidden>
-      <button class="message-menu-item danger" data-delete-message="${message.id}">Delete</button>
+      <button class="message-menu-item" data-copy-message="${message.id}">Copy</button>
+      ${canDelete ? `<button class="message-menu-item danger" data-delete-message="${message.id}">Delete</button>` : ""}
     </div>
   </div>`;
 }

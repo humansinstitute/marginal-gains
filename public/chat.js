@@ -543,9 +543,10 @@ function wireComposer() {
     }
   });
 
-  // Message menu: toggle dropdown, close others, and handle delete
+  // Message menu: toggle dropdown, close others, and handle copy/delete
   document.addEventListener("click", async (event) => {
     const trigger = event.target.closest("[data-message-menu]");
+    const copyBtn = event.target.closest("[data-copy-message]");
     const deleteBtn = event.target.closest("[data-delete-message]");
 
     // Handle menu trigger click
@@ -559,6 +560,33 @@ function wireComposer() {
       // Toggle this menu
       const dropdown = document.querySelector(`[data-message-dropdown="${id}"]`);
       if (dropdown) dropdown.hidden = !dropdown.hidden;
+      return;
+    }
+
+    // Handle copy button click
+    if (copyBtn) {
+      event.stopPropagation();
+      const messageId = copyBtn.dataset.copyMessage;
+      // Find the message in state
+      const messages = getActiveChannelMessages();
+      const message = messages.find((m) => m.id === messageId);
+      if (message?.body) {
+        try {
+          await navigator.clipboard.writeText(message.body);
+          // Brief visual feedback - change button text temporarily
+          const originalText = copyBtn.textContent;
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyBtn.textContent = originalText;
+          }, 1000);
+        } catch (_err) {
+          alert("Failed to copy to clipboard");
+        }
+      }
+      // Close the menu
+      document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
+        d.hidden = true;
+      });
       return;
     }
 
