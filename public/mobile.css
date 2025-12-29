@@ -1,0 +1,138 @@
+/* Mobile chat - single column view navigation */
+@media (max-width: 768px) {
+  /* Prevent iOS auto-zoom on input focus - inputs must be 16px minimum */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  /* Prevent horizontal overflow on mobile */
+  html,
+  body {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+  body:not(.chat-page) {
+    padding: 1rem;
+  }
+  .chat-layout {
+    display: block !important;
+    height: 100%;
+    width: 100%;
+    max-width: 100vw;
+    overflow: hidden;
+  }
+  /* Hide all panels by default on mobile */
+  .chat-layout .chat-channels-sidebar,
+  .chat-layout .chat-messages-area,
+  .chat-layout .chat-thread-panel {
+    display: none !important;
+    height: 100%;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  /* Show only the active panel */
+  .chat-layout[data-mobile-view="channels"] .chat-channels-sidebar {
+    display: flex !important;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .chat-layout[data-mobile-view="messages"] .chat-messages-area {
+    display: flex !important;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .chat-layout[data-mobile-view="thread"] .chat-thread-panel {
+    display: flex !important;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  /* Show back buttons on mobile */
+  .chat-back-btn {
+    display: flex !important;
+  }
+  /* Adjust header for mobile */
+  .chat-page-header {
+    padding: 0.75rem 1rem;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  .chat-page-header .app-title {
+    font-size: 1.2rem;
+  }
+  .chat-app-shell {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  .chat-nav {
+    gap: 0.5rem;
+  }
+  .chat-nav-link {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.9rem;
+  }
+  /* Ensure inputs don't overflow */
+  input,
+  textarea,
+  select {
+    max-width: 100%;
+  }
+  /* Constrain chat shell on mobile */
+  .chat-shell {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    transform: none;
+    padding: 0.75rem;
+  }
+  /* Constrain composer and messages */
+  .chat-composer {
+    padding: 0.75rem;
+  }
+  .chat-threads {
+    padding: 0.75rem;
+  }
+  .chat-input {
+    width: 100%;
+    min-width: 0;
+  }
+  /* Prevent text overflow */
+  .chat-channel,
+  .chat-channel-name,
+  .chat-channel-desc,
+  .chat-message-body {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    min-width: 0;
+  }
+  /* Constrain channel sidebar content */
+  .chat-channels-sidebar {
+    padding: 0.75rem;
+  }
+  .chat-section-header {
+    flex-wrap: wrap;
+  }
+}
+
+/* Back button - hidden on desktop */
+.chat-back-btn {
+  display: none;
+  align-items: center;
+  gap: 0.25rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0.5rem;
+  margin-right: 0.5rem;
+}
+.chat-back-btn:hover {
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+}
+.chat-back-btn::before {
+  content: "\2190";
+  font-size: 1.1rem;
+}
