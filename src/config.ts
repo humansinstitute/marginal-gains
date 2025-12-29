@@ -10,8 +10,8 @@ export const APP_NAME = "Marginal Gains";
 export const APP_TAG = "marginal-gains";
 export const PUBLIC_DIR = join(import.meta.dir, "../public");
 
-// Admin npubs - comma separated list in env
-export const ADMIN_NPUBS: string[] = (Bun.env.ADMIN_NPUB ?? "")
+// Admin npubs - comma separated list in env (supports both ADMIN_NPUBS and ADMIN_NPUB)
+export const ADMIN_NPUBS: string[] = (Bun.env.ADMIN_NPUBS ?? Bun.env.ADMIN_NPUB ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter((s) => s.startsWith("npub"));
