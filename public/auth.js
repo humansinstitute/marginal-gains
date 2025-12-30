@@ -3,6 +3,7 @@ import {
   AUTO_LOGIN_PUBKEY_KEY,
   DEFAULT_RELAYS,
   EPHEMERAL_SECRET_KEY,
+  ENCRYPTED_SECRET_KEY,
 } from "./constants.js";
 import { closeAvatarMenu, fetchProfile } from "./avatar.js";
 import { elements as el, hide, show } from "./dom.js";
@@ -17,6 +18,8 @@ import {
 import { fetchSummaries } from "./summary.js";
 import { clearError, showError } from "./ui.js";
 import { setSession, setSummaries, state } from "./state.js";
+import { encryptWithPin, decryptWithPin, isSecureContext } from "./pinCrypto.js";
+import { initPinModal, promptForPin, promptForNewPin } from "./pinModal.js";
 
 let autoLoginAttempted = false;
 
@@ -25,6 +28,7 @@ export const initAuth = () => {
   wireForms();
   wireMenuButtons();
   wireQrModal();
+  initPinModal();
 
   if (state.session) {
     void fetchSummaries();
@@ -92,14 +96,40 @@ const wireForms = () => {
   secretForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const input = secretForm.querySelector("input[name='secret']");
-    if (!input?.value.trim()) {
+    const nsec = input?.value.trim();
+    if (!nsec) {
       showError("Paste an nsec secret key to continue.");
       return;
     }
+
+    // Check for secure context before PIN encryption
+    if (!isSecureContext()) {
+      showError("PIN encryption requires HTTPS. Please access via https:// or localhost.");
+      return;
+    }
+
+    // Prompt for PIN to encrypt the secret
+    const pin = await promptForNewPin();
+    if (!pin) {
+      showError("PIN is required to securely store your key.");
+      return;
+    }
+
     secretForm.classList.add("is-busy");
     clearError();
     try {
-      const signedEvent = await signLoginEvent("secret", input.value.trim());
+      // Decode and validate nsec
+      const { nip19 } = await loadNostrLibs();
+      const secretBytes = decodeNsec(nip19, nsec);
+      const secretHex = bytesToHex(secretBytes);
+
+      // Encrypt and store the secret
+      const encrypted = await encryptWithPin(secretHex, pin);
+      localStorage.setItem(ENCRYPTED_SECRET_KEY, encrypted);
+      localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "secret");
+
+      // Sign in
+      const signedEvent = await signLoginEvent("secret", nsec);
       await completeLogin("secret", signedEvent);
       input.value = "";
     } catch (err) {
@@ -216,20 +246,75 @@ const checkFragmentLogin = async () => {
 const maybeAutoLogin = async () => {
   if (autoLoginAttempted || state.session) return;
   autoLoginAttempted = true;
+
   const method = localStorage.getItem(AUTO_LOGIN_METHOD_KEY);
-  const hasSecret = !!localStorage.getItem(EPHEMERAL_SECRET_KEY);
-  if (method !== "ephemeral" || !hasSecret) {
-    autoLoginAttempted = false;
+
+  // Handle ephemeral auto-login
+  if (method === "ephemeral") {
+    const hasSecret = !!localStorage.getItem(EPHEMERAL_SECRET_KEY);
+    if (!hasSecret) {
+      autoLoginAttempted = false;
+      return;
+    }
+    try {
+      const signedEvent = await signLoginEvent("ephemeral");
+      await completeLogin("ephemeral", signedEvent);
+    } catch (err) {
+      console.error("Auto login failed", err);
+      clearAutoLogin();
+      autoLoginAttempted = false;
+    }
     return;
   }
-  try {
-    const signedEvent = await signLoginEvent("ephemeral");
-    await completeLogin("ephemeral", signedEvent);
-  } catch (err) {
-    console.error("Auto login failed", err);
-    clearAutoLogin();
-    autoLoginAttempted = false;
+
+  // Handle PIN-protected secret auto-login
+  if (method === "secret") {
+    const encryptedSecret = localStorage.getItem(ENCRYPTED_SECRET_KEY);
+    if (!encryptedSecret) {
+      autoLoginAttempted = false;
+      return;
+    }
+
+    // Check for secure context before PIN decryption
+    if (!isSecureContext()) {
+      console.warn("[Auth] PIN decryption requires HTTPS");
+      autoLoginAttempted = false;
+      return;
+    }
+
+    // Prompt for PIN
+    const pin = await promptForPin({
+      title: "Welcome back",
+      subtitle: "Enter your PIN to unlock",
+    });
+
+    if (!pin) {
+      autoLoginAttempted = false;
+      return;
+    }
+
+    try {
+      const secretHex = await decryptWithPin(encryptedSecret, pin);
+      if (!secretHex) {
+        // Wrong PIN - let them try again
+        autoLoginAttempted = false;
+        showError("Wrong PIN. Try again.");
+        return;
+      }
+
+      // Convert hex to bytes for signing
+      const secretBytes = hexToBytes(secretHex);
+      const { pure } = await loadNostrLibs();
+      const signedEvent = pure.finalizeEvent(buildUnsignedEvent("secret"), secretBytes);
+      await completeLogin("secret", signedEvent);
+    } catch (err) {
+      console.error("Auto login with PIN failed", err);
+      autoLoginAttempted = false;
+    }
+    return;
   }
+
+  autoLoginAttempted = false;
 };
 
 const signLoginEvent = async (method, supplemental) => {
@@ -295,6 +380,9 @@ const completeLogin = async (method, event) => {
   if (method === "ephemeral") {
     localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "ephemeral");
     localStorage.setItem(AUTO_LOGIN_PUBKEY_KEY, session.pubkey);
+  } else if (method === "secret") {
+    // Keep encrypted secret - it was stored during login
+    localStorage.setItem(AUTO_LOGIN_PUBKEY_KEY, session.pubkey);
   } else {
     clearAutoLogin();
   }
@@ -358,4 +446,5 @@ const handleExportSecret = async () => {
 const clearAutoLogin = () => {
   localStorage.removeItem(AUTO_LOGIN_METHOD_KEY);
   localStorage.removeItem(AUTO_LOGIN_PUBKEY_KEY);
+  localStorage.removeItem(ENCRYPTED_SECRET_KEY);
 };

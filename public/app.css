@@ -723,6 +723,107 @@ summary::-webkit-details-marker {
   border-radius: 8px;
 }
 
+/* PIN Modal */
+.pin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(8px);
+}
+.pin-modal-overlay[hidden] {
+  display: none;
+}
+.pin-modal {
+  background: var(--chat-surface);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  text-align: center;
+  max-width: 320px;
+  width: 90%;
+  color: var(--chat-text);
+}
+.pin-modal h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  color: var(--chat-text);
+}
+.pin-modal p {
+  margin: 0 0 1.5rem;
+  color: var(--chat-text-muted);
+  font-size: 0.9rem;
+}
+.pin-display {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.pin-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--chat-text-muted);
+  background: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pin-dot.filled {
+  background: var(--chat-accent);
+  border-color: var(--chat-accent);
+}
+.pin-error {
+  color: #ef4444;
+  font-size: 0.85rem;
+  margin: -1rem 0 1rem;
+}
+.pin-error[hidden] {
+  display: none;
+}
+.pin-numpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.pin-key {
+  padding: 1rem;
+  font-size: 1.5rem;
+  font-weight: 500;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--chat-border);
+  color: var(--chat-text);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.pin-key:hover {
+  background: var(--chat-accent);
+}
+.pin-key:active {
+  transform: scale(0.95);
+}
+.pin-key-action {
+  font-size: 1.25rem;
+  background: var(--chat-bg);
+}
+.pin-cancel {
+  padding: 0.75rem 1.5rem;
+  font-size: 0.9rem;
+  border: 1px solid var(--chat-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--chat-text-muted);
+  cursor: pointer;
+}
+.pin-cancel:hover {
+  background: var(--chat-border);
+  color: var(--chat-text);
+}
+
 /* Profile modal */
 .profile-modal-overlay {
   position: fixed;

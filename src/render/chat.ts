@@ -1,8 +1,8 @@
 import { APP_NAME } from "../config";
-import { renderAppMenu } from "./components";
-import type { Session } from "../types";
+import { renderAppMenu, renderPinModal } from "./components";
+import type { DeepLink, Session } from "../types";
 
-export function renderChatPage(session: Session | null) {
+export function renderChatPage(session: Session | null, deepLink?: DeepLink) {
   return `<!doctype html>
 <html lang="en">
 ${renderHead()}
@@ -11,7 +11,7 @@ ${renderHead()}
     ${renderChatHeader(session)}
     ${session ? renderChatContent() : renderAuthRequired()}
   </main>
-  ${renderSessionSeed(session)}
+  ${renderSessionSeed(session, deepLink)}
   <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>`;
@@ -285,13 +285,15 @@ function renderAuthRequired() {
       </section>
     </div>
     ${renderQrModal()}
+    ${renderPinModal()}
   </section>`;
 }
 
-function renderSessionSeed(session: Session | null) {
+function renderSessionSeed(session: Session | null, deepLink?: DeepLink) {
   return `<script>
     window.__NOSTR_SESSION__ = ${JSON.stringify(session ?? null)};
     window.__CHAT_PAGE__ = true;
+    window.__DEEP_LINK__ = ${JSON.stringify(deepLink ?? null)};
   </script>`;
 }
 

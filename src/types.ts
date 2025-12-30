@@ -22,3 +22,7 @@ export type NotificationPayload = {
   tag?: string;
   data?: Record<string, unknown>;
 };
+
+export type DeepLink =
+  | { type: "channel"; slug: string }
+  | { type: "dm"; id: number };

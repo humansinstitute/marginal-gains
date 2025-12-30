@@ -1,4 +1,5 @@
 import { APP_NAME } from "../config";
+import { renderPinModal } from "./components";
 
 export function renderLandingPage() {
   return `<!doctype html>
@@ -10,6 +11,7 @@ ${renderHead()}
     ${renderWelcome()}
     ${renderAuth()}
     ${renderQrModal()}
+    ${renderPinModal()}
   </main>
   ${renderSessionSeed()}
   <script type="module" src="/app.js?v=3"></script>

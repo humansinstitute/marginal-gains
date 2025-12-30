@@ -29,6 +29,50 @@ let openThreadId = null;
 // Track if we should scroll to bottom (only on initial load or explicit action)
 let shouldScrollToBottom = false;
 
+// Update browser URL to reflect current channel (for deep linking)
+function updateChatUrl(channelId) {
+  if (!channelId) {
+    history.replaceState(null, "", "/chat");
+    return;
+  }
+
+  // Find the channel to determine type and slug
+  const channel = state.chat.channels.find((c) => c.id === channelId);
+  const dm = state.chat.dmChannels.find((c) => c.id === channelId);
+  const personal = state.chat.personalChannel?.id === channelId ? state.chat.personalChannel : null;
+
+  let url = "/chat";
+  if (channel) {
+    url = `/chat/channel/${encodeURIComponent(channel.name)}`;
+  } else if (dm) {
+    url = `/chat/dm/${channelId}`;
+  } else if (personal) {
+    url = `/chat/channel/${encodeURIComponent(personal.name)}`;
+  }
+
+  // Use replaceState to avoid cluttering history
+  history.replaceState(null, "", url);
+}
+
+// Handle deep link from server (e.g., /chat/channel/general or /chat/dm/123)
+function handleDeepLink() {
+  const deepLink = window.__DEEP_LINK__;
+  if (!deepLink) return null;
+
+  if (deepLink.type === "channel") {
+    // Find channel by slug/name
+    const channel = state.chat.channels.find((c) => c.name === deepLink.slug);
+    const personal = state.chat.personalChannel?.name === deepLink.slug ? state.chat.personalChannel : null;
+    return channel?.id || personal?.id || null;
+  } else if (deepLink.type === "dm") {
+    // Find DM by ID
+    const dm = state.chat.dmChannels.find((c) => c.id === String(deepLink.id));
+    return dm?.id || null;
+  }
+
+  return null;
+}
+
 // Set up mobile keyboard handling using visualViewport API
 function setupMobileKeyboardHandler() {
   if (!window.visualViewport) return;
@@ -396,6 +440,18 @@ export const initChat = async () => {
 
     // Fetch channels via HTTP first (more reliable than SSE for initial load)
     await fetchChannels();
+
+    // Handle deep link if present (e.g., /chat/channel/general)
+    const deepLinkChannelId = handleDeepLink();
+    if (deepLinkChannelId) {
+      selectChannel(deepLinkChannelId);
+      await fetchMessages(deepLinkChannelId);
+    } else if (state.chat.selectedChannelId) {
+      // Update URL to reflect default selected channel
+      updateChatUrl(state.chat.selectedChannelId);
+      await fetchMessages(state.chat.selectedChannelId);
+    }
+
     renderChannels();
 
     // Set up live update event handlers
@@ -556,6 +612,7 @@ function wireChannelModal() {
           isPublic: created.is_public === 1,
         });
         selectChannel(String(created.id));
+        updateChatUrl(String(created.id));
       } else {
         const err = await res.json().catch(() => ({}));
         console.error('[Chat] Failed to create channel:', err.error || res.status);
@@ -795,6 +852,7 @@ function renderChannels() {
     const handler = async () => {
       const channelId = btn.dataset.channelId;
       selectChannel(channelId);
+      updateChatUrl(channelId);
       updateChannelSettingsCog();
       await fetchMessages(channelId);
       setMobileView("messages");
@@ -1368,6 +1426,7 @@ async function createDmWithUser(targetNpub) {
         otherNpub: targetNpub,
       });
       selectChannel(String(channel.id));
+      updateChatUrl(String(channel.id));
       await fetchMessages(String(channel.id));
       hide(el.dmModal);
       setMobileView("messages");

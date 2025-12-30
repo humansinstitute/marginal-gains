@@ -1,5 +1,5 @@
 import { APP_NAME } from "../config";
-import { renderAppMenu } from "./components";
+import { renderAppMenu, renderPinModal } from "./components";
 import { ALLOWED_STATE_TRANSITIONS, formatPriorityLabel, formatStateLabel } from "../domain/todos";
 import { escapeHtml } from "../utils/html";
 
@@ -41,6 +41,7 @@ ${renderHead()}
     ${renderSummaries()}
     ${renderQrModal()}
     ${renderProfileModal()}
+    ${renderPinModal()}
   </main>
   ${renderSessionSeed(session)}
   <script type="module" src="/app.js?v=3"></script>

@@ -96,8 +96,12 @@ const server = Bun.serve({
         if (aiTasksMatch) return handleAiTasks(url, aiTasksMatch);
         if (pathname === "/ai/summary/latest") return handleLatestSummary(url);
 
-        // Chat routes
+        // Chat routes - support deep linking to channels/DMs
         if (pathname === "/chat") return handleChatPage(session);
+        const chatChannelMatch = pathname.match(/^\/chat\/channel\/([^/]+)$/);
+        if (chatChannelMatch) return handleChatPage(session, { type: "channel", slug: chatChannelMatch[1] });
+        const chatDmMatch = pathname.match(/^\/chat\/dm\/(\d+)$/);
+        if (chatDmMatch) return handleChatPage(session, { type: "dm", id: Number(chatDmMatch[1]) });
         if (pathname === "/chat/events") return handleChatEvents(req, session);
         if (pathname === "/chat/channels") return handleListChannels(session);
         if (pathname === "/chat/users") return handleListUsers(session);

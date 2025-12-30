@@ -13,14 +13,14 @@ import {
 import { broadcast } from "../services/events";
 import { notifyChannelMessage } from "../services/push";
 
-import type { Session } from "../types";
+import type { DeepLink, Session } from "../types";
 
 function forbidden(message = "Forbidden") {
   return jsonResponse({ error: message }, 403);
 }
 
-export function handleChatPage(session: Session | null) {
-  const page = renderChatPage(session);
+export function handleChatPage(session: Session | null, deepLink?: DeepLink) {
+  const page = renderChatPage(session, deepLink);
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
@@ -262,11 +262,18 @@ export async function handleSendMessage(req: Request, session: Session | null, c
     recipientNpubs,
   });
 
+  // Determine the deep link URL based on channel type
+  const dmParticipantsForUrl = getDmParticipants(channelId);
+  const isDm = dmParticipantsForUrl.length > 0;
+  const pushUrl = isDm
+    ? `/chat/dm/${channelId}`
+    : `/chat/channel/${encodeURIComponent(channel.name)}`;
+
   // Send push notifications to users with "on_update" frequency (async, don't await)
   notifyChannelMessage(recipientNpubs, session.npub, {
     title: channel.display_name || channel.name,
     body: content.length > 100 ? content.slice(0, 100) + "..." : content,
-    url: `/chat?channel=${channelId}`,
+    url: pushUrl,
     tag: `channel-${channelId}`,
   }).catch((err) => console.error("[Push] Failed to send notifications:", err));
 
