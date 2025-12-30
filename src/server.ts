@@ -5,6 +5,7 @@ import {
   LOGIN_EVENT_KIND,
   LOGIN_MAX_AGE_SECONDS,
   PORT,
+  PUSH_CONTACT_EMAIL,
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
 } from "./config";
@@ -44,8 +45,17 @@ import { handleChatEvents } from "./routes/events";
 import { handleHome, handleTodos } from "./routes/home";
 import { handleAssetUpload, serveAsset } from "./routes/assets";
 import { handleSettings } from "./routes/settings";
-import { handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
+import {
+  handleGetPushStatus,
+  handleGetVapidPublicKey,
+  handlePushSubscribe,
+  handlePushUnsubscribe,
+  handlePushUpdateFrequency,
+  handleSendTestNotification,
+} from "./routes/push";
+import { handleApiTodoState, handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
 import { AuthService } from "./services/auth";
+import { initPushService } from "./services/push";
 import { serveStatic } from "./static";
 
 const authService = new AuthService(
@@ -58,6 +68,13 @@ const authService = new AuthService(
 );
 
 const { login, logout, sessionFromRequest } = createAuthHandlers(authService, SESSION_COOKIE);
+
+// Initialize push notification service
+try {
+  initPushService(PUSH_CONTACT_EMAIL);
+} catch (err) {
+  console.error("[Push] Failed to initialize push service:", err);
+}
 
 const server = Bun.serve({
   port: PORT,
@@ -102,6 +119,10 @@ const server = Bun.serve({
         if (pathname === "/") return handleHome(session);
         if (pathname === "/todo") return handleTodos(url, session);
         if (pathname === "/settings") return handleSettings(session);
+
+        // Push notification routes
+        if (pathname === "/api/push/vapid-public-key") return handleGetVapidPublicKey();
+        if (pathname === "/api/push/status") return handleGetPushStatus(session);
       }
 
       if (req.method === "POST") {
@@ -117,6 +138,10 @@ const server = Bun.serve({
 
         const stateMatch = pathname.match(/^\/todos\/(\d+)\/state$/);
         if (stateMatch) return handleTodoState(req, session, Number(stateMatch[1]));
+
+        // API endpoint for Kanban drag-drop (JSON)
+        const apiStateMatch = pathname.match(/^\/api\/todos\/(\d+)\/state$/);
+        if (apiStateMatch) return handleApiTodoState(req, session, Number(apiStateMatch[1]));
 
         const deleteMatch = pathname.match(/^\/todos\/(\d+)\/delete$/);
         if (deleteMatch) return handleTodoDelete(session, Number(deleteMatch[1]));
@@ -134,6 +159,11 @@ const server = Bun.serve({
         if (pathname === "/chat/groups") return handleCreateGroup(req, session);
         const addGroupMembersMatch = pathname.match(/^\/chat\/groups\/(\d+)\/members$/);
         if (addGroupMembersMatch) return handleAddGroupMembers(req, session, Number(addGroupMembersMatch[1]));
+
+        // Push notification routes
+        if (pathname === "/api/push/subscribe") return handlePushSubscribe(req, session);
+        if (pathname === "/api/push/unsubscribe") return handlePushUnsubscribe(req, session);
+        if (pathname === "/api/push/test") return handleSendTestNotification(session);
       }
 
       if (req.method === "PATCH") {
@@ -141,6 +171,9 @@ const server = Bun.serve({
         if (updateChannelMatch) return handleUpdateChannel(req, session, Number(updateChannelMatch[1]));
         const updateGroupMatch = pathname.match(/^\/chat\/groups\/(\d+)$/);
         if (updateGroupMatch) return handleUpdateGroup(req, session, Number(updateGroupMatch[1]));
+
+        // Push notification routes
+        if (pathname === "/api/push/frequency") return handlePushUpdateFrequency(req, session);
       }
 
       if (req.method === "DELETE") {

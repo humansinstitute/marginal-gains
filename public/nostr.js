@@ -2,11 +2,11 @@ import { APP_TAG, LOGIN_KIND } from "./constants.js";
 
 export const loadNostrLibs = async () => {
   if (!window.__NOSTR_LIBS__) {
-    const base = "https://esm.sh/nostr-tools@2.7.2?bundle";
+    const base = "https://esm.sh/nostr-tools@2.7.2";
     window.__NOSTR_LIBS__ = {
-      pure: await import(`${base}/pure`),
-      nip19: await import(`${base}/nip19`),
-      nip46: await import(`${base}/nip46`),
+      pure: await import(`${base}/pure?bundle`),
+      nip19: await import(`${base}/nip19?bundle`),
+      nip46: await import(`${base}/nip46?bundle`),
     };
   }
   return window.__NOSTR_LIBS__;
@@ -43,14 +43,32 @@ export const hexToBytes = (hex) => {
 export const bytesToHex = (bytes) => Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 
 export const decodeNsec = (nip19, input) => {
+  // Validate input format first
+  if (!input || typeof input !== "string") {
+    throw new Error("Please enter an nsec key.");
+  }
+
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("nsec1")) {
+    throw new Error("Key must start with 'nsec1'. Got: " + trimmed.slice(0, 10) + "...");
+  }
+
+  // nsec keys are 63 characters (nsec1 + 58 chars)
+  if (trimmed.length !== 63) {
+    throw new Error(`Invalid nsec length: ${trimmed.length} chars (expected 63).`);
+  }
+
   try {
-    const decoded = nip19.decode(input);
-    if (decoded.type !== "nsec" || !decoded.data) throw new Error("Not a valid nsec key.");
+    const decoded = nip19.decode(trimmed);
+    if (decoded.type !== "nsec" || !decoded.data) {
+      throw new Error("Decoded but not a valid nsec key.");
+    }
     if (decoded.data instanceof Uint8Array) return decoded.data;
     if (Array.isArray(decoded.data)) return new Uint8Array(decoded.data);
     throw new Error("Unable to read nsec payload.");
-  } catch (_err) {
-    throw new Error("Invalid nsec key.");
+  } catch (err) {
+    // Preserve original error message for debugging
+    throw new Error(err.message || "Failed to decode nsec key.");
   }
 };
 

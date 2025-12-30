@@ -70,6 +70,11 @@ export const elements = {
   chatLayout: document.querySelector("[data-chat-layout]"),
   backToChannelsBtn: document.querySelector("[data-back-to-channels]"),
   backToMessagesBtn: document.querySelector("[data-back-to-messages]"),
+  // Kanban view elements
+  listView: document.querySelector("[data-list-view]"),
+  kanbanView: document.querySelector("[data-kanban-view]"),
+  viewSwitcher: document.querySelector("[data-view-switcher]"),
+  kanbanBoard: document.querySelector("[data-kanban-board]"),
   // Channel settings elements
   channelSettingsBtn: document.querySelector("[data-channel-settings]"),
   channelSettingsModal: document.querySelector("[data-channel-settings-modal]"),

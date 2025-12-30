@@ -1,13 +1,12 @@
-import { isAdmin } from "../config";
 import { renderSettingsPage } from "../render/settings";
 import type { Session } from "../types";
 
 export function handleSettings(session: Session | null) {
-  // Redirect non-admins to chat
-  if (!session || !isAdmin(session.npub)) {
+  // Redirect unauthenticated users to home
+  if (!session) {
     return new Response(null, {
       status: 302,
-      headers: { Location: "/chat" },
+      headers: { Location: "/" },
     });
   }
 

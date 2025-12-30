@@ -1,7 +1,7 @@
 import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
 import { loadNostrLibs } from "./nostr.js";
-import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent } from "./liveUpdates.js";
+import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent, getConnectionState } from "./liveUpdates.js";
 import { addDmChannel, addMessage, getActiveChannelMessages, removeMessageFromChannel, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateAllChannels, upsertChannel, setChannelMessages, refreshUI } from "./state.js";
 import { init as initMentions, handleMentionInput, handleMentionKeydown, closeMentionPopup } from "./mentions.js";
 import { wirePasteAndDrop } from "./uploads.js";
@@ -28,6 +28,56 @@ let openThreadId = null;
 
 // Track if we should scroll to bottom (only on initial load or explicit action)
 let shouldScrollToBottom = false;
+
+// Set up mobile keyboard handling using visualViewport API
+function setupMobileKeyboardHandler() {
+  if (!window.visualViewport) return;
+
+  const appShell = document.querySelector(".chat-app-shell");
+  if (!appShell) return;
+
+  let isKeyboardOpen = false;
+
+  const updateLayout = () => {
+    const vv = window.visualViewport;
+    const fullHeight = window.innerHeight;
+    const visibleHeight = vv.height;
+
+    // Detect if keyboard is open (visible height significantly less than full height)
+    const keyboardOpen = fullHeight - visibleHeight > 150;
+
+    if (keyboardOpen && !isKeyboardOpen) {
+      // Keyboard just opened - switch to fixed positioning
+      isKeyboardOpen = true;
+      appShell.style.position = "fixed";
+      appShell.style.top = `${vv.offsetTop}px`;
+      appShell.style.left = "0";
+      appShell.style.right = "0";
+      appShell.style.height = `${visibleHeight}px`;
+      appShell.style.bottom = "auto";
+    } else if (keyboardOpen) {
+      // Keyboard still open - update position
+      appShell.style.top = `${vv.offsetTop}px`;
+      appShell.style.height = `${visibleHeight}px`;
+    } else if (!keyboardOpen && isKeyboardOpen) {
+      // Keyboard closed - restore normal positioning
+      isKeyboardOpen = false;
+      appShell.style.position = "";
+      appShell.style.top = "";
+      appShell.style.left = "";
+      appShell.style.right = "";
+      appShell.style.height = "";
+      appShell.style.bottom = "";
+    }
+  };
+
+  // Update on viewport resize (keyboard show/hide)
+  window.visualViewport.addEventListener("resize", updateLayout);
+  window.visualViewport.addEventListener("scroll", updateLayout);
+
+  // Set initial layout
+  updateLayout();
+}
 
 // Scroll a container to the bottom
 function scrollToBottom(container) {
@@ -341,6 +391,13 @@ export const initChat = async () => {
     show(el.chatShell);
     setChatEnabled(true);
 
+    // Set up mobile keyboard handling (adjusts layout when keyboard appears)
+    setupMobileKeyboardHandler();
+
+    // Fetch channels via HTTP first (more reliable than SSE for initial load)
+    await fetchChannels();
+    renderChannels();
+
     // Set up live update event handlers
     setupLiveUpdateHandlers();
 
@@ -351,7 +408,7 @@ export const initChat = async () => {
       }
     });
 
-    // Connect to SSE - this will provide initial sync and live updates
+    // Connect to SSE for live updates only
     await connectLiveUpdates();
 
     // Fetch messages for initially selected channel (if any)
@@ -663,6 +720,22 @@ export const refreshChatUI = () => {
 };
 
 function renderChannels() {
+  // Render connection status indicator
+  const sectionHeader = document.querySelector(".chat-section-header");
+  if (sectionHeader) {
+    let indicator = sectionHeader.querySelector(".sse-indicator");
+    if (!indicator) {
+      indicator = document.createElement("span");
+      indicator.className = "sse-indicator";
+      indicator.title = "Live connection status";
+      sectionHeader.appendChild(indicator);
+    }
+    const connState = getConnectionState();
+    indicator.textContent = connState === "connected" ? "●" : connState === "connecting" ? "○" : "○";
+    indicator.style.color = connState === "connected" ? "#4a4" : connState === "connecting" ? "#aa4" : "#a44";
+    indicator.title = `SSE: ${connState}`;
+  }
+
   // Render regular channels
   if (el.chatChannelList) {
     const channels = state.chat.channels;

@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 
-import type { TodoPriority, TodoState } from "./types";
+import type { NotificationFrequency, TodoPriority, TodoState } from "./types";
 
 export type Todo = {
   id: number;
@@ -84,6 +84,26 @@ export type GroupMember = {
 export type ChannelGroup = {
   channel_id: number;
   group_id: number;
+};
+
+export type PushSubscription = {
+  id: number;
+  npub: string;
+  endpoint: string;
+  p256dh_key: string;
+  auth_key: string;
+  frequency: NotificationFrequency;
+  created_at: string;
+  last_sent_at: string | null;
+  is_active: number;
+};
+
+export type VapidConfig = {
+  id: number;
+  public_key: string;
+  private_key: string;
+  contact_email: string;
+  created_at: string;
 };
 
 const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "marginal-gains.sqlite";
@@ -266,6 +286,35 @@ db.run(`
 db.run("CREATE INDEX IF NOT EXISTS idx_channel_groups_channel ON channel_groups(channel_id)");
 db.run("CREATE INDEX IF NOT EXISTS idx_channel_groups_group ON channel_groups(group_id)");
 db.run("CREATE INDEX IF NOT EXISTS idx_group_members_npub ON group_members(npub)");
+
+// Push notification subscriptions
+db.run(`
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    npub TEXT NOT NULL,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh_key TEXT NOT NULL,
+    auth_key TEXT NOT NULL,
+    frequency TEXT NOT NULL DEFAULT 'on_update',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_sent_at TEXT,
+    is_active INTEGER DEFAULT 1,
+    UNIQUE(npub, endpoint)
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_push_subs_npub ON push_subscriptions(npub)");
+db.run("CREATE INDEX IF NOT EXISTS idx_push_subs_active ON push_subscriptions(is_active, frequency)");
+
+// VAPID keys (singleton table)
+db.run(`
+  CREATE TABLE IF NOT EXISTS vapid_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    public_key TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    contact_email TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
 const listByOwnerStmt = db.query<Todo>(
   "SELECT * FROM todos WHERE deleted = 0 AND owner = ? ORDER BY created_at DESC"
@@ -860,6 +909,96 @@ export function getOrCreateDmChannel(creatorNpub: string, otherNpub: string, dis
   return channel ?? null;
 }
 
+// VAPID statements
+const getVapidConfigStmt = db.query<VapidConfig>(
+  "SELECT * FROM vapid_config WHERE id = 1"
+);
+const insertVapidConfigStmt = db.query<VapidConfig>(
+  `INSERT INTO vapid_config (id, public_key, private_key, contact_email)
+   VALUES (1, ?, ?, ?)
+   RETURNING *`
+);
+
+// Push subscription statements
+const getPushSubByEndpointStmt = db.query<PushSubscription>(
+  "SELECT * FROM push_subscriptions WHERE endpoint = ?"
+);
+const getPushSubsForNpubStmt = db.query<PushSubscription>(
+  "SELECT * FROM push_subscriptions WHERE npub = ? AND is_active = 1"
+);
+const getActivePushSubsStmt = db.query<PushSubscription>(
+  "SELECT * FROM push_subscriptions WHERE is_active = 1"
+);
+const getActivePushSubsByFreqStmt = db.query<PushSubscription>(
+  "SELECT * FROM push_subscriptions WHERE is_active = 1 AND frequency = ?"
+);
+const upsertPushSubStmt = db.query<PushSubscription>(
+  `INSERT INTO push_subscriptions (npub, endpoint, p256dh_key, auth_key, frequency)
+   VALUES (?, ?, ?, ?, ?)
+   ON CONFLICT(npub, endpoint) DO UPDATE SET
+     p256dh_key = excluded.p256dh_key,
+     auth_key = excluded.auth_key,
+     frequency = excluded.frequency,
+     is_active = 1
+   RETURNING *`
+);
+const updatePushSubFreqStmt = db.query<PushSubscription>(
+  `UPDATE push_subscriptions SET frequency = ? WHERE npub = ? AND endpoint = ? RETURNING *`
+);
+const deactivatePushSubStmt = db.query(
+  "UPDATE push_subscriptions SET is_active = 0 WHERE endpoint = ?"
+);
+const updatePushSubLastSentStmt = db.query(
+  "UPDATE push_subscriptions SET last_sent_at = CURRENT_TIMESTAMP WHERE id = ?"
+);
+
+// VAPID functions
+export function getVapidConfig() {
+  return getVapidConfigStmt.get() as VapidConfig | undefined ?? null;
+}
+
+export function createVapidConfig(publicKey: string, privateKey: string, contactEmail: string) {
+  return insertVapidConfigStmt.get(publicKey, privateKey, contactEmail) as VapidConfig | undefined ?? null;
+}
+
+// Push subscription functions
+export function getPushSubscriptionByEndpoint(endpoint: string) {
+  return getPushSubByEndpointStmt.get(endpoint) as PushSubscription | undefined ?? null;
+}
+
+export function getPushSubscriptionsForUser(npub: string) {
+  return getPushSubsForNpubStmt.all(npub);
+}
+
+export function getActivePushSubscriptions(frequency?: NotificationFrequency) {
+  if (frequency) {
+    return getActivePushSubsByFreqStmt.all(frequency);
+  }
+  return getActivePushSubsStmt.all();
+}
+
+export function upsertPushSubscription(
+  npub: string,
+  endpoint: string,
+  p256dhKey: string,
+  authKey: string,
+  frequency: NotificationFrequency
+) {
+  return upsertPushSubStmt.get(npub, endpoint, p256dhKey, authKey, frequency) as PushSubscription | undefined ?? null;
+}
+
+export function updatePushSubscriptionFrequency(npub: string, endpoint: string, frequency: NotificationFrequency) {
+  return updatePushSubFreqStmt.get(frequency, npub, endpoint) as PushSubscription | undefined ?? null;
+}
+
+export function deactivatePushSubscription(endpoint: string) {
+  deactivatePushSubStmt.run(endpoint);
+}
+
+export function markPushSubscriptionSent(id: number) {
+  updatePushSubLastSentStmt.run(id);
+}
+
 export function resetDatabase() {
   db.run("DELETE FROM todos");
   db.run("DELETE FROM ai_summaries");
@@ -873,7 +1012,9 @@ export function resetDatabase() {
   db.run("DELETE FROM message_mentions");
   db.run("DELETE FROM message_reactions");
   db.run("DELETE FROM users");
+  db.run("DELETE FROM push_subscriptions");
+  // Note: vapid_config is intentionally NOT reset to preserve VAPID keys
   db.run(
-    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups')"
+    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions')"
   );
 }

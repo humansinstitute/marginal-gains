@@ -25,6 +25,8 @@
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
+  position: relative;
+  z-index: 50;
 }
 .settings-header .header-left {
   display: flex;
@@ -267,4 +269,86 @@
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
+}
+
+/* Notification Settings */
+.notification-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.notification-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.notification-option:hover {
+  border-color: var(--text);
+}
+
+.notification-option.selected {
+  border-color: var(--text);
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.notification-option input[type="radio"] {
+  margin-top: 0.25rem;
+  accent-color: var(--text);
+}
+
+.notification-option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.notification-option-label {
+  font-weight: 500;
+}
+
+.notification-option-desc {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.notification-disable {
+  margin-top: 1rem;
+  color: #dc3545;
+  border-color: #dc3545;
+}
+
+.notification-disable:hover {
+  background-color: rgba(220, 53, 69, 0.05);
+}
+
+.notification-status {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.notification-status.success {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.notification-status.error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.notification-unsupported {
+  padding: 1rem;
+  background-color: #fff3cd;
+  border-radius: var(--radius-md);
+  color: #856404;
 }

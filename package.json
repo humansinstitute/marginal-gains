@@ -15,11 +15,13 @@
     "applesauce-relay": "4.0.0",
     "bun-types": "latest",
     "nostr-tools": "2.7.2",
-    "rxjs": "7.8.1"
+    "rxjs": "7.8.1",
+    "web-push": "^3.6.7"
   },
   "type": "module",
   "license": "MIT",
   "devDependencies": {
+    "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "^8.48.0",
     "@typescript-eslint/parser": "^8.48.0",
     "eslint": "^9.39.1",

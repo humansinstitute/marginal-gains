@@ -1,4 +1,5 @@
-import { APP_NAME, isAdmin } from "../config";
+import { APP_NAME } from "../config";
+import { renderAppMenu } from "./components";
 import { ALLOWED_STATE_TRANSITIONS, formatPriorityLabel, formatStateLabel } from "../domain/todos";
 import { escapeHtml } from "../utils/html";
 
@@ -84,28 +85,8 @@ function renderHeader(session: Session | null) {
         </div>
       </div>
     </div>
-    ${renderAppMenu(session)}
+    ${renderAppMenu(session, "tasks")}
   </header>`;
-}
-
-function renderAppMenu(session: Session | null) {
-  const settingsLink = session && isAdmin(session.npub)
-    ? `<li><a href="/settings" class="app-menu-item">Settings</a></li>`
-    : "";
-  return `<nav class="app-menu" data-app-menu hidden>
-    <div class="app-menu-overlay" data-app-menu-overlay></div>
-    <div class="app-menu-panel">
-      <div class="app-menu-header">
-        <span class="app-menu-title">Menu</span>
-        <button type="button" class="app-menu-close" data-app-menu-close>&times;</button>
-      </div>
-      <ul class="app-menu-list">
-        ${settingsLink}
-        <li><a href="/chat" class="app-menu-item">Chat</a></li>
-        <li><a href="/todo" class="app-menu-item active">Tasks</a></li>
-      </ul>
-    </div>
-  </nav>`;
 }
 
 function renderAuth(session: Session | null) {
@@ -148,11 +129,26 @@ function renderWork(state: PageState) {
   return `<section class="work" data-work-section>
     <div class="work-header">
       <h2>Work</h2>
-      <a class="archive-toggle" href="${state.archiveHref}">${state.archiveLabel}</a>
+      <div class="work-header-actions">
+        <div class="view-switcher" data-view-switcher>
+          <button type="button" class="view-btn active" data-view-mode="list" title="List view">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4h12v1H2V4zm0 3.5h12v1H2v-1zm0 3.5h12v1H2v-1z"/></svg>
+          </button>
+          <button type="button" class="view-btn" data-view-mode="kanban" title="Kanban view">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2h4v12H1V2zm5 0h4v8H6V2zm5 0h4v10h-4V2z"/></svg>
+          </button>
+        </div>
+        <a class="archive-toggle" href="${state.archiveHref}">${state.archiveLabel}</a>
+      </div>
     </div>
     <p class="remaining-summary">${state.remainingText}</p>
     ${state.tagFilterBar}
-    ${renderTodoList(state.activeTodos, state.emptyActiveMessage)}
+    <div class="todo-list-view" data-list-view>
+      ${renderTodoList(state.activeTodos, state.emptyActiveMessage)}
+    </div>
+    <div class="kanban-view" data-kanban-view hidden>
+      ${renderKanbanBoard(state.activeTodos, state.emptyActiveMessage)}
+    </div>
     ${state.showArchive ? renderArchiveSection(state.doneTodos, state.emptyArchiveMessage) : ""}
   </section>`;
 }
@@ -311,6 +307,59 @@ function renderTodoList(todos: Todo[], emptyMessage: string) {
     return `<ul class="todo-list"><li>${emptyMessage}</li></ul>`;
   }
   return `<ul class="todo-list">${todos.map(renderTodoItem).join("")}</ul>`;
+}
+
+function renderKanbanBoard(todos: Todo[], emptyMessage: string) {
+  const columns: { state: string; label: string; todos: Todo[] }[] = [
+    { state: "new", label: "New", todos: [] },
+    { state: "ready", label: "Ready", todos: [] },
+    { state: "in_progress", label: "In Progress", todos: [] },
+    { state: "done", label: "Done", todos: [] },
+  ];
+
+  for (const todo of todos) {
+    const col = columns.find((c) => c.state === todo.state);
+    if (col) col.todos.push(todo);
+  }
+
+  const columnHtml = columns
+    .map(
+      (col) => `
+      <div class="kanban-column" data-kanban-column="${col.state}">
+        <div class="kanban-column-header">
+          <h3>${col.label}</h3>
+          <span class="kanban-count">${col.todos.length}</span>
+        </div>
+        <div class="kanban-cards" data-kanban-cards="${col.state}">
+          ${col.todos.length === 0 ? `<p class="kanban-empty">No tasks</p>` : col.todos.map(renderKanbanCard).join("")}
+        </div>
+      </div>`
+    )
+    .join("");
+
+  return `<div class="kanban-board" data-kanban-board>${columnHtml}</div>`;
+}
+
+function renderKanbanCard(todo: Todo) {
+  const priorityClass = `priority-${todo.priority}`;
+  const tagsHtml = todo.tags
+    ? todo.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((t) => `<span class="tag-chip">${escapeHtml(t)}</span>`)
+        .join("")
+    : "";
+
+  return `
+    <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}">
+      <div class="kanban-card-header">
+        <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
+        <span class="badge ${priorityClass}">${formatPriorityLabel(todo.priority)}</span>
+      </div>
+      ${todo.description ? `<p class="kanban-card-desc">${escapeHtml(todo.description.slice(0, 100))}${todo.description.length > 100 ? "..." : ""}</p>` : ""}
+      ${tagsHtml ? `<div class="kanban-card-tags">${tagsHtml}</div>` : ""}
+    </div>`;
 }
 
 function renderArchiveSection(todos: Todo[], emptyMessage: string) {

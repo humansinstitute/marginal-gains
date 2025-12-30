@@ -1,11 +1,9 @@
 import { APP_NAME, isAdmin } from "../config";
+import { renderAppMenu } from "./components";
 import type { Session } from "../types";
 
-export function renderSettingsPage(session: Session | null) {
-  // Non-admins shouldn't reach this page (handled in route), but just in case
-  if (!session || !isAdmin(session.npub)) {
-    return renderAccessDenied();
-  }
+export function renderSettingsPage(session: Session) {
+  const userIsAdmin = isAdmin(session.npub);
 
   return `<!doctype html>
 <html lang="en">
@@ -13,9 +11,9 @@ ${renderHead()}
 <body class="settings-page">
   <main class="settings-shell">
     ${renderHeader(session)}
-    ${renderSettingsContent()}
+    ${renderSettingsContent(userIsAdmin)}
   </main>
-  ${renderSessionSeed(session)}
+  ${renderSessionSeed(session, userIsAdmin)}
   <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>`;
@@ -46,25 +44,8 @@ function renderHeader(session: Session) {
     <div class="header-right">
       ${renderAvatarMenu(session)}
     </div>
-    ${renderAppMenu()}
+    ${renderAppMenu(session, "settings")}
   </header>`;
-}
-
-function renderAppMenu() {
-  return `<nav class="app-menu" data-app-menu hidden>
-    <div class="app-menu-overlay" data-app-menu-overlay></div>
-    <div class="app-menu-panel">
-      <div class="app-menu-header">
-        <span class="app-menu-title">Menu</span>
-        <button type="button" class="app-menu-close" data-app-menu-close>&times;</button>
-      </div>
-      <ul class="app-menu-list">
-        <li><a href="/settings" class="app-menu-item active">Settings</a></li>
-        <li><a href="/chat" class="app-menu-item">Chat</a></li>
-        <li><a href="/todo" class="app-menu-item">Tasks</a></li>
-      </ul>
-    </div>
-  </nav>`;
 }
 
 function renderAvatarMenu(session: Session) {
@@ -83,9 +64,21 @@ function renderAvatarMenu(session: Session) {
   </div>`;
 }
 
-function renderSettingsContent() {
+function renderSettingsContent(userIsAdmin: boolean) {
   return `<div class="settings-content">
-    <section class="settings-section">
+    <section class="settings-section" data-notifications-section>
+      <div class="settings-section-header">
+        <h2>Notifications</h2>
+      </div>
+      <p class="settings-empty">Loading...</p>
+    </section>
+
+    ${userIsAdmin ? renderGroupsSection() : ""}
+  </div>`;
+}
+
+function renderGroupsSection() {
+  return `<section class="settings-section">
       <div class="settings-section-header">
         <h2>Groups</h2>
         <button type="button" class="primary" data-create-group>Create Group</button>
@@ -110,8 +103,7 @@ function renderSettingsContent() {
       </div>
     </section>
 
-    ${renderCreateGroupModal()}
-  </div>`;
+    ${renderCreateGroupModal()}`;
 }
 
 function renderCreateGroupModal() {
@@ -139,31 +131,11 @@ function renderCreateGroupModal() {
   </div>`;
 }
 
-function renderAccessDenied() {
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Access Denied - ${APP_NAME}</title>
-  <link rel="stylesheet" href="/app.css?v=3" />
-</head>
-<body class="settings-page">
-  <main class="settings-shell">
-    <div class="settings-access-denied">
-      <h1>Access Denied</h1>
-      <p>You don't have permission to access settings.</p>
-      <a href="/chat" class="primary">Go to Chat</a>
-    </div>
-  </main>
-</body>
-</html>`;
-}
-
-function renderSessionSeed(session: Session) {
+function renderSessionSeed(session: Session, userIsAdmin: boolean) {
   return `<script>
     window.__NOSTR_SESSION__ = ${JSON.stringify(session)};
     window.__SETTINGS_PAGE__ = true;
+    window.__IS_ADMIN__ = ${userIsAdmin};
   </script>`;
 }
 

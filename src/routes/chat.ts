@@ -11,6 +11,7 @@ import {
   sendMessage,
 } from "../services/chat";
 import { broadcast } from "../services/events";
+import { notifyChannelMessage } from "../services/push";
 
 import type { Session } from "../types";
 
@@ -260,6 +261,14 @@ export async function handleSendMessage(req: Request, session: Session | null, c
     channelId,
     recipientNpubs,
   });
+
+  // Send push notifications to users with "on_update" frequency (async, don't await)
+  notifyChannelMessage(recipientNpubs, session.npub, {
+    title: channel.display_name || channel.name,
+    body: content.length > 100 ? content.slice(0, 100) + "..." : content,
+    url: `/chat?channel=${channelId}`,
+    tag: `channel-${channelId}`,
+  }).catch((err) => console.error("[Push] Failed to send notifications:", err));
 
   return jsonResponse(message, 201);
 }

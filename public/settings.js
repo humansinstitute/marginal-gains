@@ -1,4 +1,5 @@
 import { elements as el, hide, show, escapeHtml } from "./dom.js";
+import { initNotifications } from "./notifications.js";
 import { state } from "./state.js";
 
 // Settings page state
@@ -11,9 +12,15 @@ let groupMembers = [];
 export async function initSettings() {
   if (!window.__SETTINGS_PAGE__) return;
 
-  await Promise.all([fetchGroups(), fetchUsers()]);
-  renderGroups();
-  wireEventListeners();
+  // Notifications are available to all users
+  await initNotifications();
+
+  // Groups management is admin-only
+  if (window.__IS_ADMIN__) {
+    await Promise.all([fetchGroups(), fetchUsers()]);
+    renderGroups();
+    wireEventListeners();
+  }
 }
 
 // Fetch all groups

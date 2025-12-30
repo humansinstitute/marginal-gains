@@ -222,11 +222,13 @@ function scheduleReconnect() {
 
 /**
  * Handle initial sync data from server
+ * NOTE: We now fetch channels via HTTP first, so this only saves to local DB
+ * and doesn't overwrite app state (HTTP is more reliable for initial load)
  */
 async function handleInitialSync(data) {
   const { channels, dmChannels, personalChannel } = data;
 
-  // Save to local database
+  // Save to local database for offline support
   try {
     if (channels?.length > 0) {
       await saveChannels(channels, "channel");
@@ -241,33 +243,8 @@ async function handleInitialSync(data) {
     console.error("[LiveUpdates] Error saving sync data to local DB:", err);
   }
 
-  // Update app state
-  const mappedChannels = (channels || []).map((ch) => ({
-    id: String(ch.id),
-    name: ch.name,
-    displayName: ch.displayName,
-    description: ch.description,
-    isPublic: ch.isPublic,
-  }));
-
-  const mappedDmChannels = (dmChannels || []).map((ch) => ({
-    id: String(ch.id),
-    name: ch.name,
-    displayName: ch.displayName,
-    description: ch.description,
-    otherNpub: ch.otherNpub,
-  }));
-
-  const mappedPersonal = personalChannel
-    ? {
-        id: String(personalChannel.id),
-        name: personalChannel.name,
-        displayName: personalChannel.displayName,
-        description: personalChannel.description,
-      }
-    : null;
-
-  updateAllChannels(mappedChannels, mappedDmChannels, mappedPersonal);
+  // Don't update app state - HTTP fetch handles initial channel load
+  // SSE sync:init is only used for local DB caching now
 }
 
 /**

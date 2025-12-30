@@ -1,4 +1,5 @@
-import { APP_NAME, isAdmin } from "../config";
+import { APP_NAME } from "../config";
+import { renderAppMenu } from "./components";
 import type { Session } from "../types";
 
 export function renderChatPage(session: Session | null) {
@@ -19,7 +20,7 @@ ${renderHead()}
 function renderHead() {
   return `<head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, interactive-widget=resizes-content" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <title>Chat - ${APP_NAME}</title>
   <meta name="theme-color" content="#6b3a6b" />
   <meta name="application-name" content="${APP_NAME}" />
@@ -41,28 +42,8 @@ function renderChatHeader(session: Session | null) {
     <div class="header-right">
       ${session ? renderAvatarMenu(session) : ""}
     </div>
-    ${renderAppMenu(session)}
+    ${renderAppMenu(session, "chat")}
   </header>`;
-}
-
-function renderAppMenu(session: Session | null) {
-  const settingsLink = session && isAdmin(session.npub)
-    ? `<li><a href="/settings" class="app-menu-item">Settings</a></li>`
-    : "";
-  return `<nav class="app-menu" data-app-menu hidden>
-    <div class="app-menu-overlay" data-app-menu-overlay></div>
-    <div class="app-menu-panel">
-      <div class="app-menu-header">
-        <span class="app-menu-title">Menu</span>
-        <button type="button" class="app-menu-close" data-app-menu-close>&times;</button>
-      </div>
-      <ul class="app-menu-list">
-        ${settingsLink}
-        <li><a href="/chat" class="app-menu-item active">Chat</a></li>
-        <li><a href="/todo" class="app-menu-item">Tasks</a></li>
-      </ul>
-    </div>
-  </nav>`;
 }
 
 function renderAvatarMenu(session: Session) {

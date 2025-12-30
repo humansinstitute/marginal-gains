@@ -9,6 +9,7 @@ export const COOKIE_SECURE = Bun.env.NODE_ENV === "production";
 export const APP_NAME = "Marginal Gains";
 export const APP_TAG = "marginal-gains";
 export const PUBLIC_DIR = join(import.meta.dir, "../public");
+export const PUSH_CONTACT_EMAIL = Bun.env.PUSH_CONTACT_EMAIL || "admin@example.com";
 
 // Admin npubs - comma separated list in env (supports both ADMIN_NPUBS and ADMIN_NPUB)
 export const ADMIN_NPUBS: string[] = (Bun.env.ADMIN_NPUBS ?? Bun.env.ADMIN_NPUB ?? "")
@@ -29,4 +30,5 @@ export const STATIC_FILES = new Map<string, string>([
   ["/manifest.webmanifest", "manifest.webmanifest"],
   ["/app.js", "app.js"],
   ["/app.css", "app.css"],
+  ["/sw.js", "sw.js"],
 ]);
