@@ -280,6 +280,19 @@ a {
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+/* SSE connection status on avatar */
+.avatar-chip.sse-connected {
+  outline: 2px solid #22c55e;
+  outline-offset: 2px;
+}
+.avatar-chip.sse-disconnected {
+  outline: 2px solid #ef4444;
+  outline-offset: 2px;
+}
+.avatar-chip.sse-connecting {
+  outline: 2px solid #eab308;
+  outline-offset: 2px;
+}
 .avatar-menu {
   position: absolute;
   top: calc(100% + 0.5rem);
@@ -1166,11 +1179,6 @@ details summary {
   letter-spacing: 0.05em;
   color: var(--chat-text-muted);
 }
-.sse-indicator {
-  font-size: 0.7rem;
-  margin-left: 0.5rem;
-  cursor: help;
-}
 .chat-list {
   display: flex;
   flex-direction: column;
@@ -1332,6 +1340,7 @@ details summary {
 .chat-message-content {
   flex: 1;
   min-width: 0;
+  overflow: visible;
 }
 .chat-message-meta {
   display: flex;
@@ -1366,13 +1375,6 @@ details summary {
   position: absolute;
   top: 0;
   right: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.chat-message:hover .message-menu,
-.message-menu:focus-within,
-.message-menu:has([data-message-dropdown]:not([hidden])) {
-  opacity: 1;
 }
 .message-menu-trigger {
   background: var(--surface);
@@ -1760,6 +1762,8 @@ body.chat-page {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 .chat-thread-panel-header h3 {
   margin: 0;
@@ -1964,6 +1968,7 @@ body.chat-page {
 .chat-reply {
   display: flex;
   align-items: flex-start;
+  cursor: pointer;
   gap: 0.5rem;
   margin-left: 44px; /* Align past the root avatar (36px + 8px gap) */
   padding: 0.5rem 0.75rem;
@@ -1973,6 +1978,9 @@ body.chat-page {
 }
 .chat-shell-page .chat-reply {
   background: var(--bg);
+}
+.chat-reply:hover {
+  background: var(--chat-hover);
 }
 .chat-reply-avatar {
   width: 18px;
@@ -2018,6 +2026,21 @@ body.chat-page {
   text-decoration: underline;
   color: var(--text);
 }
+/* Reply prompt for messages with no replies */
+.chat-reply-prompt {
+  cursor: pointer;
+}
+.chat-reply-prompt:hover {
+  background: var(--chat-hover);
+}
+.chat-reply-input-placeholder {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.9em;
+}
 /* Thread panel message avatars - 75% size */
 .chat-thread-avatar {
   width: 27px;
@@ -2026,7 +2049,16 @@ body.chat-page {
   object-fit: cover;
   flex-shrink: 0;
 }
-/* Divider between messages in thread panel */
+/* Messages in thread panel */
+.chat-thread-panel-messages .chat-message {
+  position: relative;
+}
+.chat-thread-panel-messages .message-menu {
+  z-index: 10;
+}
+.chat-thread-panel-messages .message-menu-dropdown {
+  z-index: 100;
+}
 .chat-thread-panel-messages .chat-message:not(:last-child) {
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);

@@ -12,14 +12,14 @@ export async function handleTodoCreate(req: Request, session: Session | null) {
   const title = String(form.get("title") ?? "");
   const tags = String(form.get("tags") ?? "");
   quickAddTodo(session.npub, title, tags);
-  return redirect("/");
+  return redirect("/todo");
 }
 
 export async function handleTodoUpdate(req: Request, session: Session | null, id: number) {
   if (!session) return unauthorized();
   const form = await req.formData();
   updateTodoFromForm(session.npub, id, form);
-  return redirect("/");
+  return redirect("/todo");
 }
 
 export async function handleTodoState(req: Request, session: Session | null, id: number) {
@@ -27,13 +27,13 @@ export async function handleTodoState(req: Request, session: Session | null, id:
   const form = await req.formData();
   const nextState = normalizeStateInput(String(form.get("state") ?? "ready"));
   transitionTodoState(session.npub, id, nextState);
-  return redirect("/");
+  return redirect("/todo");
 }
 
 export function handleTodoDelete(session: Session | null, id: number) {
   if (!session) return unauthorized();
   removeTodo(session.npub, id);
-  return redirect("/");
+  return redirect("/todo");
 }
 
 // JSON API endpoint for state updates (used by Kanban drag-drop)

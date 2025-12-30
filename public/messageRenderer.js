@@ -85,25 +85,26 @@ export function renderMessageBody(body) {
 }
 
 // Render message action menu (copy for all, delete for author or admin)
-export function renderMessageMenu(message) {
+export function renderMessageMenu(message, { isThreadRoot = false } = {}) {
   const ctx = getContext();
   const canDelete = ctx.session?.npub === message.author || ctx.isAdmin;
 
   return `<div class="message-menu">
     <button class="message-menu-trigger" data-message-menu="${message.id}" aria-label="Message options">&#8942;</button>
     <div class="message-menu-dropdown" data-message-dropdown="${message.id}" hidden>
-      <button class="message-menu-item" data-copy-message="${message.id}">Copy</button>
+      <button class="message-menu-item" data-copy-message="${message.id}">Copy message text</button>
+      ${isThreadRoot ? `<button class="message-menu-item" data-copy-thread="${message.id}">Copy entire thread</button>` : ""}
       ${canDelete ? `<button class="message-menu-item danger" data-delete-message="${message.id}">Delete</button>` : ""}
     </div>
   </div>`;
 }
 
 // Render compact message (with optional avatar)
-export function renderMessageCompact(message, { showAvatar = false } = {}) {
+export function renderMessageCompact(message, { showAvatar = false, isThreadRoot = false } = {}) {
   const avatarHtml = showAvatar
     ? `<img class="chat-message-avatar" src="${escapeHtml(getAuthorAvatarUrl(message.author))}" alt="" loading="lazy" />`
     : "";
-  const menuHtml = renderMessageMenu(message);
+  const menuHtml = renderMessageMenu(message, { isThreadRoot });
   return `<div class="chat-message${showAvatar ? " chat-message-with-avatar" : ""}" data-message-id="${message.id}">
     ${avatarHtml}
     <div class="chat-message-content">
@@ -118,9 +119,9 @@ export function renderMessageCompact(message, { showAvatar = false } = {}) {
 }
 
 // Render full message with avatar
-export function renderMessageFull(message) {
+export function renderMessageFull(message, { isThreadRoot = false } = {}) {
   const avatarUrl = getAuthorAvatarUrl(message.author);
-  const menuHtml = renderMessageMenu(message);
+  const menuHtml = renderMessageMenu(message, { isThreadRoot });
   return `<div class="chat-message chat-message-with-avatar" data-message-id="${message.id}">
     <img class="chat-thread-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
     <div class="chat-message-content">
@@ -141,7 +142,7 @@ export function renderReplyPreview(reply, replyCount) {
   const timestamp = formatReplyTimestamp(reply.createdAt);
   const moreReplies = replyCount > 1 ? `+${replyCount - 1} more` : "";
 
-  return `<div class="chat-reply">
+  return `<div class="chat-reply" data-open-thread>
     <img class="chat-reply-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
     <div class="chat-reply-content">
       <div class="chat-reply-meta">
@@ -150,6 +151,15 @@ export function renderReplyPreview(reply, replyCount) {
       </div>
       <p class="chat-message-body">${renderMessageBody(reply.body)}</p>
       <span class="chat-reply-thread-link">${moreReplies ? moreReplies + " · " : ""}... view thread</span>
+    </div>
+  </div>`;
+}
+
+// Render a reply prompt for threads with no replies yet
+export function renderReplyPrompt() {
+  return `<div class="chat-reply chat-reply-prompt" data-open-thread>
+    <div class="chat-reply-content">
+      <div class="chat-reply-input-placeholder">Send a reply...</div>
     </div>
   </div>`;
 }
@@ -163,11 +173,9 @@ export function renderCollapsedThread(message, byParent) {
   return `<article class="chat-thread" data-thread-id="${message.id}">
     <div class="chat-thread-collapsed">
       <div class="chat-thread-first">
-        ${renderMessageCompact(message, { showAvatar: true })}
+        ${renderMessageCompact(message, { showAvatar: true, isThreadRoot: true })}
       </div>
-      ${replyCount > 0 ? `
-        ${renderReplyPreview(lastReply, replyCount)}
-      ` : ""}
+      ${replyCount > 0 ? renderReplyPreview(lastReply, replyCount) : renderReplyPrompt()}
     </div>
   </article>`;
 }

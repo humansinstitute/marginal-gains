@@ -29,6 +29,41 @@ let openThreadId = null;
 // Track if we should scroll to bottom (only on initial load or explicit action)
 let shouldScrollToBottom = false;
 
+/**
+ * Copy text to clipboard with fallback for Safari mobile
+ * Safari requires synchronous clipboard access from user gesture
+ */
+async function copyToClipboard(text) {
+  // Try modern clipboard API first
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_err) {
+      // Fall through to legacy method
+    }
+  }
+
+  // Fallback: create temporary textarea and use execCommand
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    const success = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return success;
+  } catch (_err) {
+    document.body.removeChild(textarea);
+    return false;
+  }
+}
+
 // Update browser URL to reflect current channel (for deep linking)
 function updateChatUrl(channelId) {
   if (!channelId) {
@@ -405,6 +440,31 @@ function setupLiveUpdateHandlers() {
       }
     }
   });
+
+  // When connection state changes, update avatar outline
+  onEvent("connection:change", (data) => {
+    updateAvatarConnectionStatus(data.state);
+  });
+}
+
+/**
+ * Update avatar outline to reflect SSE connection status
+ * Green outline = connected, Red outline = disconnected
+ */
+function updateAvatarConnectionStatus(connState) {
+  if (!el.avatarButton) return;
+
+  // Remove any existing connection status classes
+  el.avatarButton.classList.remove("sse-connected", "sse-disconnected", "sse-connecting");
+
+  // Add appropriate class based on connection state
+  if (connState === "connected") {
+    el.avatarButton.classList.add("sse-connected");
+  } else if (connState === "connecting") {
+    el.avatarButton.classList.add("sse-connecting");
+  } else {
+    el.avatarButton.classList.add("sse-disconnected");
+  }
 }
 
 export const initChat = async () => {
@@ -466,6 +526,9 @@ export const initChat = async () => {
 
     // Connect to SSE for live updates only
     await connectLiveUpdates();
+
+    // Set initial connection status on avatar
+    updateAvatarConnectionStatus(getConnectionState());
 
     // Fetch messages for initially selected channel (if any)
     if (state.chat.selectedChannelId) {
@@ -661,18 +724,20 @@ function wireComposer() {
   document.addEventListener("click", async (event) => {
     const trigger = event.target.closest("[data-message-menu]");
     const copyBtn = event.target.closest("[data-copy-message]");
+    const copyThreadBtn = event.target.closest("[data-copy-thread]");
     const deleteBtn = event.target.closest("[data-delete-message]");
 
     // Handle menu trigger click
     if (trigger) {
       event.stopPropagation();
-      const id = trigger.dataset.messageMenu;
+      // Find the dropdown sibling within the same menu container
+      const menuContainer = trigger.closest(".message-menu");
+      const dropdown = menuContainer?.querySelector("[data-message-dropdown]");
       // Close all other open menus
       document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
-        if (d.dataset.messageDropdown !== id) d.hidden = true;
+        if (d !== dropdown) d.hidden = true;
       });
-      // Toggle this menu
-      const dropdown = document.querySelector(`[data-message-dropdown="${id}"]`);
+      // Toggle this menu's dropdown
       if (dropdown) dropdown.hidden = !dropdown.hidden;
       return;
     }
@@ -685,15 +750,51 @@ function wireComposer() {
       const messages = getActiveChannelMessages();
       const message = messages.find((m) => m.id === messageId);
       if (message?.body) {
-        try {
-          await navigator.clipboard.writeText(message.body);
+        const success = await copyToClipboard(message.body);
+        if (success) {
           // Brief visual feedback - change button text temporarily
           const originalText = copyBtn.textContent;
           copyBtn.textContent = "Copied!";
           setTimeout(() => {
             copyBtn.textContent = originalText;
           }, 1000);
-        } catch (_err) {
+        } else {
+          alert("Failed to copy to clipboard");
+        }
+      }
+      // Close the menu
+      document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
+        d.hidden = true;
+      });
+      return;
+    }
+
+    // Handle copy entire thread button click
+    if (copyThreadBtn) {
+      event.stopPropagation();
+      const threadId = copyThreadBtn.dataset.copyThread;
+      const messages = getActiveChannelMessages();
+      const byParent = groupByParent(messages);
+      const rootMessage = messages.find((m) => m.id === threadId);
+      if (rootMessage) {
+        const replies = byParent.get(threadId) || [];
+        const allMessages = [rootMessage, ...replies];
+        // Format thread as text with author names and timestamps
+        const threadText = allMessages
+          .map((msg) => {
+            const author = getAuthorDisplayName(msg.author);
+            const time = new Date(msg.createdAt).toLocaleString();
+            return `[${author} - ${time}]\n${msg.body}`;
+          })
+          .join("\n\n");
+        const success = await copyToClipboard(threadText);
+        if (success) {
+          const originalText = copyThreadBtn.textContent;
+          copyThreadBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyThreadBtn.textContent = originalText;
+          }, 1000);
+        } else {
           alert("Failed to copy to clipboard");
         }
       }
@@ -777,22 +878,6 @@ export const refreshChatUI = () => {
 };
 
 function renderChannels() {
-  // Render connection status indicator
-  const sectionHeader = document.querySelector(".chat-section-header");
-  if (sectionHeader) {
-    let indicator = sectionHeader.querySelector(".sse-indicator");
-    if (!indicator) {
-      indicator = document.createElement("span");
-      indicator.className = "sse-indicator";
-      indicator.title = "Live connection status";
-      sectionHeader.appendChild(indicator);
-    }
-    const connState = getConnectionState();
-    indicator.textContent = connState === "connected" ? "●" : connState === "connecting" ? "○" : "○";
-    indicator.style.color = connState === "connected" ? "#4a4" : connState === "connecting" ? "#aa4" : "#a44";
-    indicator.title = `SSE: ${connState}`;
-  }
-
   // Render regular channels
   if (el.chatChannelList) {
     const channels = state.chat.channels;
@@ -931,16 +1016,23 @@ function renderThreads() {
     shouldScrollToBottom = false;
   }
 
-  // Wire up thread click handlers
+  // Wire up thread click handlers - only on reply section, not entire message
   el.chatThreadList.querySelectorAll("[data-thread-id]").forEach((thread) => {
+    const replySection = thread.querySelector("[data-open-thread]");
+    if (!replySection) return;
+
     const handler = (e) => {
-      // Don't open sidebar if clicking on a button
+      // Don't open if clicking on a button
       if (e.target.closest("button")) return;
+      e.preventDefault();
       const threadId = thread.dataset.threadId;
       openThread(threadId, messages, byParent);
     };
-    thread.addEventListener("click", handler);
-    thread.addEventListener("touchend", handler);
+    replySection.addEventListener("click", handler);
+    replySection.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      handler(e);
+    });
   });
 }
 
@@ -1010,7 +1102,7 @@ function openThread(threadId, messages, byParent) {
   // Render messages in panel
   if (el.threadMessages) {
     el.threadMessages.innerHTML = allMessages
-      .map((msg) => renderMessageFull(msg))
+      .map((msg, index) => renderMessageFull(msg, { isThreadRoot: index === 0 }))
       .join("");
     // Scroll to bottom to show latest replies
     scrollToBottom(el.threadMessages);

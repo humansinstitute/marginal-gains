@@ -42,6 +42,7 @@ const eventHandlers = {
   "channel:delete": [],
   "dm:new": [],
   "sync:init": [],
+  "connection:change": [],
 };
 
 /**
@@ -103,11 +104,13 @@ export async function connect() {
   eventSource.onopen = () => {
     console.log("[LiveUpdates] Connected to event stream");
     reconnectAttempts = 0;
+    emitEvent("connection:change", { state: "connected" });
   };
 
   eventSource.onerror = (err) => {
     console.error("[LiveUpdates] Connection error:", err);
     eventSource.close();
+    emitEvent("connection:change", { state: "disconnected" });
     scheduleReconnect();
   };
 
@@ -212,6 +215,7 @@ function scheduleReconnect() {
 
   console.log(`[LiveUpdates] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
 
+  emitEvent("connection:change", { state: "connecting" });
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
     connect();
