@@ -44,6 +44,49 @@ body {
   padding: 2rem;
   max-width: 640px;
 }
+
+/* ========== Tasks Page Full Screen Layout ========== */
+body.tasks-page {
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+.tasks-app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.tasks-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.tasks-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+}
+.tasks-content-inner {
+  max-width: 640px;
+  margin: 0 auto;
+}
+/* Expand to full width in kanban view */
+body.kanban-active .tasks-content-inner {
+  max-width: none;
+}
 h1 {
   margin-bottom: 0.25rem;
   font-size: clamp(2rem, 5vw, 3rem);
@@ -128,9 +171,15 @@ a {
   align-items: center;
   gap: 0.75rem;
 }
+.app-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
 .app-title {
   margin: 0;
-  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-size: 1.1rem;
+  font-weight: 600;
 }
 /* Hamburger menu button */
 .hamburger-btn {
@@ -553,6 +602,11 @@ summary::-webkit-details-marker {
   margin-top: 2rem;
   border-top: 1px solid #ddd;
   padding-top: 1rem;
+}
+.tasks-page .work-header {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
 }
 .work-header-actions {
   display: flex;
@@ -1743,6 +1797,15 @@ body.chat-page {
 .chat-composer .chat-input {
   flex: 1;
 }
+/* Auto-expanding textarea styles */
+.chat-composer .chat-input,
+.chat-thread-panel-composer textarea {
+  min-height: 2.5rem;
+  max-height: 10.5rem; /* ~7 lines */
+  overflow-y: auto;
+  resize: none;
+  line-height: 1.5;
+}
 /* Thread panel (inline, right side) */
 .chat-thread-panel {
   background: var(--surface);
@@ -1812,6 +1875,40 @@ body.chat-page {
 .chat-thread-panel-composer textarea:focus {
   outline: none;
   border-color: var(--text);
+}
+/* Thread header actions (expand/collapse/close buttons) */
+.chat-thread-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.chat-thread-expand {
+  background: transparent;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0.25rem;
+  line-height: 1;
+  font-family: monospace;
+}
+.chat-thread-expand:hover {
+  color: var(--text);
+}
+.chat-thread-expand[hidden] {
+  display: none;
+}
+/* Thread expanded layout state (desktop only) */
+/* Swaps sizes: messages area becomes 380px, thread takes 1fr */
+.chat-layout[data-thread-expanded] {
+  grid-template-columns: 240px 380px 1fr !important;
+}
+.chat-layout[data-thread-expanded] .chat-messages-area {
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+}
+.chat-layout[data-thread-expanded] .chat-thread-panel {
+  border-left: none;
 }
 /* Channel list styling */
 .chat-shell-page .chat-channel {
@@ -2346,11 +2443,28 @@ body.chat-page {
   display: none;
 }
 .kanban-board {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
   gap: 1rem;
   margin-top: 1rem;
   min-height: 400px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 1rem;
+}
+.kanban-board::-webkit-scrollbar {
+  height: 8px;
+}
+.kanban-board::-webkit-scrollbar-track {
+  background: var(--bg);
+  border-radius: 4px;
+}
+.kanban-board::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.kanban-board::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 .kanban-column {
   background: var(--bg);
@@ -2358,7 +2472,10 @@ body.chat-page {
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
-  min-height: 300px;
+  min-width: 280px;
+  max-width: 320px;
+  flex-shrink: 0;
+  scroll-snap-align: start;
 }
 .kanban-column-header {
   display: flex;
@@ -2390,6 +2507,7 @@ body.chat-page {
   padding: 0.25rem;
   border-radius: var(--radius-sm);
   transition: background 0.15s;
+  overflow-y: auto;
 }
 .kanban-cards.drop-target {
   background: rgba(37, 99, 235, 0.1);
@@ -2409,6 +2527,9 @@ body.chat-page {
   padding: 0.75rem;
   cursor: grab;
   transition: box-shadow 0.15s, transform 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 .kanban-card:hover {
   box-shadow: var(--shadow-soft);
@@ -2420,33 +2541,28 @@ body.chat-page {
   opacity: 0.5;
   transform: rotate(3deg);
 }
-.kanban-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.5rem;
-}
 .kanban-card-title {
   font-weight: 600;
   font-size: 0.9rem;
-  flex: 1;
-  word-break: break-word;
+  line-height: 1.3;
 }
 .kanban-card-desc {
-  margin: 0.5rem 0 0;
+  margin: 0;
   font-size: 0.8rem;
   color: var(--muted);
   line-height: 1.4;
 }
-.kanban-card-tags {
+.kanban-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-top: 0.5rem;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: auto;
 }
-.kanban-card-tags .tag-chip {
+.kanban-card-meta .badge,
+.kanban-card-meta .tag-chip {
   font-size: 0.7rem;
-  padding: 0.05rem 0.4rem;
+  padding: 0.15rem 0.45rem;
 }
 
 /* Kanban column state colors */
@@ -2463,17 +2579,125 @@ body.chat-page {
   border-bottom-color: #4ade80;
 }
 
-/* Responsive kanban */
-@media (max-width: 800px) {
-  .kanban-board {
-    grid-template-columns: repeat(2, 1fr);
-  }
+/* ========== Task Edit Modal ========== */
+.task-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
 }
-@media (max-width: 500px) {
-  .kanban-board {
-    grid-template-columns: 1fr;
-  }
-  .kanban-column {
-    min-height: auto;
-  }
+.task-modal-overlay[hidden] {
+  display: none;
+}
+.task-modal {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-heavy, 0 10px 40px rgba(0,0,0,0.2));
+}
+.task-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.task-modal-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.task-modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1;
+  padding: 0.25rem;
+}
+.task-modal-close:hover {
+  color: var(--text);
+}
+.task-modal-form {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.task-modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.task-modal-form input,
+.task-modal-form textarea,
+.task-modal-form select {
+  padding: 0.5rem 0.65rem;
+  font-size: 0.95rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-family: inherit;
+}
+.task-modal-form input:focus,
+.task-modal-form textarea:focus,
+.task-modal-form select:focus {
+  outline: none;
+  border-color: var(--text);
+}
+.task-modal-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.task-modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.task-modal-actions-right {
+  display: flex;
+  gap: 0.5rem;
+}
+.task-modal-delete {
+  background: none;
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.task-modal-delete:hover {
+  background: #fef2f2;
+}
+.task-modal-actions button[type="button"]:not(.task-modal-delete) {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.task-modal-actions button.primary {
+  background: var(--text);
+  color: var(--surface);
+  border: none;
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
 }

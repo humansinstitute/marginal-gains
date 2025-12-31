@@ -61,6 +61,8 @@ export const elements = {
   threadInput: document.querySelector("[data-thread-input]"),
   threadSendBtn: document.querySelector("[data-thread-send]"),
   closeThreadBtn: document.querySelector("[data-close-thread]"),
+  expandThreadBtn: document.querySelector("[data-expand-thread]"),
+  collapseThreadBtn: document.querySelector("[data-collapse-thread]"),
   // App menu elements
   hamburgerBtn: document.querySelector("[data-hamburger-toggle]"),
   appMenu: document.querySelector("[data-app-menu]"),

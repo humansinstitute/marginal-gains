@@ -26,8 +26,22 @@ const npubToPubkeyCache = new Map();
 // Track currently open thread
 let openThreadId = null;
 
+// Track if thread is expanded to main view (desktop only)
+let threadExpanded = false;
+
 // Track if we should scroll to bottom (only on initial load or explicit action)
 let shouldScrollToBottom = false;
+
+/**
+ * Auto-resize textarea to fit content (up to max-height set in CSS)
+ */
+function autoResizeTextarea(textarea) {
+  if (!textarea) return;
+  // Reset height to auto to get proper scrollHeight
+  textarea.style.height = "auto";
+  // Set height to scrollHeight (CSS max-height will cap it)
+  textarea.style.height = textarea.scrollHeight + "px";
+}
 
 /**
  * Copy text to clipboard with fallback for Safari mobile
@@ -510,6 +524,12 @@ export const initChat = async () => {
       // Update URL to reflect default selected channel
       updateChatUrl(state.chat.selectedChannelId);
       await fetchMessages(state.chat.selectedChannelId);
+    } else if (state.chat.channels.length > 0) {
+      // Default to first channel if none selected
+      const firstChannel = state.chat.channels[0];
+      selectChannel(firstChannel.id);
+      updateChatUrl(firstChannel.id);
+      await fetchMessages(firstChannel.id);
     }
 
     renderChannels();
@@ -627,9 +647,26 @@ function wireChannelModal() {
   el.channelModal?.addEventListener("click", (event) => {
     if (event.target === el.channelModal) closeModal();
   });
+
+  // Auto-generate display name from slug (Title Case)
+  const nameInput = el.channelForm?.querySelector('input[name="name"]');
+  const displayNameInput = el.channelForm?.querySelector('input[name="displayName"]');
+  nameInput?.addEventListener("input", () => {
+    if (!displayNameInput) return;
+    // Convert slug to Title Case: "my-channel" → "My Channel"
+    const slug = nameInput.value;
+    const titleCase = slug
+      .split(/[-_\s]+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(" ");
+    displayNameInput.value = titleCase;
+  });
+
   el.newChannelTriggers?.forEach((btn) =>
     btn.addEventListener("click", () => {
       if (!state.session) return;
+      // Reset form to fresh state
+      el.channelForm?.reset();
       // Show/hide private channel option based on admin status
       const privateField = el.channelModal?.querySelector('[data-admin-only]');
       if (privateField) {
@@ -697,6 +734,9 @@ function wireComposer() {
 
     // Handle mention autocomplete
     handleMentionInput();
+
+    // Auto-expand textarea
+    autoResizeTextarea(el.chatInput);
   });
 
   el.chatInput?.addEventListener("keydown", (event) => {
@@ -842,6 +882,7 @@ async function sendMessage() {
   const parentId = state.chat.replyingTo?.id || null;
 
   el.chatInput.value = "";
+  el.chatInput.style.height = "auto"; // Reset height after sending
   el.chatSendBtn?.setAttribute("disabled", "disabled");
   setReplyTarget(null);
 
@@ -885,9 +926,8 @@ function renderChannels() {
       .map((channel) => {
         const isActive = channel.id === state.chat.selectedChannelId;
         const lockIcon = channel.isPublic ? '' : '<span class="channel-lock" title="Private">&#128274;</span>';
-        return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}">
+        return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
           <div class="chat-channel-name">#${escapeHtml(channel.name)} ${lockIcon}</div>
-          <p class="chat-channel-desc">${escapeHtml(channel.displayName)}</p>
         </button>`;
       })
       .join("");
@@ -1059,10 +1099,32 @@ function wireThreadSidebar() {
   el.closeThreadBtn?.addEventListener("click", closeHandler);
   el.closeThreadBtn?.addEventListener("touchend", (e) => { e.preventDefault(); closeHandler(); });
 
+  // Expand thread button (desktop only)
+  const expandHandler = () => expandThread();
+  el.expandThreadBtn?.addEventListener("click", expandHandler);
+  el.expandThreadBtn?.addEventListener("touchend", (e) => { e.preventDefault(); expandHandler(); });
+
+  // Collapse thread button (desktop only)
+  const collapseHandler = () => collapseThread();
+  el.collapseThreadBtn?.addEventListener("click", collapseHandler);
+  el.collapseThreadBtn?.addEventListener("touchend", (e) => { e.preventDefault(); collapseHandler(); });
+
+  // Click on messages area when thread is expanded collapses back to normal
+  const messagesArea = document.querySelector(".chat-messages-area");
+  messagesArea?.addEventListener("click", (e) => {
+    if (threadExpanded && !isMobile()) {
+      e.preventDefault();
+      collapseThread();
+    }
+  });
+
   el.threadInput?.addEventListener("input", () => {
     const hasText = Boolean(el.threadInput.value.trim());
     if (hasText && openThreadId) el.threadSendBtn?.removeAttribute("disabled");
     else el.threadSendBtn?.setAttribute("disabled", "disabled");
+
+    // Auto-expand textarea
+    autoResizeTextarea(el.threadInput);
   });
 
   // Enter sends reply, Shift+Enter adds new line
@@ -1133,10 +1195,34 @@ function closeThreadPanel() {
   if (el.threadInput) el.threadInput.value = "";
   el.threadSendBtn?.setAttribute("disabled", "disabled");
 
+  // Also collapse if expanded
+  if (threadExpanded) {
+    collapseThread();
+  }
+
   // Switch to messages view on mobile when thread is closed
   if (isMobile()) {
     setMobileView("messages");
   }
+}
+
+// Expand thread to become main view (desktop only)
+function expandThread() {
+  if (isMobile() || !openThreadId) return;
+  threadExpanded = true;
+  el.chatLayout?.setAttribute("data-thread-expanded", "");
+  // Toggle button visibility
+  if (el.expandThreadBtn) el.expandThreadBtn.hidden = true;
+  if (el.collapseThreadBtn) el.collapseThreadBtn.hidden = false;
+}
+
+// Collapse thread back to normal sidebar (desktop only)
+function collapseThread() {
+  threadExpanded = false;
+  el.chatLayout?.removeAttribute("data-thread-expanded");
+  // Toggle button visibility
+  if (el.expandThreadBtn) el.expandThreadBtn.hidden = false;
+  if (el.collapseThreadBtn) el.collapseThreadBtn.hidden = true;
 }
 
 async function sendThreadReply() {
@@ -1148,6 +1234,7 @@ async function sendThreadReply() {
   const parentId = openThreadId;
 
   el.threadInput.value = "";
+  el.threadInput.style.height = "auto"; // Reset height after sending
   el.threadSendBtn?.setAttribute("disabled", "disabled");
 
   try {

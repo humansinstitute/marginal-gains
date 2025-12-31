@@ -7,6 +7,7 @@ import { initChat } from "./chat.js";
 import { initAppMenu } from "./menu.js";
 import { initSettings } from "./settings.js";
 import { initKanban } from "./kanban.js";
+import { initTaskModal } from "./taskModal.js";
 
 window.addEventListener("load", focusHeroInput);
 
@@ -18,3 +19,4 @@ initTagInputs();
 initChat();
 initSettings();
 initKanban();
+initTaskModal();

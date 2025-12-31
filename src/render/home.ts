@@ -32,16 +32,21 @@ export function renderHomePage({ showArchive, session, filterTags = [], todos = 
   return `<!doctype html>
 <html lang="en">
 ${renderHead()}
-<body>
-  <main class="app-shell">
+<body class="tasks-page">
+  <main class="tasks-app-shell">
     ${renderHeader(session)}
-    ${renderAuth(session)}
-    ${renderHero(session)}
-    ${renderWork(pageState)}
-    ${renderSummaries()}
+    <div class="tasks-content" data-tasks-content>
+      <div class="tasks-content-inner">
+        ${renderAuth(session)}
+        ${renderHero(session)}
+        ${renderWork(pageState)}
+        ${renderSummaries()}
+      </div>
+    </div>
     ${renderQrModal()}
     ${renderProfileModal()}
     ${renderPinModal()}
+    ${renderTaskEditModal()}
   </main>
   ${renderSessionSeed(session)}
   <script type="module" src="/app.js?v=3"></script>
@@ -64,7 +69,7 @@ function renderHead() {
 }
 
 function renderHeader(session: Session | null) {
-  return `<header class="page-header">
+  return `<header class="tasks-page-header">
     <div class="header-left">
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
         <span class="hamburger-icon"></span>
@@ -354,12 +359,12 @@ function renderKanbanCard(todo: Todo) {
 
   return `
     <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}">
-      <div class="kanban-card-header">
-        <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
-        <span class="badge ${priorityClass}">${formatPriorityLabel(todo.priority)}</span>
-      </div>
+      <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
       ${todo.description ? `<p class="kanban-card-desc">${escapeHtml(todo.description.slice(0, 100))}${todo.description.length > 100 ? "..." : ""}</p>` : ""}
-      ${tagsHtml ? `<div class="kanban-card-tags">${tagsHtml}</div>` : ""}
+      <div class="kanban-card-meta">
+        <span class="badge ${priorityClass}">${formatPriorityLabel(todo.priority)}</span>
+        ${tagsHtml}
+      </div>
     </div>`;
 }
 
@@ -496,5 +501,57 @@ function renderTagsInput(tags: string) {
         <input type="hidden" name="tags" value="${escapeHtml(tags)}" />
       </div>
     </label>`;
+}
+
+function renderTaskEditModal() {
+  return `<div class="task-modal-overlay" data-task-modal hidden>
+    <div class="task-modal">
+      <div class="task-modal-header">
+        <h2>Edit Task</h2>
+        <button class="task-modal-close" type="button" data-task-modal-close aria-label="Close">&times;</button>
+      </div>
+      <form class="task-modal-form" method="post" data-task-modal-form>
+        <label>Title
+          <input name="title" data-task-modal-title required />
+        </label>
+        <label>Description
+          <textarea name="description" data-task-modal-description rows="3"></textarea>
+        </label>
+        <div class="task-modal-row">
+          <label>Priority
+            <select name="priority" data-task-modal-priority>
+              <option value="rock">${formatPriorityLabel("rock")}</option>
+              <option value="pebble">${formatPriorityLabel("pebble")}</option>
+              <option value="sand">${formatPriorityLabel("sand")}</option>
+            </select>
+          </label>
+          <label>State
+            <select name="state" data-task-modal-state>
+              <option value="new">${formatStateLabel("new")}</option>
+              <option value="ready">${formatStateLabel("ready")}</option>
+              <option value="in_progress">${formatStateLabel("in_progress")}</option>
+              <option value="done">${formatStateLabel("done")}</option>
+            </select>
+          </label>
+        </div>
+        <label>Scheduled For
+          <input type="date" name="scheduled_for" data-task-modal-scheduled />
+        </label>
+        <label>Tags
+          <div class="tag-input-wrapper" data-task-modal-tags-wrapper>
+            <input type="text" placeholder="Type and press comma..." />
+            <input type="hidden" name="tags" data-task-modal-tags-hidden value="" />
+          </div>
+        </label>
+        <div class="task-modal-actions">
+          <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
+          <div class="task-modal-actions-right">
+            <button type="button" data-task-modal-cancel>Cancel</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>`;
 }
 

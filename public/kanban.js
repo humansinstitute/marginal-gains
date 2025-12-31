@@ -31,9 +31,11 @@ function applyViewMode() {
   if (state.viewMode === "kanban") {
     hide(listView);
     show(kanbanView);
+    document.body.classList.add("kanban-active");
   } else {
     show(listView);
     hide(kanbanView);
+    document.body.classList.remove("kanban-active");
   }
 
   // Update active button state

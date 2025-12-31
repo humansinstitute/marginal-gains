@@ -37,6 +37,7 @@ function renderChatHeader(session: Session | null) {
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
         <span class="hamburger-icon"></span>
       </button>
+      <img src="/favicon.png" alt="" class="app-logo" />
       <h1 class="app-title">${APP_NAME}</h1>
     </div>
     <div class="header-right">
@@ -97,7 +98,11 @@ function renderChatContent() {
         <header class="chat-thread-panel-header">
           <button type="button" class="chat-back-btn" data-back-to-messages>Back</button>
           <h3>Thread</h3>
-          <button type="button" class="chat-thread-close" data-close-thread>&times;</button>
+          <div class="chat-thread-header-actions">
+            <button type="button" class="chat-thread-expand" data-expand-thread title="Expand thread">|&larr;</button>
+            <button type="button" class="chat-thread-expand" data-collapse-thread hidden title="Collapse thread">&rarr;|</button>
+            <button type="button" class="chat-thread-close" data-close-thread>&times;</button>
+          </div>
         </header>
         <div class="chat-thread-panel-messages" data-thread-messages></div>
         <div class="chat-thread-panel-composer">
