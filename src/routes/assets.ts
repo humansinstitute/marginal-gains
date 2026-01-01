@@ -1,7 +1,9 @@
+import { randomUUID } from "crypto";
 import { mkdir } from "fs/promises";
 import { join, extname } from "path";
-import { randomUUID } from "crypto";
+
 import { isAdmin } from "../config";
+
 import type { Session } from "../types";
 
 export const ASSETS_ROOT = join(import.meta.dir, "../../assets");

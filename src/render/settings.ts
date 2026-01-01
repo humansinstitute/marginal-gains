@@ -1,5 +1,7 @@
 import { APP_NAME, isAdmin } from "../config";
+
 import { renderAppMenu } from "./components";
+
 import type { Session } from "../types";
 
 export function renderSettingsPage(session: Session) {
@@ -73,8 +75,20 @@ function renderSettingsContent(userIsAdmin: boolean) {
       <p class="settings-empty">Loading...</p>
     </section>
 
+    ${userIsAdmin ? renderWingmanSection() : ""}
     ${userIsAdmin ? renderGroupsSection() : ""}
   </div>`;
+}
+
+function renderWingmanSection() {
+  return `<section class="settings-section" data-wingman-section>
+      <div class="settings-section-header">
+        <h2>Wingman AI</h2>
+      </div>
+      <div class="settings-wingman-content" data-wingman-content>
+        <p class="settings-empty">Loading...</p>
+      </div>
+    </section>`;
 }
 
 function renderGroupsSection() {

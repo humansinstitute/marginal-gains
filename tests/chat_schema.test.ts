@@ -1,8 +1,8 @@
 import { rm } from "fs/promises";
 import { join } from "path";
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 const TEST_DB_PATH = join(import.meta.dir, "tmp-chat-schema.sqlite");
 await rm(TEST_DB_PATH, { force: true });

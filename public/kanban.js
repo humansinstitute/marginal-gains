@@ -19,8 +19,28 @@ export function initKanban() {
     });
   }
 
+  // Context switcher (Personal / Group dropdown)
+  initContextSwitcher();
+
   // Initialize drag-drop for kanban cards
   initDragDrop();
+
+  // Initialize thread link handlers
+  initThreadLinks();
+}
+
+function initContextSwitcher() {
+  const switcher = document.querySelector("[data-context-switcher]");
+  if (!switcher) return;
+
+  switcher.addEventListener("change", (e) => {
+    const groupId = e.target.value;
+    if (groupId) {
+      window.location.href = `/todo?group=${groupId}`;
+    } else {
+      window.location.href = "/todo";
+    }
+  });
 }
 
 function applyViewMode() {
@@ -56,6 +76,14 @@ function initDragDrop() {
   kanbanBoard.addEventListener("dragstart", (e) => {
     const card = e.target.closest("[data-todo-id]");
     if (!card) return;
+
+    // Check if column is readonly
+    const column = card.closest("[data-kanban-cards]");
+    if (column && column.dataset.readonly === "true") {
+      e.preventDefault();
+      return;
+    }
+
     draggedCard = card;
     card.classList.add("dragging");
     e.dataTransfer.effectAllowed = "move";
@@ -74,7 +102,7 @@ function initDragDrop() {
   kanbanBoard.addEventListener("dragover", (e) => {
     e.preventDefault();
     const column = e.target.closest("[data-kanban-cards]");
-    if (column) {
+    if (column && column.dataset.readonly !== "true") {
       e.dataTransfer.dropEffect = "move";
       column.classList.add("drop-target");
     }
@@ -92,6 +120,9 @@ function initDragDrop() {
     const column = e.target.closest("[data-kanban-cards]");
     if (!column || !draggedCard) return;
 
+    // Check readonly
+    if (column.dataset.readonly === "true") return;
+
     column.classList.remove("drop-target");
 
     const todoId = draggedCard.dataset.todoId;
@@ -99,6 +130,9 @@ function initDragDrop() {
     const oldState = draggedCard.dataset.todoState;
 
     if (newState === oldState) return;
+
+    // Get group_id from card or global
+    const groupId = draggedCard.dataset.groupId || window.__GROUP_ID__ || null;
 
     // Optimistically move the card
     const emptyMessage = column.querySelector(".kanban-empty");
@@ -111,10 +145,13 @@ function initDragDrop() {
 
     // Send update to server
     try {
+      const body = { state: newState };
+      if (groupId) body.group_id = groupId;
+
       const response = await fetch(`/api/todos/${todoId}/state`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: newState }),
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
@@ -144,6 +181,107 @@ function updateColumnCounts() {
       cardsContainer.innerHTML = '<p class="kanban-empty">No tasks</p>';
     }
   });
+}
+
+// Thread links dropdown state
+let activeThreadDropdown = null;
+
+function initThreadLinks() {
+  // Use event delegation for thread badge clicks
+  document.addEventListener("click", async (e) => {
+    const badge = e.target.closest("[data-view-threads]");
+    const threadLink = e.target.closest("[data-goto-thread]");
+
+    // Close any open dropdown if clicking outside
+    if (!badge && !threadLink && activeThreadDropdown) {
+      closeThreadDropdown();
+      return;
+    }
+
+    // Handle thread badge click - show dropdown
+    if (badge) {
+      e.preventDefault();
+      e.stopPropagation();
+      const todoId = badge.dataset.viewThreads;
+      await toggleThreadDropdown(badge, todoId);
+      return;
+    }
+
+    // Handle thread link click - navigate to chat
+    if (threadLink) {
+      e.preventDefault();
+      const channelName = threadLink.dataset.gotoThread;
+      const threadId = threadLink.dataset.threadId;
+      window.location.href = `/chat/channel/${encodeURIComponent(channelName)}?thread=${threadId}`;
+    }
+  });
+}
+
+async function toggleThreadDropdown(badge, todoId) {
+  // Close if clicking the same badge
+  if (activeThreadDropdown && activeThreadDropdown.dataset.todoId === todoId) {
+    closeThreadDropdown();
+    return;
+  }
+
+  // Close any existing dropdown
+  closeThreadDropdown();
+
+  // Fetch threads for this task
+  try {
+    const res = await fetch(`/api/tasks/${todoId}/threads`);
+    if (!res.ok) {
+      console.error("Failed to fetch threads");
+      return;
+    }
+    const data = await res.json();
+    const threads = data.threads || [];
+
+    if (threads.length === 0) {
+      return;
+    }
+
+    // Create dropdown
+    const dropdown = document.createElement("div");
+    dropdown.className = "thread-links-dropdown";
+    dropdown.dataset.todoId = todoId;
+
+    dropdown.innerHTML = threads
+      .map((thread) => {
+        const preview = thread.body?.slice(0, 50) || "Thread";
+        const previewText = thread.body?.length > 50 ? preview + "..." : preview;
+        return `<button type="button" class="thread-link-item" data-goto-thread="${escapeHtml(thread.channel_name)}" data-thread-id="${thread.message_id}">
+          <span class="thread-link-channel">#${escapeHtml(thread.channel_name)}</span>
+          <span class="thread-link-preview">${escapeHtml(previewText)}</span>
+        </button>`;
+      })
+      .join("");
+
+    // Position relative to badge
+    const rect = badge.getBoundingClientRect();
+    dropdown.style.position = "fixed";
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.left = `${rect.left}px`;
+    dropdown.style.zIndex = "1000";
+
+    document.body.appendChild(dropdown);
+    activeThreadDropdown = dropdown;
+  } catch (_err) {
+    console.error("Failed to fetch threads");
+  }
+}
+
+function closeThreadDropdown() {
+  if (activeThreadDropdown) {
+    activeThreadDropdown.remove();
+    activeThreadDropdown = null;
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  const escapes = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return str.replace(/[&<>"']/g, (c) => escapes[c]);
 }
 
 // Re-export for use in app.js

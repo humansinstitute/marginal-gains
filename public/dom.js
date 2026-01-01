@@ -100,6 +100,16 @@ export const elements = {
   dmSearch: document.querySelector("[data-dm-search]"),
   dmUserList: document.querySelector("[data-dm-user-list]"),
   closeDmModalBtns: document.querySelectorAll("[data-close-dm-modal]"),
+  // Task link modal elements
+  viewThreadTasksBtn: document.querySelector("[data-view-thread-tasks]"),
+  taskLinkModal: document.querySelector("[data-task-link-modal]"),
+  closeTaskLinkBtns: document.querySelectorAll("[data-close-task-link]"),
+  taskLinkTabs: document.querySelector(".task-link-tabs"),
+  taskLinkCreateForm: document.querySelector("[data-task-link-create]"),
+  taskBoardSelect: document.querySelector("[data-task-board]"),
+  taskLinkExisting: document.querySelector("[data-task-link-existing]"),
+  taskSearchInput: document.querySelector("[data-task-search]"),
+  taskResults: document.querySelector("[data-task-results]"),
 };
 
 export const show = (el) => el?.removeAttribute("hidden");

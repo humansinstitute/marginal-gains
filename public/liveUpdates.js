@@ -43,6 +43,7 @@ const eventHandlers = {
   "dm:new": [],
   "sync:init": [],
   "connection:change": [],
+  "wingman:thinking": [],
 };
 
 /**
@@ -184,6 +185,17 @@ export async function connect() {
       emitEvent("dm:new", data);
     } catch (err) {
       console.error("[LiveUpdates] Error handling dm:new:", err);
+    }
+  });
+
+  // Handle Wingman thinking indicator
+  eventSource.addEventListener("wingman:thinking", (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log("[LiveUpdates] Wingman thinking:", data);
+      emitEvent("wingman:thinking", data);
+    } catch (err) {
+      console.error("[LiveUpdates] Error handling wingman:thinking:", err);
     }
   });
 }

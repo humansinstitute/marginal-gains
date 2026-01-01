@@ -6,6 +6,8 @@ let mentionQuery = null;
 let mentionStartPos = -1;
 let mentionSelectedIndex = 0;
 let mentionMatches = [];
+let activeInput = null; // Track which input is active
+let activePopup = null; // Track which popup is active
 
 // Reference to user cache (set via init)
 let userCache = null;
@@ -55,16 +57,40 @@ export function filterUsers(query) {
     .slice(0, 8);
 }
 
+// Get or create popup for an input element
+function getPopupForInput(input) {
+  // For main chat input, use the existing popup
+  if (input === el.chatInput && el.mentionPopup) {
+    return el.mentionPopup;
+  }
+
+  // For thread input, create/get a popup in the thread composer
+  if (input === el.threadInput) {
+    let popup = document.querySelector("[data-thread-mention-popup]");
+    if (!popup) {
+      popup = document.createElement("div");
+      popup.className = "mention-popup";
+      popup.setAttribute("data-thread-mention-popup", "");
+      popup.hidden = true;
+      // Insert before the thread input
+      input.parentElement?.insertBefore(popup, input);
+    }
+    return popup;
+  }
+
+  return null;
+}
+
 // Render the mention popup
 export function renderMentionPopup() {
-  if (!el.mentionPopup) return;
+  if (!activePopup) return;
 
   if (mentionQuery === null || mentionMatches.length === 0) {
-    hide(el.mentionPopup);
+    hide(activePopup);
     return;
   }
 
-  el.mentionPopup.innerHTML = mentionMatches
+  activePopup.innerHTML = mentionMatches
     .map((user, index) => {
       const name = user.display_name || user.name || "Unknown";
       const avatarUrl = user.picture || `https://robohash.org/${user.pubkey || user.npub}.png?set=set3`;
@@ -78,9 +104,9 @@ export function renderMentionPopup() {
     })
     .join("");
 
-  show(el.mentionPopup);
+  show(activePopup);
 
-  el.mentionPopup.querySelectorAll(".mention-item").forEach((item) => {
+  activePopup.querySelectorAll(".mention-item").forEach((item) => {
     item.addEventListener("click", () => {
       const npub = item.dataset.npub;
       if (npub) insertMention(npub);
@@ -90,22 +116,22 @@ export function renderMentionPopup() {
 
 // Insert a mention at the current position
 export function insertMention(npub) {
-  if (!el.chatInput || mentionStartPos === -1) return;
+  if (!activeInput || mentionStartPos === -1) return;
 
-  const text = el.chatInput.value;
+  const text = activeInput.value;
   const before = text.slice(0, mentionStartPos);
-  const cursorPos = el.chatInput.selectionStart;
+  const cursorPos = activeInput.selectionStart;
   const after = text.slice(cursorPos);
 
   const mention = `nostr:${npub} `;
-  el.chatInput.value = before + mention + after;
+  activeInput.value = before + mention + after;
 
   const newCursorPos = mentionStartPos + mention.length;
-  el.chatInput.setSelectionRange(newCursorPos, newCursorPos);
-  el.chatInput.focus();
+  activeInput.setSelectionRange(newCursorPos, newCursorPos);
+  activeInput.focus();
 
   closeMentionPopup();
-  el.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+  activeInput.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 // Close mention popup and reset state
@@ -114,16 +140,21 @@ export function closeMentionPopup() {
   mentionStartPos = -1;
   mentionSelectedIndex = 0;
   mentionMatches = [];
-  hide(el.mentionPopup);
+  if (activePopup) hide(activePopup);
+  activeInput = null;
+  activePopup = null;
 }
 
 // Handle input changes for mention detection
-export function handleMentionInput() {
-  if (!el.chatInput) return;
+// Now accepts an optional input parameter
+export function handleMentionInput(input = el.chatInput) {
+  if (!input) return;
 
-  const detected = detectMentionQuery(el.chatInput);
+  const detected = detectMentionQuery(input);
 
   if (detected) {
+    activeInput = input;
+    activePopup = getPopupForInput(input);
     mentionQuery = detected.query;
     mentionStartPos = detected.startPos;
     mentionMatches = filterUsers(mentionQuery);

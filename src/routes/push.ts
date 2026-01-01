@@ -9,6 +9,7 @@ import {
   sendNotificationToUser,
   subscribePush,
 } from "../services/push";
+
 import type { NotificationFrequency, Session } from "../types";
 
 export function handleGetVapidPublicKey() {

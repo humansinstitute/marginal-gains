@@ -10,6 +10,7 @@ import {
   upsertPushSubscription,
   type PushSubscription,
 } from "../db";
+
 import type { NotificationFrequency, NotificationPayload } from "../types";
 
 export function initPushService(contactEmail: string): string {

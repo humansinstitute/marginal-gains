@@ -81,30 +81,45 @@ export function renderMessageBody(body) {
     return `<a href="${safeUrl}" target="_blank" rel="noopener">${safeName}</a>`;
   });
 
+  // Auto-link plain URLs (not already in href/src attributes)
+  // Matches http://, https://, and www. URLs
+  const urlRegex = /(?<!href="|src=")(https?:\/\/[^\s<>"]+|www\.[^\s<>"]+)/g;
+  html = html.replace(urlRegex, (url) => {
+    const href = url.startsWith("www.") ? `https://${url}` : url;
+    const safeHref = href.replace(/"/g, "&quot;");
+    // Truncate display URL if too long
+    const displayUrl = url.length > 50 ? url.slice(0, 47) + "..." : url;
+    return `<a href="${safeHref}" target="_blank" rel="noopener">${displayUrl}</a>`;
+  });
+
   return html;
 }
 
 // Render message action menu (copy for all, delete for author or admin)
-export function renderMessageMenu(message, { isThreadRoot = false } = {}) {
+// threadRootId is the root message ID of the thread (for linking purposes)
+export function renderMessageMenu(message, { isThreadRoot = false, threadRootId = null } = {}) {
   const ctx = getContext();
   const canDelete = ctx.session?.npub === message.author || ctx.isAdmin;
+  // Use the thread root ID for linking (or message.id if this is the root)
+  const linkTargetId = threadRootId || message.id;
 
   return `<div class="message-menu">
     <button class="message-menu-trigger" data-message-menu="${message.id}" aria-label="Message options">&#8942;</button>
     <div class="message-menu-dropdown" data-message-dropdown="${message.id}" hidden>
       <button class="message-menu-item" data-copy-message="${message.id}">Copy message text</button>
       ${isThreadRoot ? `<button class="message-menu-item" data-copy-thread="${message.id}">Copy entire thread</button>` : ""}
+      <button class="message-menu-item" data-link-thread-to-task="${linkTargetId}">Link thread to task</button>
       ${canDelete ? `<button class="message-menu-item danger" data-delete-message="${message.id}">Delete</button>` : ""}
     </div>
   </div>`;
 }
 
 // Render compact message (with optional avatar)
-export function renderMessageCompact(message, { showAvatar = false, isThreadRoot = false } = {}) {
+export function renderMessageCompact(message, { showAvatar = false, isThreadRoot = false, threadRootId = null } = {}) {
   const avatarHtml = showAvatar
     ? `<img class="chat-message-avatar" src="${escapeHtml(getAuthorAvatarUrl(message.author))}" alt="" loading="lazy" />`
     : "";
-  const menuHtml = renderMessageMenu(message, { isThreadRoot });
+  const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
   return `<div class="chat-message${showAvatar ? " chat-message-with-avatar" : ""}" data-message-id="${message.id}">
     ${avatarHtml}
     <div class="chat-message-content">
@@ -119,9 +134,9 @@ export function renderMessageCompact(message, { showAvatar = false, isThreadRoot
 }
 
 // Render full message with avatar
-export function renderMessageFull(message, { isThreadRoot = false } = {}) {
+export function renderMessageFull(message, { isThreadRoot = false, threadRootId = null } = {}) {
   const avatarUrl = getAuthorAvatarUrl(message.author);
-  const menuHtml = renderMessageMenu(message, { isThreadRoot });
+  const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
   return `<div class="chat-message chat-message-with-avatar" data-message-id="${message.id}">
     <img class="chat-thread-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
     <div class="chat-message-content">

@@ -1,3 +1,4 @@
+import { isAdmin } from "../config";
 import {
   addChannelGroup,
   addGroupMember,
@@ -13,7 +14,6 @@ import {
   removeGroupMember,
   updateGroup,
 } from "../db";
-import { isAdmin } from "../config";
 import { jsonResponse, unauthorized } from "../http";
 
 import type { Session } from "../types";

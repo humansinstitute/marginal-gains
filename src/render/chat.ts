@@ -1,5 +1,7 @@
 import { APP_NAME } from "../config";
+
 import { renderAppMenu, renderPinModal } from "./components";
+
 import type { DeepLink, Session } from "../types";
 
 export function renderChatPage(session: Session | null, deepLink?: DeepLink) {
@@ -99,6 +101,7 @@ function renderChatContent() {
           <button type="button" class="chat-back-btn" data-back-to-messages>Back</button>
           <h3>Thread</h3>
           <div class="chat-thread-header-actions">
+            <button type="button" class="chat-thread-tasks-btn" data-view-thread-tasks hidden title="View linked tasks">&#9745;</button>
             <button type="button" class="chat-thread-expand" data-expand-thread title="Expand thread">|&larr;</button>
             <button type="button" class="chat-thread-expand" data-collapse-thread hidden title="Collapse thread">&rarr;|</button>
             <button type="button" class="chat-thread-close" data-close-thread>&times;</button>
@@ -115,6 +118,7 @@ function renderChatContent() {
     ${renderChannelSettingsModal()}
     ${renderDmModal()}
     ${renderProfileModal()}
+    ${renderTaskLinkModal()}
   </section>`;
 }
 
@@ -249,6 +253,58 @@ function renderProfileModal() {
         </div>
         <p class="profile-edit-status" data-profile-edit-status hidden></p>
       </form>
+    </div>
+  </div>`;
+}
+
+function renderTaskLinkModal() {
+  return `<div class="chat-modal task-link-modal" data-task-link-modal hidden>
+    <div class="chat-modal-body task-link-modal-body">
+      <header class="chat-modal-header">
+        <h3>Link to Task</h3>
+        <button type="button" class="ghost" data-close-task-link>&times;</button>
+      </header>
+      <div class="task-link-tabs">
+        <button type="button" class="task-link-tab active" data-task-tab="create">Create New</button>
+        <button type="button" class="task-link-tab" data-task-tab="existing">Link Existing</button>
+      </div>
+      <form class="task-link-create-form" data-task-link-create>
+        <label>
+          <span>Board</span>
+          <select name="board" data-task-board>
+            <option value="">Personal</option>
+          </select>
+        </label>
+        <label>
+          <span>Title</span>
+          <input name="title" required placeholder="Task title" />
+        </label>
+        <label>
+          <span>Description</span>
+          <textarea name="description" rows="2" placeholder="Description (optional)"></textarea>
+        </label>
+        <label>
+          <span>Priority</span>
+          <select name="priority">
+            <option value="sand">Sand (Low)</option>
+            <option value="pebble" selected>Pebble (Normal)</option>
+            <option value="rock">Rock (High)</option>
+            <option value="boulder">Boulder (Critical)</option>
+          </select>
+        </label>
+        <div class="chat-form-actions">
+          <button type="button" class="ghost" data-close-task-link>Cancel</button>
+          <button type="submit" class="primary">Create &amp; Link</button>
+        </div>
+      </form>
+      <div class="task-link-existing" data-task-link-existing hidden>
+        <div class="task-search-container">
+          <input type="search" placeholder="Search tasks..." data-task-search autocomplete="off" />
+        </div>
+        <div class="task-search-results" data-task-results>
+          <p class="task-search-empty">Start typing to search tasks...</p>
+        </div>
+      </div>
     </div>
   </div>`;
 }

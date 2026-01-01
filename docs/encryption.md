@@ -25,11 +25,49 @@ This document describes the encryption approach for private group messages and D
 ### Adding Members
 
 ```
-1. Owner invites a new member
+1. Owner invites a new member (by npub)
 2. Owner's client decrypts the channel key from their key store
 3. Owner's client re-encrypts the channel key to the new member's npub (NIP-44)
 4. New encrypted key blob stored in DB for the new member
 ```
+
+### Offline Invitation (Key Pre-Distribution)
+
+A critical feature: **members don't need to be logged in to receive keys**.
+
+Since NIP-44 encryption only requires the recipient's public key (npub), the owner can:
+1. Invite a user by npub who has never logged into the app
+2. Wrap the channel key to that npub immediately
+3. Store the wrapped key in `user_channel_keys`
+
+When the invited user eventually logs in:
+1. They see the encrypted channel in their channel list
+2. Client checks `user_channel_keys` for their pubkey
+3. Finds the pre-distributed wrapped key
+4. Decrypts it with their nsec (via extension or ephemeral key)
+5. Can immediately read all encrypted messages
+
+```
+Owner                          Server                         New User (offline)
+  │                              │                                │
+  │─── Invite user by npub ─────▶│                                │
+  │                              │── Add to channel_members ─────▶│
+  │                              │                                │
+  │─── Wrap key to npub ────────▶│                                │
+  │    (NIP-44 encrypt)          │── Store in user_channel_keys ─▶│
+  │                              │                                │
+  │                              │         ... time passes ...    │
+  │                              │                                │
+  │                              │◀────────── User logs in ───────│
+  │                              │                                │
+  │                              │◀─── GET /channels/:id/keys ────│
+  │                              │──── Return wrapped key ───────▶│
+  │                              │                                │
+  │                              │         User decrypts with nsec│
+  │                              │         Can read all messages! │
+```
+
+This ensures seamless onboarding - no "waiting for key exchange" flow required.
 
 ### Sending Messages
 
@@ -114,6 +152,26 @@ base64(nonce || ciphertext || tag)
 - 12-byte random nonce
 - Variable-length ciphertext
 - 16-byte authentication tag
+
+### Encrypted Payload Structure
+
+Before encryption, the message is wrapped with sender authentication:
+
+```json
+{
+  "content": "The actual message text",
+  "sender": "<sender pubkey hex>",
+  "ts": 1704067200,
+  "sig": "<Nostr signature of content+ts by sender>"
+}
+```
+
+This JSON is then encrypted with AES-256-GCM. On decryption, clients:
+1. Decrypt the payload
+2. Verify `sig` matches `content+ts` signed by `sender`
+3. Reject if signature invalid (display as `[Unverified message]`)
+
+**Why**: Prevents impersonation. Without this, anyone with the channel key could forge messages as any sender. The Nostr signature proves the message came from who it claims.
 
 ## Access Control
 
@@ -320,12 +378,35 @@ Users with ephemeral login (localStorage keys) risk losing access if storage is 
 - [ ] 2.3: Implement `encryptMessage(plaintext, key)` - AES-256-GCM encryption
 - [ ] 2.4: Implement `decryptMessage(ciphertext, key)` - AES-256-GCM decryption
 - [ ] 2.5: Implement `wrapKeyForUser(channelKey, recipientPubkey)` - NIP-44 key wrapping
-- [ ] 2.6: Implement `unwrapKey(wrappedKey)` - NIP-44 key unwrapping
-- [ ] 2.7: Add unit tests for crypto operations
+- [ ] 2.6: Implement `unwrapKey(wrappedKey, senderPubkey)` - NIP-44 key unwrapping
+- [ ] 2.7: Implement `createSignedPayload(content, senderPubkey)` - wrap content with Nostr signature
+- [ ] 2.8: Implement `verifySignedPayload(payload)` - verify signature matches sender
+- [ ] 2.9: Add unit tests for crypto operations
+
+**Signed Payload Functions**:
+```javascript
+// Create payload with Nostr signature (uses NIP-07 extension or ephemeral key)
+async function createSignedPayload(content) {
+  const ts = Math.floor(Date.now() / 1000);
+  const message = `${content}:${ts}`;
+  const sig = await window.nostr.signSchnorr(message); // or use ephemeral key
+  const sender = await window.nostr.getPublicKey();
+
+  return JSON.stringify({ content, sender, ts, sig });
+}
+
+// Verify payload signature
+function verifySignedPayload(payload) {
+  const { content, sender, ts, sig } = JSON.parse(payload);
+  const message = `${content}:${ts}`;
+  const valid = schnorr.verify(sig, message, sender); // nostr-tools
+  return { valid, content, sender, ts };
+}
+```
 
 **Files**: `public/crypto.js`, `tests/crypto.test.ts`
 
-**Dependencies**: `nostr-tools` for NIP-44
+**Dependencies**: `nostr-tools` for NIP-44 and Schnorr signatures
 
 ---
 
@@ -358,15 +439,18 @@ Users with ephemeral login (localStorage keys) risk losing access if storage is 
 
 ### WP5: Member Invitation with Key Distribution
 
-**Objective**: Share channel key when inviting members
+**Objective**: Share channel key when inviting members (including offline users)
 
 - [ ] 5.1: When owner invites a member, fetch owner's wrapped key
 - [ ] 5.2: Unwrap to get channel key
-- [ ] 5.3: Wrap channel key to new member's pubkey
+- [ ] 5.3: Wrap channel key to new member's pubkey (works even if user never logged in)
 - [ ] 5.4: Store new member's wrapped key via API
 - [ ] 5.5: Handle invitation UI flow
+- [ ] 5.6: On login, client checks for pre-distributed keys in channels user is member of
 
-**Files**: `public/channels.js`, `public/crypto.js`
+**Note**: Key pre-distribution works because NIP-44 only needs recipient's pubkey (not nsec). User decrypts on first login.
+
+**Files**: `public/channels.js`, `public/crypto.js`, `public/app.js` (login flow)
 
 **Prerequisite**: WP2, WP3, WP4
 
@@ -376,12 +460,31 @@ Users with ephemeral login (localStorage keys) risk losing access if storage is 
 
 **Objective**: Encrypt outgoing messages, decrypt incoming messages
 
-- [ ] 6.1: Create key cache in client (decrypt key once per session)
-- [ ] 6.2: On send in encrypted channel: encrypt message content before POST
+- [ ] 6.1: Create key cache in client using `sessionStorage` (decrypt key once per session, clears on tab close)
+- [ ] 6.2: On send: wrap content in signed payload `{content, sender, ts, sig}`, then encrypt
 - [ ] 6.3: Server stores encrypted content with `encrypted=1`, `key_version`
-- [ ] 6.4: On receive: check `encrypted` flag, decrypt if needed
+- [ ] 6.4: On receive: decrypt, verify sender signature, reject if invalid
 - [ ] 6.5: Handle SSE events for encrypted messages
-- [ ] 6.6: Update message rendering to handle both encrypted and plaintext
+- [ ] 6.6: Update message rendering to handle encrypted, plaintext, and error states
+- [ ] 6.7: Show `[Unable to decrypt message]` placeholder on decryption failure
+- [ ] 6.8: Show `[Unverified message]` placeholder if signature verification fails
+
+**Key Cache Strategy**:
+```javascript
+// sessionStorage - survives page refresh, clears on tab close
+const CACHE_KEY = 'mg_channel_keys';
+
+function getCachedKey(channelId) {
+  const cache = JSON.parse(sessionStorage.getItem(CACHE_KEY) || '{}');
+  return cache[channelId]; // Returns raw symmetric key or undefined
+}
+
+function setCachedKey(channelId, key) {
+  const cache = JSON.parse(sessionStorage.getItem(CACHE_KEY) || '{}');
+  cache[channelId] = key;
+  sessionStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+}
+```
 
 **Files**: `public/chat.js`, `public/crypto.js`, `src/routes/chat.ts`
 

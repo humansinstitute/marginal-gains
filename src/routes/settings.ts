@@ -1,4 +1,5 @@
 import { renderSettingsPage } from "../render/settings";
+
 import type { Session } from "../types";
 
 export function handleSettings(session: Session | null) {

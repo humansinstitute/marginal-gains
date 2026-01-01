@@ -1,12 +1,19 @@
+import { isAdmin } from "../config";
 import {
   addTodo,
   addTodoFull,
   deleteTodo,
+  deleteGroupTodo,
+  getGroup,
   getLatestSummaries,
+  getTodoById,
+  listGroupTodos,
   listScheduledTodos,
   listTodos,
   listUnscheduledTodos,
+  transitionGroupTodo,
   transitionTodo,
+  updateGroupTodo,
   updateTodo,
   upsertSummary,
 } from "../db";
@@ -17,8 +24,22 @@ import { normalizeStateInput, validateTaskInput, validateTodoForm, validateTodoT
 export const TODO_STATE_OPTIONS = TODO_STATES;
 export const TODO_PRIORITY_OPTIONS = TODO_PRIORITIES;
 
+/**
+ * Check if a user can manage todos in a group.
+ * Only system admins and group creators can manage group todos.
+ */
+export function canManageGroupTodo(npub: string, groupId: number): boolean {
+  if (isAdmin(npub)) return true;
+  const group = getGroup(groupId);
+  return group?.created_by === npub;
+}
+
 export function listOwnerTodos(owner: string | null) {
   return listTodos(owner);
+}
+
+export function listTodosForGroup(groupId: number) {
+  return listGroupTodos(groupId);
 }
 
 export function listOwnerScheduled(owner: string, endDate: string) {
@@ -42,11 +63,11 @@ export function createTodoFromForm(owner: string, form: FormData) {
   return addTodoFull(owner, fields);
 }
 
-export function quickAddTodo(owner: string, title: string, tags: string) {
+export function quickAddTodo(owner: string, title: string, tags: string, groupId: number | null = null) {
   const normalizedTitle = validateTodoTitle(title);
   if (!normalizedTitle) return null;
   const normalizedTags = tags?.trim() ?? "";
-  return addTodo(normalizedTitle, owner, normalizedTags);
+  return addTodo(normalizedTitle, owner, normalizedTags, groupId);
 }
 
 export function updateTodoFromForm(owner: string, id: number, form: FormData) {
@@ -72,6 +93,32 @@ export function transitionTodoState(owner: string, id: number, state: string) {
 
 export function removeTodo(owner: string, id: number) {
   return deleteTodo(id, owner);
+}
+
+// Group todo operations
+export function updateGroupTodoFromForm(groupId: number, id: number, form: FormData) {
+  const fields = validateTodoForm({
+    title: form.get("title"),
+    description: form.get("description"),
+    priority: form.get("priority"),
+    state: form.get("state"),
+    scheduled_for: form.get("scheduled_for"),
+    tags: form.get("tags"),
+  });
+  if (!fields) return null;
+  return updateGroupTodo(id, groupId, fields);
+}
+
+export function transitionGroupTodoState(groupId: number, id: number, state: string) {
+  const normalized = normalizeStateInput(state);
+  const existing = getTodoById(id);
+  if (!existing || existing.group_id !== groupId) return null;
+  if (!isAllowedTransition(existing.state, normalized)) return null;
+  return transitionGroupTodo(id, groupId, normalized);
+}
+
+export function removeGroupTodo(groupId: number, id: number) {
+  return deleteGroupTodo(id, groupId);
 }
 
 export function createTodosFromTasks(owner: string, tasks: Array<Record<string, any>>) {

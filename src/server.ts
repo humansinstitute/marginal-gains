@@ -12,6 +12,7 @@ import {
 import { withErrorHandling } from "./http";
 import { logError } from "./logger";
 import { handleAiTasks, handleAiTasksPost, handleLatestSummary, handleSummaryPost } from "./routes/ai";
+import { handleAssetUpload, serveAsset } from "./routes/assets";
 import { createAuthHandlers } from "./routes/auth";
 import {
   handleChatPage,
@@ -28,6 +29,7 @@ import {
   handleUpdateChannel,
   handleUpdateUser,
 } from "./routes/chat";
+import { handleChatEvents } from "./routes/events";
 import {
   handleAddChannelGroups,
   handleAddGroupMembers,
@@ -41,10 +43,7 @@ import {
   handleRemoveGroupMember,
   handleUpdateGroup,
 } from "./routes/groups";
-import { handleChatEvents } from "./routes/events";
 import { handleHome, handleTodos } from "./routes/home";
-import { handleAssetUpload, serveAsset } from "./routes/assets";
-import { handleSettings } from "./routes/settings";
 import {
   handleGetPushStatus,
   handleGetVapidPublicKey,
@@ -53,7 +52,22 @@ import {
   handlePushUpdateFrequency,
   handleSendTestNotification,
 } from "./routes/push";
+import { handleSettings } from "./routes/settings";
+import {
+  handleCreateTask,
+  handleGetTaskThreads,
+  handleGetThreadTasks,
+  handleLinkThreadToTask,
+  handleSearchTasks,
+  handleUnlinkThreadFromTask,
+} from "./routes/tasks";
 import { handleApiTodoState, handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
+import {
+  handleGetSlashCommands,
+  handleGetWingmanSettings,
+  handleUpdateWingmanSettings,
+  handleGetWingmanCosts,
+} from "./routes/wingman";
 import { AuthService } from "./services/auth";
 import { initPushService } from "./services/push";
 import { serveStatic } from "./static";
@@ -127,6 +141,18 @@ const server = Bun.serve({
         // Push notification routes
         if (pathname === "/api/push/vapid-public-key") return handleGetVapidPublicKey();
         if (pathname === "/api/push/status") return handleGetPushStatus(session);
+
+        // Task-thread linking routes
+        if (pathname === "/api/tasks/search") return handleSearchTasks(url, session);
+        const taskThreadsMatch = pathname.match(/^\/api\/tasks\/(\d+)\/threads$/);
+        if (taskThreadsMatch) return handleGetTaskThreads(session, Number(taskThreadsMatch[1]));
+        const threadTasksMatch = pathname.match(/^\/api\/threads\/(\d+)\/tasks$/);
+        if (threadTasksMatch) return handleGetThreadTasks(session, Number(threadTasksMatch[1]));
+
+        // Wingman routes
+        if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
+        if (pathname === "/api/wingman/costs") return handleGetWingmanCosts(session);
+        if (pathname === "/api/slashcommands") return handleGetSlashCommands(session);
       }
 
       if (req.method === "POST") {
@@ -148,7 +174,7 @@ const server = Bun.serve({
         if (apiStateMatch) return handleApiTodoState(req, session, Number(apiStateMatch[1]));
 
         const deleteMatch = pathname.match(/^\/todos\/(\d+)\/delete$/);
-        if (deleteMatch) return handleTodoDelete(session, Number(deleteMatch[1]));
+        if (deleteMatch) return handleTodoDelete(req, session, Number(deleteMatch[1]));
 
         // Chat routes
         if (pathname === "/chat/channels") return handleCreateChannel(req, session);
@@ -168,6 +194,11 @@ const server = Bun.serve({
         if (pathname === "/api/push/subscribe") return handlePushSubscribe(req, session);
         if (pathname === "/api/push/unsubscribe") return handlePushUnsubscribe(req, session);
         if (pathname === "/api/push/test") return handleSendTestNotification(session);
+
+        // Task-thread linking routes
+        if (pathname === "/api/tasks") return handleCreateTask(req, session);
+        const linkThreadMatch = pathname.match(/^\/api\/tasks\/(\d+)\/threads$/);
+        if (linkThreadMatch) return handleLinkThreadToTask(req, session, Number(linkThreadMatch[1]));
       }
 
       if (req.method === "PATCH") {
@@ -178,6 +209,9 @@ const server = Bun.serve({
 
         // Push notification routes
         if (pathname === "/api/push/frequency") return handlePushUpdateFrequency(req, session);
+
+        // Wingman routes
+        if (pathname === "/api/wingman/settings") return handleUpdateWingmanSettings(req, session);
       }
 
       if (req.method === "DELETE") {
@@ -206,6 +240,16 @@ const server = Bun.serve({
             session,
             Number(removeChannelGroupMatch[1]),
             Number(removeChannelGroupMatch[2])
+          );
+        }
+
+        // Task-thread linking routes
+        const unlinkThreadMatch = pathname.match(/^\/api\/tasks\/(\d+)\/threads\/(\d+)$/);
+        if (unlinkThreadMatch) {
+          return handleUnlinkThreadFromTask(
+            session,
+            Number(unlinkThreadMatch[1]),
+            Number(unlinkThreadMatch[2])
           );
         }
       }

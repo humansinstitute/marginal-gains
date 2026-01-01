@@ -1,5 +1,5 @@
-import { canUserAccessChannel, deleteChannel, deleteMessage, getDmParticipants, getMessage, getOrCreateDmChannel, getOrCreatePersonalChannel, listAllChannels, listDmChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
 import { isAdmin } from "../config";
+import { canUserAccessChannel, deleteChannel, deleteMessage, getDmParticipants, getMessage, getOrCreateDmChannel, getOrCreatePersonalChannel, listAllChannels, listDmChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
 import { jsonResponse, unauthorized } from "../http";
 import { renderChatPage } from "../render/chat";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../services/chat";
 import { broadcast } from "../services/events";
 import { notifyChannelMessage } from "../services/push";
+import { executeSlashCommands } from "../services/slashCommands";
 
 import type { DeepLink, Session } from "../types";
 
@@ -276,6 +277,11 @@ export async function handleSendMessage(req: Request, session: Session | null, c
     url: pushUrl,
     tag: `channel-${channelId}`,
   }).catch((err) => console.error("[Push] Failed to send notifications:", err));
+
+  // Execute any slash commands in the message (async, don't await)
+  executeSlashCommands(message, session.npub).catch((err) =>
+    console.error("[SlashCommands] Failed to execute:", err)
+  );
 
   return jsonResponse(message, 201);
 }

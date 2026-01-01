@@ -14,6 +14,7 @@ export type Todo = {
   created_at: string;
   scheduled_for: string | null;
   tags: string;
+  group_id: number | null;
 };
 
 export type Summary = {
@@ -106,6 +107,31 @@ export type VapidConfig = {
   created_at: string;
 };
 
+export type TaskThread = {
+  id: number;
+  todo_id: number;
+  message_id: number;
+  linked_by: string;
+  linked_at: string;
+};
+
+export type AppSetting = {
+  key: string;
+  value: string;
+  updated_at: string;
+};
+
+export type WingmanCost = {
+  id: number;
+  npub: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  created_at: string;
+};
+
 const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "marginal-gains.sqlite";
 const db = new Database(dbPath);
 db.run("PRAGMA foreign_keys = ON");
@@ -136,6 +162,16 @@ addColumn("ALTER TABLE todos ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");
 addColumn("ALTER TABLE todos ADD COLUMN owner TEXT NOT NULL DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN scheduled_for TEXT DEFAULT NULL");
 addColumn("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
+addColumn("ALTER TABLE todos ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE");
+
+// Index for efficient group todo queries
+try {
+  db.run("CREATE INDEX idx_todos_group_id ON todos(group_id)");
+} catch (error) {
+  if (!(error instanceof Error) || !error.message.includes("already exists")) {
+    throw error;
+  }
+}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS ai_summaries (
@@ -316,8 +352,50 @@ db.run(`
   )
 `);
 
+// Task-thread links (many-to-many relationship)
+db.run(`
+  CREATE TABLE IF NOT EXISTS task_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    linked_by TEXT NOT NULL,
+    linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(todo_id, message_id)
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_task_threads_todo ON task_threads(todo_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_threads_message ON task_threads(message_id)");
+
+// App-wide settings table (key-value store)
+db.run(`
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+// Wingman cost tracking table
+db.run(`
+  CREATE TABLE IF NOT EXISTS wingman_costs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    npub TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_wingman_costs_npub ON wingman_costs(npub)");
+db.run("CREATE INDEX IF NOT EXISTS idx_wingman_costs_created ON wingman_costs(created_at)");
+
 const listByOwnerStmt = db.query<Todo>(
-  "SELECT * FROM todos WHERE deleted = 0 AND owner = ? ORDER BY created_at DESC"
+  "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY created_at DESC"
+);
+const listByGroupStmt = db.query<Todo>(
+  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? ORDER BY created_at DESC"
 );
 const listScheduledStmt = db.query<Todo>(
   `SELECT * FROM todos
@@ -335,15 +413,17 @@ const listUnscheduledStmt = db.query<Todo>(
      AND (scheduled_for IS NULL OR scheduled_for = '')
    ORDER BY created_at DESC`
 );
-const insertStmt = db.query(
-  "INSERT INTO todos (title, description, priority, state, done, owner, tags) VALUES (?, '', 'sand', 'new', 0, ?, ?) RETURNING *"
+const insertStmt = db.query<Todo>(
+  "INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id) VALUES (?, '', 'sand', 'new', 0, ?, ?, ?) RETURNING *"
 );
 const insertFullStmt = db.query<Todo>(
-  `INSERT INTO todos (title, description, priority, state, done, owner, scheduled_for, tags)
-   VALUES (?, ?, ?, ?, CASE WHEN ? = 'done' THEN 1 ELSE 0 END, ?, ?, ?)
+  `INSERT INTO todos (title, description, priority, state, done, owner, scheduled_for, tags, group_id)
+   VALUES (?, ?, ?, ?, CASE WHEN ? = 'done' THEN 1 ELSE 0 END, ?, ?, ?, ?)
    RETURNING *`
 );
 const deleteStmt = db.query("UPDATE todos SET deleted = 1 WHERE id = ? AND owner = ?");
+const deleteGroupTodoStmt = db.query("UPDATE todos SET deleted = 1 WHERE id = ? AND group_id = ?");
+const getTodoByIdStmt = db.query<Todo>("SELECT * FROM todos WHERE id = ? AND deleted = 0");
 const updateStmt = db.query<Todo>(
   `UPDATE todos
    SET
@@ -363,6 +443,27 @@ const transitionStmt = db.query<Todo>(
     state = ?,
     done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END
    WHERE id = ? AND owner = ?
+   RETURNING *`
+);
+const updateGroupTodoStmt = db.query<Todo>(
+  `UPDATE todos
+   SET
+    title = ?,
+    description = ?,
+    priority = ?,
+    state = ?,
+    done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
+    scheduled_for = ?,
+    tags = ?
+   WHERE id = ? AND group_id = ?
+   RETURNING *`
+);
+const transitionGroupTodoStmt = db.query<Todo>(
+  `UPDATE todos
+   SET
+    state = ?,
+    done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END
+   WHERE id = ? AND group_id = ?
    RETURNING *`
 );
 const upsertSummaryStmt = db.query<Summary>(
@@ -442,6 +543,19 @@ export function listTodos(owner: string | null, filterTags?: string[]) {
   });
 }
 
+export function listGroupTodos(groupId: number, filterTags?: string[]) {
+  const todos = listByGroupStmt.all(groupId);
+  if (!filterTags || filterTags.length === 0) return todos;
+  return todos.filter((todo) => {
+    const todoTags = todo.tags ? todo.tags.split(",").map((t) => t.trim().toLowerCase()) : [];
+    return filterTags.some((ft) => todoTags.includes(ft.toLowerCase()));
+  });
+}
+
+export function getTodoById(id: number) {
+  return getTodoByIdStmt.get(id) as Todo | undefined ?? null;
+}
+
 export function listScheduledTodos(owner: string, endDate: string) {
   return listScheduledStmt.all(owner, endDate);
 }
@@ -450,9 +564,9 @@ export function listUnscheduledTodos(owner: string) {
   return listUnscheduledStmt.all(owner);
 }
 
-export function addTodo(title: string, owner: string, tags: string = "") {
+export function addTodo(title: string, owner: string, tags: string = "", groupId: number | null = null) {
   if (!title.trim()) return null;
-  const todo = insertStmt.get(title.trim(), owner, tags) as Todo | undefined;
+  const todo = insertStmt.get(title.trim(), owner, tags, groupId) as Todo | undefined;
   return todo ?? null;
 }
 
@@ -465,7 +579,8 @@ export function addTodoFull(
     state?: TodoState;
     scheduled_for?: string | null;
     tags?: string;
-  }
+  },
+  groupId: number | null = null
 ) {
   const title = fields.title?.trim();
   if (!title) return null;
@@ -482,7 +597,8 @@ export function addTodoFull(
     state,
     owner,
     scheduled_for,
-    tags
+    tags,
+    groupId
   ) as Todo | undefined;
   return todo ?? null;
 }
@@ -519,6 +635,42 @@ export function updateTodo(
 
 export function transitionTodo(id: number, owner: string, state: TodoState) {
   const todo = transitionStmt.get(state, state, id, owner) as Todo | undefined;
+  return todo ?? null;
+}
+
+// Group todo functions
+export function deleteGroupTodo(id: number, groupId: number) {
+  deleteGroupTodoStmt.run(id, groupId);
+}
+
+export function updateGroupTodo(
+  id: number,
+  groupId: number,
+  fields: {
+    title: string;
+    description: string;
+    priority: TodoPriority;
+    state: TodoState;
+    scheduled_for: string | null;
+    tags: string;
+  }
+) {
+  const todo = updateGroupTodoStmt.get(
+    fields.title,
+    fields.description,
+    fields.priority,
+    fields.state,
+    fields.state,
+    fields.scheduled_for,
+    fields.tags,
+    id,
+    groupId
+  ) as Todo | undefined;
+  return todo ?? null;
+}
+
+export function transitionGroupTodo(id: number, groupId: number, state: TodoState) {
+  const todo = transitionGroupTodoStmt.get(state, state, id, groupId) as Todo | undefined;
   return todo ?? null;
 }
 
@@ -999,7 +1151,159 @@ export function markPushSubscriptionSent(id: number) {
   updatePushSubLastSentStmt.run(id);
 }
 
+// Task-thread linking statements
+const linkThreadToTaskStmt = db.query<TaskThread>(
+  `INSERT INTO task_threads (todo_id, message_id, linked_by)
+   VALUES (?, ?, ?)
+   ON CONFLICT(todo_id, message_id) DO NOTHING
+   RETURNING *`
+);
+const unlinkThreadFromTaskStmt = db.query(
+  "DELETE FROM task_threads WHERE todo_id = ? AND message_id = ?"
+);
+const getThreadsForTaskStmt = db.query<TaskThread & { channel_id: number; body: string; author: string; channel_name: string }>(
+  `SELECT tt.*, m.channel_id, m.body, m.author, c.name as channel_name
+   FROM task_threads tt
+   JOIN messages m ON tt.message_id = m.id
+   JOIN channels c ON m.channel_id = c.id
+   WHERE tt.todo_id = ?
+   ORDER BY tt.linked_at DESC`
+);
+const getTasksForThreadStmt = db.query<TaskThread & { title: string; state: string; priority: string }>(
+  `SELECT tt.*, t.title, t.state, t.priority
+   FROM task_threads tt
+   JOIN todos t ON tt.todo_id = t.id
+   WHERE tt.message_id = ? AND t.deleted = 0
+   ORDER BY tt.linked_at DESC`
+);
+const getThreadLinkCountStmt = db.query<{ count: number }>(
+  "SELECT COUNT(*) as count FROM task_threads WHERE todo_id = ?"
+);
+const getTaskThreadLinkStmt = db.query<TaskThread>(
+  "SELECT * FROM task_threads WHERE todo_id = ? AND message_id = ?"
+);
+
+// Task-thread linking functions
+export function linkThreadToTask(todoId: number, messageId: number, linkedBy: string) {
+  return linkThreadToTaskStmt.get(todoId, messageId, linkedBy) as TaskThread | undefined ?? null;
+}
+
+export function unlinkThreadFromTask(todoId: number, messageId: number) {
+  unlinkThreadFromTaskStmt.run(todoId, messageId);
+}
+
+export function getThreadsForTask(todoId: number) {
+  return getThreadsForTaskStmt.all(todoId);
+}
+
+export function getTasksForThread(messageId: number) {
+  return getTasksForThreadStmt.all(messageId);
+}
+
+export function getThreadLinkCount(todoId: number): number {
+  const result = getThreadLinkCountStmt.get(todoId);
+  return result?.count ?? 0;
+}
+
+export function getTaskThreadLink(todoId: number, messageId: number) {
+  return getTaskThreadLinkStmt.get(todoId, messageId) as TaskThread | undefined ?? null;
+}
+
+// App settings statements
+const getSettingStmt = db.query<AppSetting>(
+  "SELECT * FROM app_settings WHERE key = ?"
+);
+const setSettingStmt = db.query<AppSetting>(
+  `INSERT INTO app_settings (key, value, updated_at)
+   VALUES (?, ?, CURRENT_TIMESTAMP)
+   ON CONFLICT(key) DO UPDATE SET
+     value = excluded.value,
+     updated_at = CURRENT_TIMESTAMP
+   RETURNING *`
+);
+const deleteSettingStmt = db.query("DELETE FROM app_settings WHERE key = ?");
+const listSettingsStmt = db.query<AppSetting>(
+  "SELECT * FROM app_settings ORDER BY key"
+);
+const listSettingsByPrefixStmt = db.query<AppSetting>(
+  "SELECT * FROM app_settings WHERE key LIKE ? ORDER BY key"
+);
+
+// App settings functions
+export function getSetting(key: string): string | null {
+  const setting = getSettingStmt.get(key) as AppSetting | undefined;
+  return setting?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): AppSetting | null {
+  return setSettingStmt.get(key, value) as AppSetting | undefined ?? null;
+}
+
+export function deleteSetting(key: string): void {
+  deleteSettingStmt.run(key);
+}
+
+export function listSettings(): AppSetting[] {
+  return listSettingsStmt.all();
+}
+
+export function listSettingsByPrefix(prefix: string): AppSetting[] {
+  return listSettingsByPrefixStmt.all(`${prefix}%`);
+}
+
+// Wingman cost tracking statements
+const insertWingmanCostStmt = db.query<WingmanCost>(
+  `INSERT INTO wingman_costs (npub, model, prompt_tokens, completion_tokens, total_tokens, cost_usd)
+   VALUES (?, ?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const listWingmanCostsStmt = db.query<WingmanCost>(
+  "SELECT * FROM wingman_costs ORDER BY created_at DESC LIMIT ?"
+);
+const listWingmanCostsByNpubStmt = db.query<WingmanCost>(
+  "SELECT * FROM wingman_costs WHERE npub = ? ORDER BY created_at DESC LIMIT ?"
+);
+const getWingmanCostSummaryStmt = db.query<{ npub: string; total_cost: number; total_tokens: number; request_count: number }>(
+  `SELECT npub, SUM(cost_usd) as total_cost, SUM(total_tokens) as total_tokens, COUNT(*) as request_count
+   FROM wingman_costs
+   GROUP BY npub
+   ORDER BY total_cost DESC`
+);
+const getWingmanTotalCostStmt = db.query<{ total_cost: number; total_tokens: number; request_count: number }>(
+  `SELECT SUM(cost_usd) as total_cost, SUM(total_tokens) as total_tokens, COUNT(*) as request_count
+   FROM wingman_costs`
+);
+
+// Wingman cost tracking functions
+export function recordWingmanCost(
+  npub: string,
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+  totalTokens: number,
+  costUsd: number
+) {
+  return insertWingmanCostStmt.get(npub, model, promptTokens, completionTokens, totalTokens, costUsd) as WingmanCost | undefined ?? null;
+}
+
+export function listWingmanCosts(limit: number = 100) {
+  return listWingmanCostsStmt.all(limit);
+}
+
+export function listWingmanCostsByNpub(npub: string, limit: number = 100) {
+  return listWingmanCostsByNpubStmt.all(npub, limit);
+}
+
+export function getWingmanCostSummary() {
+  return getWingmanCostSummaryStmt.all();
+}
+
+export function getWingmanTotalCost() {
+  return getWingmanTotalCostStmt.get() ?? { total_cost: 0, total_tokens: 0, request_count: 0 };
+}
+
 export function resetDatabase() {
+  db.run("DELETE FROM task_threads");
   db.run("DELETE FROM todos");
   db.run("DELETE FROM ai_summaries");
   db.run("DELETE FROM channel_groups");
@@ -1013,8 +1317,9 @@ export function resetDatabase() {
   db.run("DELETE FROM message_reactions");
   db.run("DELETE FROM users");
   db.run("DELETE FROM push_subscriptions");
+  db.run("DELETE FROM wingman_costs");
   // Note: vapid_config is intentionally NOT reset to preserve VAPID keys
   db.run(
-    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions')"
+    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs')"
   );
 }

@@ -1,6 +1,7 @@
 import { elements as el, hide, show, escapeHtml } from "./dom.js";
 import { initNotifications } from "./notifications.js";
 import { state } from "./state.js";
+import { initWingmanSettings } from "./wingmanSettings.js";
 
 // Settings page state
 let groups = [];
@@ -15,8 +16,12 @@ export async function initSettings() {
   // Notifications are available to all users
   await initNotifications();
 
-  // Groups management is admin-only
+  // Admin-only sections
   if (window.__IS_ADMIN__) {
+    // Wingman AI settings
+    await initWingmanSettings();
+
+    // Groups management
     await Promise.all([fetchGroups(), fetchUsers()]);
     renderGroups();
     wireEventListeners();

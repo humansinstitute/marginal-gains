@@ -3,8 +3,8 @@
  * Manages connected clients and broadcasts events to relevant users
  */
 
-import { canUserAccessChannel } from "../db";
 import { isAdmin } from "../config";
+import { canUserAccessChannel } from "../db";
 
 // Event types that can be broadcast
 export type EventType =
@@ -13,7 +13,8 @@ export type EventType =
   | "channel:update"
   | "channel:delete"
   | "dm:new"
-  | "sync:init";
+  | "sync:init"
+  | "wingman:thinking";
 
 export interface BroadcastEvent {
   type: EventType;

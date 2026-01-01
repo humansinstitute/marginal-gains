@@ -2,10 +2,11 @@
  * SSE endpoint for real-time updates
  */
 
-import { listAllChannels, listDmChannels, listVisibleChannels, getOrCreatePersonalChannel } from "../db";
 import { isAdmin } from "../config";
-import { registerClient, unregisterClient, sendInitialSync } from "../services/events";
+import { listAllChannels, listDmChannels, listVisibleChannels, getOrCreatePersonalChannel } from "../db";
 import { unauthorized } from "../http";
+import { registerClient, unregisterClient, sendInitialSync } from "../services/events";
+
 import type { Session } from "../types";
 
 /**

@@ -1,4 +1,5 @@
 import { APP_NAME } from "../config";
+
 import { renderPinModal } from "./components";
 
 export function renderLandingPage() {

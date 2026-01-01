@@ -4,6 +4,7 @@ import { loadNostrLibs } from "./nostr.js";
 import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent, getConnectionState } from "./liveUpdates.js";
 import { addDmChannel, addMessage, getActiveChannelMessages, removeMessageFromChannel, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateAllChannels, upsertChannel, setChannelMessages, refreshUI } from "./state.js";
 import { init as initMentions, handleMentionInput, handleMentionKeydown, closeMentionPopup } from "./mentions.js";
+import { init as initSlashCommands, handleSlashInput, handleSlashKeydown, closePopup as closeSlashPopup } from "./slashCommands.js";
 import { wirePasteAndDrop } from "./uploads.js";
 import {
   init as initMessageRenderer,
@@ -104,22 +105,31 @@ function updateChatUrl(channelId) {
 }
 
 // Handle deep link from server (e.g., /chat/channel/general or /chat/dm/123)
+// Returns { channelId, threadId } where threadId is from URL ?thread= param
 function handleDeepLink() {
   const deepLink = window.__DEEP_LINK__;
-  if (!deepLink) return null;
 
+  // Check for thread parameter in URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const threadId = urlParams.get("thread");
+
+  if (!deepLink) {
+    return { channelId: null, threadId };
+  }
+
+  let channelId = null;
   if (deepLink.type === "channel") {
     // Find channel by slug/name
     const channel = state.chat.channels.find((c) => c.name === deepLink.slug);
     const personal = state.chat.personalChannel?.name === deepLink.slug ? state.chat.personalChannel : null;
-    return channel?.id || personal?.id || null;
+    channelId = channel?.id || personal?.id || null;
   } else if (deepLink.type === "dm") {
     // Find DM by ID
     const dm = state.chat.dmChannels.find((c) => c.id === String(deepLink.id));
-    return dm?.id || null;
+    channelId = dm?.id || null;
   }
 
-  return null;
+  return { channelId, threadId };
 }
 
 // Set up mobile keyboard handling using visualViewport API
@@ -211,6 +221,47 @@ function hideNewMessageIndicator() {
   const indicator = document.querySelector("[data-new-message-indicator]");
   if (indicator) {
     indicator.style.display = "none";
+  }
+}
+
+// Show "Wingman is thinking..." indicator for a thread
+function showWingmanThinking(threadId) {
+  // Remove any existing indicator
+  hideWingmanThinking(threadId);
+
+  // Find the thread root message in the DOM
+  const threadEl = document.querySelector(`[data-thread-id="${threadId}"]`);
+  if (!threadEl) {
+    // Try to find by message ID if it's a root message
+    const messageEl = document.querySelector(`[data-message-id="${threadId}"]`);
+    if (messageEl) {
+      // Insert indicator after the message
+      const indicator = createWingmanIndicator(threadId);
+      messageEl.after(indicator);
+    }
+    return;
+  }
+
+  // Insert indicator at the end of the thread
+  const indicator = createWingmanIndicator(threadId);
+  threadEl.appendChild(indicator);
+}
+
+function createWingmanIndicator(threadId) {
+  const indicator = document.createElement("div");
+  indicator.className = "wingman-thinking";
+  indicator.setAttribute("data-wingman-thinking", threadId);
+  indicator.innerHTML = `
+    <span class="wingman-thinking-dots"></span>
+    <span class="wingman-thinking-text">Wingman is thinking...</span>
+  `;
+  return indicator;
+}
+
+function hideWingmanThinking(threadId) {
+  const indicator = document.querySelector(`[data-wingman-thinking="${threadId}"]`);
+  if (indicator) {
+    indicator.remove();
   }
 }
 
@@ -382,6 +433,10 @@ function setupLiveUpdateHandlers() {
       // (captured BEFORE the message was added to state and DOM was updated)
       const { wasNearBottom } = data;
 
+      // Clear any "Wingman is thinking" indicator for this thread
+      const threadRootId = data.thread_root_id ? String(data.thread_root_id) : String(data.id);
+      hideWingmanThinking(threadRootId);
+
       // Note: renderThreads() was already called by refreshUI() when message was added to state
       // No need to call it again here
 
@@ -394,10 +449,11 @@ function setupLiveUpdateHandlers() {
         showNewMessageIndicator();
       }
 
-      // If thread panel is open for a parent message that just got a reply, update it
-      // Compare as strings since openThreadId is a string and data.parent_id is a number
+      // If thread panel is open and this message belongs to that thread, update it
+      // Check both parent_id and thread_root_id since replies might be nested
       const parentId = data.parent_id ? String(data.parent_id) : null;
-      if (openThreadId && parentId === openThreadId) {
+      const msgThreadRootId = data.thread_root_id ? String(data.thread_root_id) : null;
+      if (openThreadId && (parentId === openThreadId || msgThreadRootId === openThreadId)) {
         renderThreadPanel(openThreadId);
       }
     }
@@ -459,6 +515,14 @@ function setupLiveUpdateHandlers() {
   onEvent("connection:change", (data) => {
     updateAvatarConnectionStatus(data.state);
   });
+
+  // When Wingman starts thinking, show indicator
+  onEvent("wingman:thinking", (data) => {
+    const { threadId, channelId } = data;
+    if (state.chat.selectedChannelId === String(channelId)) {
+      showWingmanThinking(String(threadId));
+    }
+  });
 }
 
 /**
@@ -496,6 +560,9 @@ export const initChat = async () => {
   // Initialize mentions module with user cache
   initMentions(localUserCache);
 
+  // Initialize slash commands module
+  await initSlashCommands();
+
   // Initialize message renderer with dependencies
   initMessageRenderer({
     getAuthorDisplayName,
@@ -515,11 +582,21 @@ export const initChat = async () => {
     // Fetch channels via HTTP first (more reliable than SSE for initial load)
     await fetchChannels();
 
-    // Handle deep link if present (e.g., /chat/channel/general)
-    const deepLinkChannelId = handleDeepLink();
-    if (deepLinkChannelId) {
-      selectChannel(deepLinkChannelId);
-      await fetchMessages(deepLinkChannelId);
+    // Handle deep link if present (e.g., /chat/channel/general?thread=123)
+    const deepLink = handleDeepLink();
+    if (deepLink.channelId) {
+      selectChannel(deepLink.channelId);
+      await fetchMessages(deepLink.channelId);
+
+      // If a thread ID was specified, open that thread after messages load
+      if (deepLink.threadId) {
+        const messages = getActiveChannelMessages();
+        const byParent = groupByParent(messages);
+        // Small delay to ensure DOM is ready
+        setTimeout(() => {
+          openThread(deepLink.threadId, messages, byParent);
+        }, 100);
+      }
     } else if (state.chat.selectedChannelId) {
       // Update URL to reflect default selected channel
       updateChatUrl(state.chat.selectedChannelId);
@@ -568,6 +645,7 @@ export const initChat = async () => {
   wireThreadSidebar();
   wireChannelSettingsModal();
   wireDmModal();
+  wireTaskLinkModal();
   updateChannelSettingsCog();
 };
 
@@ -735,6 +813,9 @@ function wireComposer() {
     // Handle mention autocomplete
     handleMentionInput();
 
+    // Handle slash command autocomplete
+    handleSlashInput();
+
     // Auto-expand textarea
     autoResizeTextarea(el.chatInput);
   });
@@ -742,6 +823,9 @@ function wireComposer() {
   el.chatInput?.addEventListener("keydown", (event) => {
     // Let mention handler take over if active
     if (handleMentionKeydown(event)) return;
+
+    // Let slash command handler take over if active
+    if (handleSlashKeydown(event)) return;
 
     // Enter sends message, Shift+Enter adds new line
     if (event.key === "Enter" && !event.shiftKey) {
@@ -757,6 +841,11 @@ function wireComposer() {
   document.addEventListener("click", (event) => {
     if (!el.mentionPopup?.contains(event.target) && event.target !== el.chatInput) {
       closeMentionPopup();
+    }
+    // Close slash popup when clicking outside
+    const slashPopup = document.querySelector("[data-slash-popup]");
+    if (slashPopup && !slashPopup.contains(event.target) && event.target !== el.chatInput) {
+      closeSlashPopup();
     }
   });
 
@@ -856,8 +945,21 @@ function wireComposer() {
         if (!res.ok) {
           const err = await res.json();
           alert(err.error || "Failed to delete message");
+          return;
         }
-        // Success: SSE broadcast handles UI update, no need to do anything here
+        // Update UI immediately (don't rely solely on SSE)
+        const channelId = state.chat.selectedChannelId;
+        if (channelId) {
+          removeMessageFromChannel(channelId, messageId);
+          renderThreads();
+          // Close thread panel if the deleted message was the open thread root
+          if (openThreadId === messageId) {
+            closeThreadPanel();
+          } else if (openThreadId) {
+            // Re-render thread panel if open (message might be a reply)
+            renderThreadPanel(openThreadId);
+          }
+        }
       } catch (_err) {
         alert("Failed to delete message");
       }
@@ -1123,12 +1225,24 @@ function wireThreadSidebar() {
     if (hasText && openThreadId) el.threadSendBtn?.removeAttribute("disabled");
     else el.threadSendBtn?.setAttribute("disabled", "disabled");
 
+    // Handle mention autocomplete
+    handleMentionInput(el.threadInput);
+
+    // Handle slash command autocomplete
+    handleSlashInput(el.threadInput);
+
     // Auto-expand textarea
     autoResizeTextarea(el.threadInput);
   });
 
   // Enter sends reply, Shift+Enter adds new line
   el.threadInput?.addEventListener("keydown", (event) => {
+    // Let mention handler take over if active
+    if (handleMentionKeydown(event)) return;
+
+    // Let slash command handler take over if active
+    if (handleSlashKeydown(event)) return;
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendThreadReply();
@@ -1153,7 +1267,7 @@ function wireThreadSidebar() {
   el.backToMessagesBtn?.addEventListener("touchend", (e) => { e.preventDefault(); backToMessagesHandler(); });
 }
 
-function openThread(threadId, messages, byParent) {
+async function openThread(threadId, messages, byParent) {
   openThreadId = threadId;
   const rootMessage = messages.find((m) => m.id === threadId);
   if (!rootMessage) return;
@@ -1161,14 +1275,17 @@ function openThread(threadId, messages, byParent) {
   const replies = byParent.get(threadId) || [];
   const allMessages = [rootMessage, ...replies];
 
-  // Render messages in panel
+  // Render messages in panel - pass threadRootId for all messages
   if (el.threadMessages) {
     el.threadMessages.innerHTML = allMessages
-      .map((msg, index) => renderMessageFull(msg, { isThreadRoot: index === 0 }))
+      .map((msg, index) => renderMessageFull(msg, { isThreadRoot: index === 0, threadRootId: threadId }))
       .join("");
     // Scroll to bottom to show latest replies
     scrollToBottom(el.threadMessages);
   }
+
+  // Check for linked tasks and show/hide the view tasks button
+  await updateThreadTasksButton(threadId);
 
   // Show inline panel
   show(el.threadPanel);
@@ -1641,5 +1758,322 @@ function wireDmModal() {
   el.dmSearch?.addEventListener("input", () => {
     dmSearchQuery = el.dmSearch.value.trim();
     renderDmUserList();
+  });
+}
+
+// ========== Task Link Modal ==========
+
+let taskSearchDebounce = null;
+let threadLinkedTasks = []; // Cache of linked tasks for current thread
+
+// Update the "view linked tasks" button visibility based on task count
+async function updateThreadTasksButton(threadId) {
+  if (!el.viewThreadTasksBtn) return;
+
+  try {
+    const res = await fetch(`/api/threads/${threadId}/tasks`);
+    if (!res.ok) {
+      hide(el.viewThreadTasksBtn);
+      return;
+    }
+    const data = await res.json();
+    threadLinkedTasks = data.tasks || [];
+
+    if (threadLinkedTasks.length > 0) {
+      show(el.viewThreadTasksBtn);
+    } else {
+      hide(el.viewThreadTasksBtn);
+    }
+  } catch (_err) {
+    hide(el.viewThreadTasksBtn);
+  }
+}
+
+// Fetch user's groups for the board dropdown
+async function fetchUserGroups() {
+  try {
+    const res = await fetch("/chat/groups");
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (_err) {
+    return [];
+  }
+}
+
+// Populate the board dropdown with user's groups
+async function populateBoardDropdown() {
+  if (!el.taskBoardSelect) return;
+  const groups = await fetchUserGroups();
+  el.taskBoardSelect.innerHTML = `<option value="">Personal</option>` +
+    groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
+}
+
+// Search tasks by query
+async function searchTasks(query, groupId = null) {
+  const resultsContainer = document.querySelector("[data-task-results]");
+  if (!resultsContainer) return;
+
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (groupId) params.set("group_id", groupId);
+
+  try {
+    const res = await fetch(`/api/tasks/search?${params.toString()}`);
+    if (!res.ok) {
+      resultsContainer.innerHTML = `<p class="task-search-error">Failed to search tasks</p>`;
+      return;
+    }
+    const data = await res.json();
+    renderTaskSearchResults(data.tasks || [], resultsContainer);
+  } catch (_err) {
+    resultsContainer.innerHTML = `<p class="task-search-error">Failed to search tasks</p>`;
+  }
+}
+
+// Render task search results
+function renderTaskSearchResults(tasks, container = null) {
+  const resultsContainer = container || document.querySelector("[data-task-results]");
+  if (!resultsContainer) return;
+
+  if (tasks.length === 0) {
+    resultsContainer.innerHTML = `<p class="task-search-empty">No tasks found</p>`;
+    return;
+  }
+
+  resultsContainer.innerHTML = tasks
+    .map((task) => `<button type="button" class="task-result-item" data-link-task-id="${task.id}">
+      <span class="task-result-title">${escapeHtml(task.title)}</span>
+      <span class="task-result-meta">
+        <span class="badge priority-${task.priority}">${task.priority}</span>
+        <span class="badge state-${task.state}">${task.state.replace("_", " ")}</span>
+      </span>
+    </button>`)
+    .join("");
+
+  // Wire click handlers
+  resultsContainer.querySelectorAll("[data-link-task-id]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const taskId = btn.dataset.linkTaskId;
+      await linkThreadToTask(Number(taskId));
+    });
+  });
+}
+
+// Link current thread to a task
+async function linkThreadToTask(taskId) {
+  if (!openThreadId) {
+    alert("No thread selected");
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/threads`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: Number(openThreadId) }),
+    });
+
+    if (res.ok) {
+      hide(el.taskLinkModal);
+      showToast("Thread linked to task");
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Failed to link thread");
+    }
+  } catch (_err) {
+    alert("Failed to link thread");
+  }
+}
+
+// Create a new task and link thread
+async function createAndLinkTask(formData) {
+  if (!openThreadId) {
+    alert("No thread selected");
+    return;
+  }
+
+  const groupId = formData.get("board") || null;
+  const payload = {
+    title: String(formData.get("title") || "").trim(),
+    description: String(formData.get("description") || "").trim(),
+    priority: String(formData.get("priority") || "pebble"),
+    group_id: groupId ? Number(groupId) : null,
+    thread_id: Number(openThreadId),
+  };
+
+  if (!payload.title) {
+    alert("Title is required");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      hide(el.taskLinkModal);
+      el.taskLinkCreateForm?.reset();
+      showToast("Task created and linked");
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Failed to create task");
+    }
+  } catch (_err) {
+    alert("Failed to create task");
+  }
+}
+
+// Show a toast notification
+function showToast(message) {
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add("toast-fade");
+    setTimeout(() => toast.remove(), 300);
+  }, 2000);
+}
+
+// Open task link modal
+async function openTaskLinkModal() {
+  if (!openThreadId) return;
+
+  // Reset to create tab
+  switchTaskLinkTab("create");
+  el.taskLinkCreateForm?.reset();
+  if (el.taskSearchInput) el.taskSearchInput.value = "";
+  if (el.taskResults) el.taskResults.innerHTML = `<p class="task-search-empty">Start typing to search tasks...</p>`;
+
+  // Populate board dropdown
+  await populateBoardDropdown();
+
+  show(el.taskLinkModal);
+}
+
+// Switch between create/existing tabs
+function switchTaskLinkTab(tab) {
+  // Query elements directly to ensure they're found (modal may not exist at page load)
+  const tabsContainer = document.querySelector(".task-link-tabs");
+  const tabs = tabsContainer?.querySelectorAll("[data-task-tab]");
+  const createForm = document.querySelector("[data-task-link-create]");
+  const existingSection = document.querySelector("[data-task-link-existing]");
+
+  tabs?.forEach((t) => {
+    if (t.dataset.taskTab === tab) {
+      t.classList.add("active");
+    } else {
+      t.classList.remove("active");
+    }
+  });
+
+  if (tab === "create") {
+    show(createForm);
+    hide(existingSection);
+  } else {
+    hide(createForm);
+    show(existingSection);
+    // Load initial tasks
+    searchTasks("");
+  }
+}
+
+// Show linked tasks dropdown from thread header button
+function showLinkedTasksDropdown() {
+  if (threadLinkedTasks.length === 0) return;
+
+  // Remove any existing dropdown
+  const existing = document.querySelector(".thread-tasks-dropdown");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "thread-tasks-dropdown";
+  dropdown.innerHTML = threadLinkedTasks
+    .map((task) => `<a href="/todo" class="thread-task-item" data-task-id="${task.id}">
+      <span class="thread-task-title">${escapeHtml(task.title)}</span>
+      <span class="thread-task-meta">
+        <span class="badge priority-${task.priority}">${task.priority}</span>
+        <span class="badge state-${task.state}">${task.state.replace("_", " ")}</span>
+      </span>
+    </a>`)
+    .join("");
+
+  // Position below the button
+  if (el.viewThreadTasksBtn) {
+    const rect = el.viewThreadTasksBtn.getBoundingClientRect();
+    dropdown.style.position = "fixed";
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.right = `${window.innerWidth - rect.right}px`;
+    dropdown.style.zIndex = "1000";
+  }
+
+  document.body.appendChild(dropdown);
+
+  // Close on click outside
+  const closeHandler = (e) => {
+    if (!dropdown.contains(e.target) && e.target !== el.viewThreadTasksBtn) {
+      dropdown.remove();
+      document.removeEventListener("click", closeHandler);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", closeHandler), 0);
+}
+
+// Wire task link modal
+function wireTaskLinkModal() {
+  // View linked tasks button in thread header
+  el.viewThreadTasksBtn?.addEventListener("click", showLinkedTasksDropdown);
+
+  // Handle "Link thread to task" from message menu (via event delegation)
+  document.addEventListener("click", async (e) => {
+    const linkBtn = e.target.closest("[data-link-thread-to-task]");
+    if (linkBtn) {
+      e.stopPropagation();
+      const threadId = linkBtn.dataset.linkThreadToTask;
+      // Close the message menu dropdown
+      document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
+        d.hidden = true;
+      });
+      // Set the thread ID and open modal
+      openThreadId = threadId;
+      await openTaskLinkModal();
+      return;
+    }
+  });
+
+  // Close modal
+  const closeModal = () => hide(el.taskLinkModal);
+  el.closeTaskLinkBtns?.forEach((btn) => btn.addEventListener("click", closeModal));
+  el.taskLinkModal?.addEventListener("click", (e) => {
+    if (e.target === el.taskLinkModal) closeModal();
+  });
+
+  // Tab switching
+  el.taskLinkTabs?.addEventListener("click", (e) => {
+    const tab = e.target.closest("[data-task-tab]");
+    if (!tab) return;
+    switchTaskLinkTab(tab.dataset.taskTab);
+  });
+
+  // Create form submission
+  el.taskLinkCreateForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    await createAndLinkTask(formData);
+  });
+
+  // Search input with debounce
+  el.taskSearchInput?.addEventListener("input", () => {
+    clearTimeout(taskSearchDebounce);
+    taskSearchDebounce = setTimeout(() => {
+      const query = el.taskSearchInput.value.trim();
+      searchTasks(query);
+    }, 300);
   });
 }
