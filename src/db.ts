@@ -132,7 +132,6 @@ export type WingmanCost = {
   created_at: string;
 };
 
-<<<<<<< Updated upstream
 // CRM Types
 export type CrmCompany = {
   id: number;
@@ -195,7 +194,8 @@ export type CrmActivity = {
   created_by: string;
   created_at: string;
   deleted: number;
-=======
+};
+
 export type WalletTransaction = {
   id: number;
   npub: string;
@@ -207,7 +207,6 @@ export type WalletTransaction = {
   description: string | null;
   created_at: string;
   settled_at: string | null;
->>>>>>> Stashed changes
 };
 
 const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "marginal-gains.sqlite";
@@ -469,7 +468,6 @@ db.run(`
 db.run("CREATE INDEX IF NOT EXISTS idx_wingman_costs_npub ON wingman_costs(npub)");
 db.run("CREATE INDEX IF NOT EXISTS idx_wingman_costs_created ON wingman_costs(created_at)");
 
-<<<<<<< Updated upstream
 // CRM Tables
 db.run(`
   CREATE TABLE IF NOT EXISTS crm_companies (
@@ -560,7 +558,7 @@ db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_company ON crm_activities(
 db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_type ON crm_activities(type)");
 db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_date ON crm_activities(activity_date)");
 db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_deleted ON crm_activities(deleted)");
-=======
+
 // Wallet transaction cache table
 db.run(`
   CREATE TABLE IF NOT EXISTS wallet_transactions (
@@ -578,7 +576,6 @@ db.run(`
 `);
 db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_npub ON wallet_transactions(npub)");
 db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_created ON wallet_transactions(created_at)");
->>>>>>> Stashed changes
 
 const listByOwnerStmt = db.query<Todo>(
   "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY created_at DESC"
@@ -1491,7 +1488,6 @@ export function getWingmanTotalCost() {
   return getWingmanTotalCostStmt.get() ?? { total_cost: 0, total_tokens: 0, request_count: 0 };
 }
 
-<<<<<<< Updated upstream
 // CRM Companies statements
 const listCrmCompaniesStmt = db.query<CrmCompany>(
   "SELECT * FROM crm_companies WHERE deleted = 0 ORDER BY name ASC"
@@ -1798,7 +1794,8 @@ export function deleteCrmActivity(id: number) {
 // CRM Pipeline summary
 export function getCrmPipelineSummary() {
   return getCrmPipelineSummaryStmt.all();
-=======
+}
+
 // Wallet transaction statements
 const insertWalletTxStmt = db.query<WalletTransaction>(
   `INSERT INTO wallet_transactions (npub, type, amount_msats, invoice, payment_hash, state, description)
@@ -1839,7 +1836,6 @@ export function getWalletTransactionByHash(npub: string, paymentHash: string) {
 
 export function updateWalletTransactionState(id: number, state: "pending" | "settled" | "failed") {
   return updateWalletTxStateStmt.get(state, state, id) as WalletTransaction | undefined ?? null;
->>>>>>> Stashed changes
 }
 
 export function resetDatabase() {
@@ -1858,19 +1854,13 @@ export function resetDatabase() {
   db.run("DELETE FROM users");
   db.run("DELETE FROM push_subscriptions");
   db.run("DELETE FROM wingman_costs");
-<<<<<<< Updated upstream
   db.run("DELETE FROM crm_activities");
   db.run("DELETE FROM crm_opportunities");
   db.run("DELETE FROM crm_contacts");
   db.run("DELETE FROM crm_companies");
-  // Note: vapid_config is intentionally NOT reset to preserve VAPID keys
-  db.run(
-    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'crm_companies', 'crm_contacts', 'crm_opportunities', 'crm_activities')"
-=======
   db.run("DELETE FROM wallet_transactions");
   // Note: vapid_config is intentionally NOT reset to preserve VAPID keys
   db.run(
-    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'wallet_transactions')"
->>>>>>> Stashed changes
+    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'crm_companies', 'crm_contacts', 'crm_opportunities', 'crm_activities', 'wallet_transactions')"
   );
 }
