@@ -1,5 +1,5 @@
 import { hexToBytes } from "@noble/hashes/utils";
-import { parseBolt11 } from "applesauce-core/helpers";
+import { parseBolt11 } from "applesauce-common/helpers";
 import { WalletConnect } from "applesauce-wallet-connect";
 import {
   parseWalletConnectURI,

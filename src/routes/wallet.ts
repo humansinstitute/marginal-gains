@@ -1,13 +1,35 @@
 import { jsonResponse, unauthorized } from "../http";
+import { renderWalletPage } from "../render/wallet";
+import { isLightningAddress, isBolt11Invoice } from "../services/lnurl";
 import {
   setWalletUri,
   hasWalletUri,
   clearWalletUri,
   getBalance,
   getTransactions,
+  makeInvoice,
+  payInvoice,
+  payLightningAddress,
 } from "../services/wallet";
 
 import type { Session } from "../types";
+
+/**
+ * GET /wallet
+ * Render wallet page
+ */
+export function handleWalletPage(session: Session | null): Response {
+  // Redirect unauthenticated users to home
+  if (!session) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: "/" },
+    });
+  }
+
+  const page = renderWalletPage(session);
+  return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
 
 /**
  * POST /api/wallet/connect
@@ -75,20 +97,29 @@ export async function handleWalletBalance(
   _req: Request,
   session: Session | null
 ): Promise<Response> {
-  if (!session) return unauthorized();
+  console.log("[Wallet] Balance request, session:", session ? session.npub : "null");
+
+  if (!session) {
+    console.log("[Wallet] No session, returning unauthorized");
+    return unauthorized();
+  }
 
   if (!hasWalletUri(session.npub)) {
+    console.log("[Wallet] No wallet URI for user");
     return jsonResponse({ error: "Wallet not connected" }, 400);
   }
 
   try {
+    console.log("[Wallet] Fetching balance for", session.npub);
     const result = await getBalance(session.npub);
+    console.log("[Wallet] Balance result:", result.balance);
     return jsonResponse({
       balance: result.balance,
       balanceSats: Math.floor(result.balance / 1000),
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
+    console.error("[Wallet] Balance error:", msg);
     return jsonResponse({ error: msg }, 500);
   }
 }
@@ -110,4 +141,91 @@ export function handleWalletTransactions(
   const transactions = getTransactions(session.npub, limit);
 
   return jsonResponse({ transactions });
+}
+
+/**
+ * POST /api/wallet/invoice
+ * Create a Lightning invoice
+ */
+export async function handleWalletInvoice(
+  req: Request,
+  session: Session | null
+): Promise<Response> {
+  if (!session) return unauthorized();
+
+  if (!hasWalletUri(session.npub)) {
+    return jsonResponse({ error: "Wallet not connected" }, 400);
+  }
+
+  try {
+    const body = (await req.json()) as { amount?: number; description?: string };
+    const amount = body.amount;
+    const description = body.description;
+
+    if (!amount || typeof amount !== "number" || amount <= 0) {
+      return jsonResponse({ error: "Invalid amount" }, 400);
+    }
+
+    const result = await makeInvoice(session.npub, amount, description);
+
+    return jsonResponse({
+      invoice: result.invoice,
+      amount: result.amount,
+      paymentHash: result.payment_hash,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return jsonResponse({ error: msg }, 500);
+  }
+}
+
+/**
+ * POST /api/wallet/pay
+ * Pay a Lightning invoice or address
+ */
+export async function handleWalletPay(
+  req: Request,
+  session: Session | null
+): Promise<Response> {
+  if (!session) return unauthorized();
+
+  if (!hasWalletUri(session.npub)) {
+    return jsonResponse({ error: "Wallet not connected" }, 400);
+  }
+
+  try {
+    const body = (await req.json()) as { target?: string; amount?: number };
+    const target = body.target?.trim();
+    const amount = body.amount;
+
+    if (!target) {
+      return jsonResponse({ error: "Missing target (invoice or lightning address)" }, 400);
+    }
+
+    if (isBolt11Invoice(target)) {
+      // Pay BOLT11 invoice
+      const result = await payInvoice(session.npub, target);
+      return jsonResponse({
+        success: true,
+        preimage: result.preimage,
+      });
+    } else if (isLightningAddress(target)) {
+      // Pay Lightning address
+      if (!amount || typeof amount !== "number" || amount <= 0) {
+        return jsonResponse({ error: "Amount required for lightning address" }, 400);
+      }
+
+      const result = await payLightningAddress(session.npub, target, amount);
+      return jsonResponse({
+        success: true,
+        preimage: result.payResult.preimage,
+        successAction: result.successAction,
+      });
+    } else {
+      return jsonResponse({ error: "Invalid target. Provide a BOLT11 invoice or lightning address" }, 400);
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return jsonResponse({ error: msg }, 500);
+  }
 }

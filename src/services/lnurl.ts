@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils";
-import { parseBolt11 } from "applesauce-core/helpers";
+import { parseBolt11 } from "applesauce-common/helpers";
 
 import type { WalletConnect } from "applesauce-wallet-connect";
 import type { PayInvoiceResult } from "applesauce-wallet-connect/helpers";
