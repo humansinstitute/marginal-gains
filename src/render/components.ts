@@ -1,6 +1,8 @@
+import { isAdmin } from "../config";
+
 import type { Session } from "../types";
 
-export type ActivePage = "settings" | "chat" | "tasks";
+export type ActivePage = "settings" | "chat" | "tasks" | "crm";
 
 export function renderPinModal() {
   const numpadButtons = [1, 2, 3, 4, 5, 6, 7, 8, 9, "clear", 0, "back"]
@@ -39,6 +41,10 @@ export function renderAppMenu(session: Session | null, activePage: ActivePage) {
     ? `<li><a href="/settings" class="app-menu-item${activePage === "settings" ? " active" : ""}">Settings</a></li>`
     : "";
 
+  const crmLink = session && isAdmin(session.npub)
+    ? `<li><a href="/crm" class="app-menu-item${activePage === "crm" ? " active" : ""}">CRM</a></li>`
+    : "";
+
   return `<nav class="app-menu" data-app-menu hidden>
     <div class="app-menu-overlay" data-app-menu-overlay></div>
     <div class="app-menu-panel">
@@ -50,6 +56,7 @@ export function renderAppMenu(session: Session | null, activePage: ActivePage) {
         ${settingsLink}
         <li><a href="/chat" class="app-menu-item${activePage === "chat" ? " active" : ""}">Chat</a></li>
         <li><a href="/todo" class="app-menu-item${activePage === "tasks" ? " active" : ""}">Tasks</a></li>
+        ${crmLink}
       </ul>
     </div>
   </nav>`;

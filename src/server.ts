@@ -29,6 +29,29 @@ import {
   handleUpdateChannel,
   handleUpdateUser,
 } from "./routes/chat";
+import {
+  handleCrmPage,
+  handleCreateActivity,
+  handleCreateCompany,
+  handleCreateContact,
+  handleCreateOpportunity,
+  handleDeleteActivity,
+  handleDeleteCompany,
+  handleDeleteContact,
+  handleDeleteOpportunity,
+  handleGetActivity,
+  handleGetCompany,
+  handleGetContact,
+  handleGetOpportunity,
+  handleListActivities,
+  handleListCompanies,
+  handleListContacts,
+  handleListOpportunities,
+  handlePipelineSummary,
+  handleUpdateCompany,
+  handleUpdateContact,
+  handleUpdateOpportunity,
+} from "./routes/crm";
 import { handleChatEvents } from "./routes/events";
 import {
   handleAddChannelGroups,
@@ -153,6 +176,37 @@ const server = Bun.serve({
         if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
         if (pathname === "/api/wingman/costs") return handleGetWingmanCosts(session);
         if (pathname === "/api/slashcommands") return handleGetSlashCommands(session);
+
+        // CRM routes (admin only)
+        if (pathname === "/crm") return handleCrmPage(session);
+        if (pathname === "/api/crm/companies") return handleListCompanies(session);
+        const crmCompanyMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)$/);
+        if (crmCompanyMatch) return handleGetCompany(session, Number(crmCompanyMatch[1]));
+        if (pathname === "/api/crm/contacts") {
+          const companyId = url.searchParams.get("company_id");
+          return handleListContacts(session, companyId ? Number(companyId) : undefined);
+        }
+        const crmContactMatch = pathname.match(/^\/api\/crm\/contacts\/(\d+)$/);
+        if (crmContactMatch) return handleGetContact(session, Number(crmContactMatch[1]));
+        if (pathname === "/api/crm/opportunities") {
+          const stage = url.searchParams.get("stage") ?? undefined;
+          return handleListOpportunities(session, stage);
+        }
+        const crmOpportunityMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)$/);
+        if (crmOpportunityMatch) return handleGetOpportunity(session, Number(crmOpportunityMatch[1]));
+        if (pathname === "/api/crm/activities") {
+          const contactId = url.searchParams.get("contact_id");
+          const opportunityId = url.searchParams.get("opportunity_id");
+          const companyId = url.searchParams.get("company_id");
+          return handleListActivities(session, {
+            contact_id: contactId ? Number(contactId) : undefined,
+            opportunity_id: opportunityId ? Number(opportunityId) : undefined,
+            company_id: companyId ? Number(companyId) : undefined,
+          });
+        }
+        const crmActivityMatch = pathname.match(/^\/api\/crm\/activities\/(\d+)$/);
+        if (crmActivityMatch) return handleGetActivity(session, Number(crmActivityMatch[1]));
+        if (pathname === "/api/crm/pipeline") return handlePipelineSummary(session);
       }
 
       if (req.method === "POST") {
@@ -199,6 +253,12 @@ const server = Bun.serve({
         if (pathname === "/api/tasks") return handleCreateTask(req, session);
         const linkThreadMatch = pathname.match(/^\/api\/tasks\/(\d+)\/threads$/);
         if (linkThreadMatch) return handleLinkThreadToTask(req, session, Number(linkThreadMatch[1]));
+
+        // CRM routes (admin only)
+        if (pathname === "/api/crm/companies") return handleCreateCompany(req, session);
+        if (pathname === "/api/crm/contacts") return handleCreateContact(req, session);
+        if (pathname === "/api/crm/opportunities") return handleCreateOpportunity(req, session);
+        if (pathname === "/api/crm/activities") return handleCreateActivity(req, session);
       }
 
       if (req.method === "PATCH") {
@@ -212,6 +272,14 @@ const server = Bun.serve({
 
         // Wingman routes
         if (pathname === "/api/wingman/settings") return handleUpdateWingmanSettings(req, session);
+
+        // CRM routes (admin only)
+        const updateCrmCompanyMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)$/);
+        if (updateCrmCompanyMatch) return handleUpdateCompany(req, session, Number(updateCrmCompanyMatch[1]));
+        const updateCrmContactMatch = pathname.match(/^\/api\/crm\/contacts\/(\d+)$/);
+        if (updateCrmContactMatch) return handleUpdateContact(req, session, Number(updateCrmContactMatch[1]));
+        const updateCrmOpportunityMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)$/);
+        if (updateCrmOpportunityMatch) return handleUpdateOpportunity(req, session, Number(updateCrmOpportunityMatch[1]));
       }
 
       if (req.method === "DELETE") {
@@ -252,6 +320,16 @@ const server = Bun.serve({
             Number(unlinkThreadMatch[2])
           );
         }
+
+        // CRM routes (admin only)
+        const deleteCrmCompanyMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)$/);
+        if (deleteCrmCompanyMatch) return handleDeleteCompany(session, Number(deleteCrmCompanyMatch[1]));
+        const deleteCrmContactMatch = pathname.match(/^\/api\/crm\/contacts\/(\d+)$/);
+        if (deleteCrmContactMatch) return handleDeleteContact(session, Number(deleteCrmContactMatch[1]));
+        const deleteCrmOpportunityMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)$/);
+        if (deleteCrmOpportunityMatch) return handleDeleteOpportunity(session, Number(deleteCrmOpportunityMatch[1]));
+        const deleteCrmActivityMatch = pathname.match(/^\/api\/crm\/activities\/(\d+)$/);
+        if (deleteCrmActivityMatch) return handleDeleteActivity(session, Number(deleteCrmActivityMatch[1]));
       }
 
       return new Response("Not found", { status: 404 });
