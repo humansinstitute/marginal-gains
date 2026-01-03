@@ -86,6 +86,16 @@ import {
 } from "./routes/tasks";
 import { handleApiTodoState, handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
 import {
+  handleWalletPage,
+  handleWalletConnect,
+  handleWalletDisconnect,
+  handleWalletStatus,
+  handleWalletBalance,
+  handleWalletTransactions,
+  handleWalletInvoice,
+  handleWalletPay,
+} from "./routes/wallet";
+import {
   handleGetSlashCommands,
   handleGetWingmanSettings,
   handleUpdateWingmanSettings,
@@ -160,6 +170,7 @@ const server = Bun.serve({
         if (pathname === "/") return handleHome(session);
         if (pathname === "/todo") return handleTodos(url, session);
         if (pathname === "/settings") return handleSettings(session);
+        if (pathname === "/wallet") return handleWalletPage(session);
 
         // Push notification routes
         if (pathname === "/api/push/vapid-public-key") return handleGetVapidPublicKey();
@@ -207,6 +218,11 @@ const server = Bun.serve({
         const crmActivityMatch = pathname.match(/^\/api\/crm\/activities\/(\d+)$/);
         if (crmActivityMatch) return handleGetActivity(session, Number(crmActivityMatch[1]));
         if (pathname === "/api/crm/pipeline") return handlePipelineSummary(session);
+
+        // Wallet routes
+        if (pathname === "/api/wallet/status") return handleWalletStatus(req, session);
+        if (pathname === "/api/wallet/balance") return handleWalletBalance(req, session);
+        if (pathname === "/api/wallet/transactions") return handleWalletTransactions(req, session);
       }
 
       if (req.method === "POST") {
@@ -259,6 +275,11 @@ const server = Bun.serve({
         if (pathname === "/api/crm/contacts") return handleCreateContact(req, session);
         if (pathname === "/api/crm/opportunities") return handleCreateOpportunity(req, session);
         if (pathname === "/api/crm/activities") return handleCreateActivity(req, session);
+
+        // Wallet routes
+        if (pathname === "/api/wallet/connect") return handleWalletConnect(req, session);
+        if (pathname === "/api/wallet/invoice") return handleWalletInvoice(req, session);
+        if (pathname === "/api/wallet/pay") return handleWalletPay(req, session);
       }
 
       if (req.method === "PATCH") {
@@ -330,6 +351,9 @@ const server = Bun.serve({
         if (deleteCrmOpportunityMatch) return handleDeleteOpportunity(session, Number(deleteCrmOpportunityMatch[1]));
         const deleteCrmActivityMatch = pathname.match(/^\/api\/crm\/activities\/(\d+)$/);
         if (deleteCrmActivityMatch) return handleDeleteActivity(session, Number(deleteCrmActivityMatch[1]));
+
+        // Wallet routes
+        if (pathname === "/api/wallet/disconnect") return handleWalletDisconnect(req, session);
       }
 
       return new Response("Not found", { status: 404 });

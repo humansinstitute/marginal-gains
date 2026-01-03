@@ -5,7 +5,10 @@ export function redirect(path: string) {
 }
 
 export function unauthorized() {
-  return new Response("Unauthorized", { status: 401 });
+  return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    status: 401,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 export function jsonResponse(body: unknown, status = 200, cookie?: string) {
@@ -55,7 +58,10 @@ export function withErrorHandling(handler: (req: Request) => Promise<Response> |
       return await handler(req);
     } catch (error) {
       onError?.(error);
-      return new Response("Internal Server Error", { status: 500 });
+      return new Response(JSON.stringify({ error: "Internal Server Error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
     }
   };
 }
