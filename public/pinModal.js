@@ -64,6 +64,36 @@ export function initPinModal() {
       onCancel?.();
     }
   });
+
+  // Keyboard support
+  document.addEventListener("keydown", (e) => {
+    // Only handle when modal is visible
+    if (el.modal?.hidden) return;
+
+    // Digit keys 0-9
+    if (e.key >= "0" && e.key <= "9") {
+      e.preventDefault();
+      addDigit(e.key);
+      return;
+    }
+
+    // Backspace to delete
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      currentPin = currentPin.slice(0, -1);
+      updateDots();
+      hideError();
+      return;
+    }
+
+    // Escape to cancel
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePinModal();
+      onCancel?.();
+      return;
+    }
+  });
 }
 
 function addDigit(digit) {

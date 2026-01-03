@@ -14,7 +14,9 @@ export type EventType =
   | "channel:delete"
   | "dm:new"
   | "sync:init"
-  | "wingman:thinking";
+  | "wingman:thinking"
+  | "wallet:balance"
+  | "wallet:transaction";
 
 export interface BroadcastEvent {
   type: EventType;

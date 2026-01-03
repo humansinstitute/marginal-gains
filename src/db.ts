@@ -196,6 +196,19 @@ export type CrmActivity = {
   deleted: number;
 };
 
+export type WalletTransaction = {
+  id: number;
+  npub: string;
+  type: "incoming" | "outgoing";
+  amount_msats: number;
+  invoice: string | null;
+  payment_hash: string | null;
+  state: "pending" | "settled" | "failed";
+  description: string | null;
+  created_at: string;
+  settled_at: string | null;
+};
+
 const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "marginal-gains.sqlite";
 const db = new Database(dbPath);
 db.run("PRAGMA foreign_keys = ON");
@@ -545,6 +558,24 @@ db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_company ON crm_activities(
 db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_type ON crm_activities(type)");
 db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_date ON crm_activities(activity_date)");
 db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_deleted ON crm_activities(deleted)");
+
+// Wallet transaction cache table
+db.run(`
+  CREATE TABLE IF NOT EXISTS wallet_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    npub TEXT NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('incoming', 'outgoing')),
+    amount_msats INTEGER NOT NULL,
+    invoice TEXT,
+    payment_hash TEXT,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending', 'settled', 'failed')),
+    description TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    settled_at TEXT
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_npub ON wallet_transactions(npub)");
+db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_created ON wallet_transactions(created_at)");
 
 const listByOwnerStmt = db.query<Todo>(
   "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY created_at DESC"
@@ -1765,6 +1796,48 @@ export function getCrmPipelineSummary() {
   return getCrmPipelineSummaryStmt.all();
 }
 
+// Wallet transaction statements
+const insertWalletTxStmt = db.query<WalletTransaction>(
+  `INSERT INTO wallet_transactions (npub, type, amount_msats, invoice, payment_hash, state, description)
+   VALUES (?, ?, ?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const listWalletTxStmt = db.query<WalletTransaction>(
+  "SELECT * FROM wallet_transactions WHERE npub = ? ORDER BY created_at DESC LIMIT ?"
+);
+const getWalletTxByHashStmt = db.query<WalletTransaction>(
+  "SELECT * FROM wallet_transactions WHERE npub = ? AND payment_hash = ?"
+);
+const updateWalletTxStateStmt = db.query<WalletTransaction>(
+  `UPDATE wallet_transactions SET state = ?, settled_at = CASE WHEN ? = 'settled' THEN CURRENT_TIMESTAMP ELSE settled_at END
+   WHERE id = ? RETURNING *`
+);
+
+// Wallet transaction functions
+export function saveWalletTransaction(
+  npub: string,
+  type: "incoming" | "outgoing",
+  amountMsats: number,
+  invoice: string | null,
+  paymentHash: string | null,
+  state: "pending" | "settled" | "failed",
+  description: string | null
+) {
+  return insertWalletTxStmt.get(npub, type, amountMsats, invoice, paymentHash, state, description) as WalletTransaction | undefined ?? null;
+}
+
+export function listWalletTransactions(npub: string, limit: number = 50) {
+  return listWalletTxStmt.all(npub, limit);
+}
+
+export function getWalletTransactionByHash(npub: string, paymentHash: string) {
+  return getWalletTxByHashStmt.get(npub, paymentHash) as WalletTransaction | undefined ?? null;
+}
+
+export function updateWalletTransactionState(id: number, state: "pending" | "settled" | "failed") {
+  return updateWalletTxStateStmt.get(state, state, id) as WalletTransaction | undefined ?? null;
+}
+
 export function resetDatabase() {
   db.run("DELETE FROM task_threads");
   db.run("DELETE FROM todos");
@@ -1785,8 +1858,9 @@ export function resetDatabase() {
   db.run("DELETE FROM crm_opportunities");
   db.run("DELETE FROM crm_contacts");
   db.run("DELETE FROM crm_companies");
+  db.run("DELETE FROM wallet_transactions");
   // Note: vapid_config is intentionally NOT reset to preserve VAPID keys
   db.run(
-    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'crm_companies', 'crm_contacts', 'crm_opportunities', 'crm_activities')"
+    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'crm_companies', 'crm_contacts', 'crm_opportunities', 'crm_activities', 'wallet_transactions')"
   );
 }

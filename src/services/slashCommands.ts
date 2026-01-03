@@ -5,6 +5,7 @@
 
 import { isAdmin } from "../config";
 
+import { handleBalanceCommand, handlePayCommand, handleReceiveCommand } from "./wallet";
 import { handleWingmanRequest, handleImageWingmanRequest, isWingmanAvailable } from "./wingman";
 
 import type { Message } from "../db";
@@ -150,4 +151,29 @@ registerCommand({
   handler: async (ctx) => {
     await handleImageWingmanRequest(ctx.message, ctx.args);
   },
+});
+
+// Wallet commands
+registerCommand({
+  name: "balance",
+  description: "Check your wallet balance",
+  adminOnly: false,
+  isAvailable: () => true,
+  handler: handleBalanceCommand,
+});
+
+registerCommand({
+  name: "pay",
+  description: "Pay invoice or LN address: /pay <invoice|address> [amount]",
+  adminOnly: false,
+  isAvailable: () => true,
+  handler: handlePayCommand,
+});
+
+registerCommand({
+  name: "receive",
+  description: "Generate invoice: /receive <amount_sats> [description]",
+  adminOnly: false,
+  isAvailable: () => true,
+  handler: handleReceiveCommand,
 });

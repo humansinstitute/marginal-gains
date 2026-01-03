@@ -68,6 +68,7 @@ function renderAvatarMenu(session: Session) {
       <img data-avatar-img alt="Profile photo" loading="lazy" hidden />
     </button>
     <div class="avatar-menu" data-avatar-menu hidden>
+      <a href="/wallet" class="avatar-menu-link">Wallet</a>
       <button type="button" data-logout>Log out</button>
     </div>
   </div>`;
