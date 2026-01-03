@@ -132,6 +132,70 @@ export type WingmanCost = {
   created_at: string;
 };
 
+// CRM Types
+export type CrmCompany = {
+  id: number;
+  name: string;
+  website: string | null;
+  industry: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  deleted: number;
+};
+
+export type CrmContact = {
+  id: number;
+  company_id: number | null;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  npub: string | null;
+  twitter: string | null;
+  linkedin: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  deleted: number;
+};
+
+export type CrmOpportunityStage = "lead" | "qualified" | "proposal" | "negotiation" | "closed_won" | "closed_lost";
+
+export type CrmOpportunity = {
+  id: number;
+  company_id: number | null;
+  contact_id: number | null;
+  title: string;
+  value: number | null;
+  currency: string;
+  stage: CrmOpportunityStage;
+  probability: number;
+  expected_close: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  deleted: number;
+};
+
+export type CrmActivityType = "call" | "email" | "meeting" | "note" | "task";
+
+export type CrmActivity = {
+  id: number;
+  contact_id: number | null;
+  opportunity_id: number | null;
+  company_id: number | null;
+  type: CrmActivityType;
+  subject: string;
+  description: string | null;
+  activity_date: string;
+  created_by: string;
+  created_at: string;
+  deleted: number;
+};
+
 const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "marginal-gains.sqlite";
 const db = new Database(dbPath);
 db.run("PRAGMA foreign_keys = ON");
@@ -390,6 +454,97 @@ db.run(`
 `);
 db.run("CREATE INDEX IF NOT EXISTS idx_wingman_costs_npub ON wingman_costs(npub)");
 db.run("CREATE INDEX IF NOT EXISTS idx_wingman_costs_created ON wingman_costs(created_at)");
+
+// CRM Tables
+db.run(`
+  CREATE TABLE IF NOT EXISTS crm_companies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    website TEXT,
+    industry TEXT,
+    notes TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted INTEGER NOT NULL DEFAULT 0
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_companies_name ON crm_companies(name)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_companies_deleted ON crm_companies(deleted)");
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS crm_contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER,
+    name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT,
+    npub TEXT,
+    twitter TEXT,
+    linkedin TEXT,
+    notes TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (company_id) REFERENCES crm_companies(id) ON DELETE SET NULL
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_contacts_company ON crm_contacts(company_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_contacts_name ON crm_contacts(name)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_contacts_email ON crm_contacts(email)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_contacts_npub ON crm_contacts(npub)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_contacts_deleted ON crm_contacts(deleted)");
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS crm_opportunities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER,
+    contact_id INTEGER,
+    title TEXT NOT NULL,
+    value REAL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    stage TEXT NOT NULL DEFAULT 'lead',
+    probability INTEGER NOT NULL DEFAULT 0,
+    expected_close TEXT,
+    notes TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (company_id) REFERENCES crm_companies(id) ON DELETE SET NULL,
+    FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE SET NULL
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_opportunities_company ON crm_opportunities(company_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_opportunities_contact ON crm_opportunities(contact_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_opportunities_stage ON crm_opportunities(stage)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_opportunities_deleted ON crm_opportunities(deleted)");
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS crm_activities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_id INTEGER,
+    opportunity_id INTEGER,
+    company_id INTEGER,
+    type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    description TEXT,
+    activity_date TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE SET NULL,
+    FOREIGN KEY (opportunity_id) REFERENCES crm_opportunities(id) ON DELETE SET NULL,
+    FOREIGN KEY (company_id) REFERENCES crm_companies(id) ON DELETE SET NULL
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_contact ON crm_activities(contact_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_opportunity ON crm_activities(opportunity_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_company ON crm_activities(company_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_type ON crm_activities(type)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_date ON crm_activities(activity_date)");
+db.run("CREATE INDEX IF NOT EXISTS idx_crm_activities_deleted ON crm_activities(deleted)");
 
 const listByOwnerStmt = db.query<Todo>(
   "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY created_at DESC"
@@ -1302,6 +1457,314 @@ export function getWingmanTotalCost() {
   return getWingmanTotalCostStmt.get() ?? { total_cost: 0, total_tokens: 0, request_count: 0 };
 }
 
+// CRM Companies statements
+const listCrmCompaniesStmt = db.query<CrmCompany>(
+  "SELECT * FROM crm_companies WHERE deleted = 0 ORDER BY name ASC"
+);
+const getCrmCompanyByIdStmt = db.query<CrmCompany>(
+  "SELECT * FROM crm_companies WHERE id = ? AND deleted = 0"
+);
+const insertCrmCompanyStmt = db.query<CrmCompany>(
+  `INSERT INTO crm_companies (name, website, industry, notes, created_by)
+   VALUES (?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const updateCrmCompanyStmt = db.query<CrmCompany>(
+  `UPDATE crm_companies
+   SET name = ?, website = ?, industry = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+   WHERE id = ? AND deleted = 0
+   RETURNING *`
+);
+const deleteCrmCompanyStmt = db.query(
+  "UPDATE crm_companies SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+);
+
+// CRM Contacts statements
+const listCrmContactsStmt = db.query<CrmContact & { company_name: string | null }>(
+  `SELECT c.*, co.name as company_name
+   FROM crm_contacts c
+   LEFT JOIN crm_companies co ON c.company_id = co.id AND co.deleted = 0
+   WHERE c.deleted = 0
+   ORDER BY c.name ASC`
+);
+const listCrmContactsByCompanyStmt = db.query<CrmContact>(
+  "SELECT * FROM crm_contacts WHERE company_id = ? AND deleted = 0 ORDER BY name ASC"
+);
+const getCrmContactByIdStmt = db.query<CrmContact & { company_name: string | null }>(
+  `SELECT c.*, co.name as company_name
+   FROM crm_contacts c
+   LEFT JOIN crm_companies co ON c.company_id = co.id AND co.deleted = 0
+   WHERE c.id = ? AND c.deleted = 0`
+);
+const insertCrmContactStmt = db.query<CrmContact>(
+  `INSERT INTO crm_contacts (company_id, name, email, phone, npub, twitter, linkedin, notes, created_by)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const updateCrmContactStmt = db.query<CrmContact>(
+  `UPDATE crm_contacts
+   SET company_id = ?, name = ?, email = ?, phone = ?, npub = ?, twitter = ?, linkedin = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+   WHERE id = ? AND deleted = 0
+   RETURNING *`
+);
+const deleteCrmContactStmt = db.query(
+  "UPDATE crm_contacts SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+);
+
+// CRM Opportunities statements
+const listCrmOpportunitiesStmt = db.query<CrmOpportunity & { company_name: string | null; contact_name: string | null }>(
+  `SELECT o.*, co.name as company_name, c.name as contact_name
+   FROM crm_opportunities o
+   LEFT JOIN crm_companies co ON o.company_id = co.id AND co.deleted = 0
+   LEFT JOIN crm_contacts c ON o.contact_id = c.id AND c.deleted = 0
+   WHERE o.deleted = 0
+   ORDER BY o.created_at DESC`
+);
+const listCrmOpportunitiesByStageStmt = db.query<CrmOpportunity & { company_name: string | null; contact_name: string | null }>(
+  `SELECT o.*, co.name as company_name, c.name as contact_name
+   FROM crm_opportunities o
+   LEFT JOIN crm_companies co ON o.company_id = co.id AND co.deleted = 0
+   LEFT JOIN crm_contacts c ON o.contact_id = c.id AND c.deleted = 0
+   WHERE o.deleted = 0 AND o.stage = ?
+   ORDER BY o.created_at DESC`
+);
+const getCrmOpportunityByIdStmt = db.query<CrmOpportunity & { company_name: string | null; contact_name: string | null }>(
+  `SELECT o.*, co.name as company_name, c.name as contact_name
+   FROM crm_opportunities o
+   LEFT JOIN crm_companies co ON o.company_id = co.id AND co.deleted = 0
+   LEFT JOIN crm_contacts c ON o.contact_id = c.id AND c.deleted = 0
+   WHERE o.id = ? AND o.deleted = 0`
+);
+const insertCrmOpportunityStmt = db.query<CrmOpportunity>(
+  `INSERT INTO crm_opportunities (company_id, contact_id, title, value, currency, stage, probability, expected_close, notes, created_by)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const updateCrmOpportunityStmt = db.query<CrmOpportunity>(
+  `UPDATE crm_opportunities
+   SET company_id = ?, contact_id = ?, title = ?, value = ?, currency = ?, stage = ?, probability = ?, expected_close = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+   WHERE id = ? AND deleted = 0
+   RETURNING *`
+);
+const deleteCrmOpportunityStmt = db.query(
+  "UPDATE crm_opportunities SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+);
+
+// CRM Activities statements
+const listCrmActivitiesStmt = db.query<CrmActivity & { contact_name: string | null; opportunity_title: string | null; company_name: string | null }>(
+  `SELECT a.*, c.name as contact_name, o.title as opportunity_title, co.name as company_name
+   FROM crm_activities a
+   LEFT JOIN crm_contacts c ON a.contact_id = c.id AND c.deleted = 0
+   LEFT JOIN crm_opportunities o ON a.opportunity_id = o.id AND o.deleted = 0
+   LEFT JOIN crm_companies co ON a.company_id = co.id AND co.deleted = 0
+   WHERE a.deleted = 0
+   ORDER BY a.activity_date DESC, a.created_at DESC`
+);
+const listCrmActivitiesByContactStmt = db.query<CrmActivity>(
+  "SELECT * FROM crm_activities WHERE contact_id = ? AND deleted = 0 ORDER BY activity_date DESC"
+);
+const listCrmActivitiesByOpportunityStmt = db.query<CrmActivity>(
+  "SELECT * FROM crm_activities WHERE opportunity_id = ? AND deleted = 0 ORDER BY activity_date DESC"
+);
+const listCrmActivitiesByCompanyStmt = db.query<CrmActivity>(
+  "SELECT * FROM crm_activities WHERE company_id = ? AND deleted = 0 ORDER BY activity_date DESC"
+);
+const getCrmActivityByIdStmt = db.query<CrmActivity>(
+  "SELECT * FROM crm_activities WHERE id = ? AND deleted = 0"
+);
+const insertCrmActivityStmt = db.query<CrmActivity>(
+  `INSERT INTO crm_activities (contact_id, opportunity_id, company_id, type, subject, description, activity_date, created_by)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const deleteCrmActivityStmt = db.query(
+  "UPDATE crm_activities SET deleted = 1 WHERE id = ?"
+);
+
+// CRM Pipeline summary
+const getCrmPipelineSummaryStmt = db.query<{ stage: string; count: number; total_value: number }>(
+  `SELECT stage, COUNT(*) as count, COALESCE(SUM(value), 0) as total_value
+   FROM crm_opportunities
+   WHERE deleted = 0
+   GROUP BY stage
+   ORDER BY CASE stage
+     WHEN 'lead' THEN 1
+     WHEN 'qualified' THEN 2
+     WHEN 'proposal' THEN 3
+     WHEN 'negotiation' THEN 4
+     WHEN 'closed_won' THEN 5
+     WHEN 'closed_lost' THEN 6
+   END`
+);
+
+// CRM Company functions
+export function listCrmCompanies() {
+  return listCrmCompaniesStmt.all();
+}
+
+export function getCrmCompany(id: number) {
+  return getCrmCompanyByIdStmt.get(id) as CrmCompany | undefined ?? null;
+}
+
+export function createCrmCompany(
+  name: string,
+  website: string | null,
+  industry: string | null,
+  notes: string | null,
+  createdBy: string
+) {
+  return insertCrmCompanyStmt.get(name, website, industry, notes, createdBy) as CrmCompany | undefined ?? null;
+}
+
+export function updateCrmCompany(
+  id: number,
+  name: string,
+  website: string | null,
+  industry: string | null,
+  notes: string | null
+) {
+  return updateCrmCompanyStmt.get(name, website, industry, notes, id) as CrmCompany | undefined ?? null;
+}
+
+export function deleteCrmCompany(id: number) {
+  deleteCrmCompanyStmt.run(id);
+}
+
+// CRM Contact functions
+export function listCrmContacts() {
+  return listCrmContactsStmt.all();
+}
+
+export function listCrmContactsByCompany(companyId: number) {
+  return listCrmContactsByCompanyStmt.all(companyId);
+}
+
+export function getCrmContact(id: number) {
+  return getCrmContactByIdStmt.get(id) as (CrmContact & { company_name: string | null }) | undefined ?? null;
+}
+
+export function createCrmContact(
+  companyId: number | null,
+  name: string,
+  email: string | null,
+  phone: string | null,
+  npub: string | null,
+  twitter: string | null,
+  linkedin: string | null,
+  notes: string | null,
+  createdBy: string
+) {
+  return insertCrmContactStmt.get(companyId, name, email, phone, npub, twitter, linkedin, notes, createdBy) as CrmContact | undefined ?? null;
+}
+
+export function updateCrmContact(
+  id: number,
+  companyId: number | null,
+  name: string,
+  email: string | null,
+  phone: string | null,
+  npub: string | null,
+  twitter: string | null,
+  linkedin: string | null,
+  notes: string | null
+) {
+  return updateCrmContactStmt.get(companyId, name, email, phone, npub, twitter, linkedin, notes, id) as CrmContact | undefined ?? null;
+}
+
+export function deleteCrmContact(id: number) {
+  deleteCrmContactStmt.run(id);
+}
+
+// CRM Opportunity functions
+export function listCrmOpportunities() {
+  return listCrmOpportunitiesStmt.all();
+}
+
+export function listCrmOpportunitiesByStage(stage: CrmOpportunityStage) {
+  return listCrmOpportunitiesByStageStmt.all(stage);
+}
+
+export function getCrmOpportunity(id: number) {
+  return getCrmOpportunityByIdStmt.get(id) as (CrmOpportunity & { company_name: string | null; contact_name: string | null }) | undefined ?? null;
+}
+
+export function createCrmOpportunity(
+  companyId: number | null,
+  contactId: number | null,
+  title: string,
+  value: number | null,
+  currency: string,
+  stage: CrmOpportunityStage,
+  probability: number,
+  expectedClose: string | null,
+  notes: string | null,
+  createdBy: string
+) {
+  return insertCrmOpportunityStmt.get(companyId, contactId, title, value, currency, stage, probability, expectedClose, notes, createdBy) as CrmOpportunity | undefined ?? null;
+}
+
+export function updateCrmOpportunity(
+  id: number,
+  companyId: number | null,
+  contactId: number | null,
+  title: string,
+  value: number | null,
+  currency: string,
+  stage: CrmOpportunityStage,
+  probability: number,
+  expectedClose: string | null,
+  notes: string | null
+) {
+  return updateCrmOpportunityStmt.get(companyId, contactId, title, value, currency, stage, probability, expectedClose, notes, id) as CrmOpportunity | undefined ?? null;
+}
+
+export function deleteCrmOpportunity(id: number) {
+  deleteCrmOpportunityStmt.run(id);
+}
+
+// CRM Activity functions
+export function listCrmActivities() {
+  return listCrmActivitiesStmt.all();
+}
+
+export function listCrmActivitiesByContact(contactId: number) {
+  return listCrmActivitiesByContactStmt.all(contactId);
+}
+
+export function listCrmActivitiesByOpportunity(opportunityId: number) {
+  return listCrmActivitiesByOpportunityStmt.all(opportunityId);
+}
+
+export function listCrmActivitiesByCompany(companyId: number) {
+  return listCrmActivitiesByCompanyStmt.all(companyId);
+}
+
+export function getCrmActivity(id: number) {
+  return getCrmActivityByIdStmt.get(id) as CrmActivity | undefined ?? null;
+}
+
+export function createCrmActivity(
+  contactId: number | null,
+  opportunityId: number | null,
+  companyId: number | null,
+  type: CrmActivityType,
+  subject: string,
+  description: string | null,
+  activityDate: string,
+  createdBy: string
+) {
+  return insertCrmActivityStmt.get(contactId, opportunityId, companyId, type, subject, description, activityDate, createdBy) as CrmActivity | undefined ?? null;
+}
+
+export function deleteCrmActivity(id: number) {
+  deleteCrmActivityStmt.run(id);
+}
+
+// CRM Pipeline summary
+export function getCrmPipelineSummary() {
+  return getCrmPipelineSummaryStmt.all();
+}
+
 export function resetDatabase() {
   db.run("DELETE FROM task_threads");
   db.run("DELETE FROM todos");
@@ -1318,8 +1781,12 @@ export function resetDatabase() {
   db.run("DELETE FROM users");
   db.run("DELETE FROM push_subscriptions");
   db.run("DELETE FROM wingman_costs");
+  db.run("DELETE FROM crm_activities");
+  db.run("DELETE FROM crm_opportunities");
+  db.run("DELETE FROM crm_contacts");
+  db.run("DELETE FROM crm_companies");
   // Note: vapid_config is intentionally NOT reset to preserve VAPID keys
   db.run(
-    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs')"
+    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'crm_companies', 'crm_contacts', 'crm_opportunities', 'crm_activities')"
   );
 }
