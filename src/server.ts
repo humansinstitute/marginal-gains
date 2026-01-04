@@ -21,14 +21,33 @@ import {
   handleDeleteChannel,
   handleDeleteMessage,
   handleGetChannel,
+  handleGetChannelKey,
+  handleGetChannelKeysAll,
   handleGetMe,
   handleGetMessages,
+  handleGetPendingKeyMembers,
   handleListChannels,
   handleListUsers,
   handleSendMessage,
+  handleStoreChannelKey,
+  handleStoreChannelKeysBatch,
   handleUpdateChannel,
   handleUpdateUser,
 } from "./routes/chat";
+import {
+  handleCommunityStatus,
+  handleGetCommunityKey,
+  handleBootstrapCommunity,
+  handleStoreCommunityKey,
+  handleCreateInvite,
+  handleListInvites,
+  handleDeleteInvite,
+  handleRedeemInvite,
+  handleGetPendingMigration,
+  handleGetMigrationMessages,
+  handleMigrationBatch,
+  handleCompleteMigration,
+} from "./routes/community";
 import { handleChatEvents } from "./routes/events";
 import {
   handleAddChannelGroups,
@@ -127,6 +146,14 @@ const server = Bun.serve({
         const channelGroupsMatch = pathname.match(/^\/chat\/channels\/(\d+)\/groups$/);
         if (channelGroupsMatch) return handleListChannelGroups(session, Number(channelGroupsMatch[1]));
 
+        // Channel encryption key routes
+        const channelKeysMatch = pathname.match(/^\/chat\/channels\/(\d+)\/keys$/);
+        if (channelKeysMatch) return handleGetChannelKey(session, Number(channelKeysMatch[1]));
+        const channelKeysAllMatch = pathname.match(/^\/chat\/channels\/(\d+)\/keys\/all$/);
+        if (channelKeysAllMatch) return handleGetChannelKeysAll(session, Number(channelKeysAllMatch[1]));
+        const channelKeysPendingMatch = pathname.match(/^\/chat\/channels\/(\d+)\/keys\/pending$/);
+        if (channelKeysPendingMatch) return handleGetPendingKeyMembers(session, Number(channelKeysPendingMatch[1]));
+
         // Group routes (admin only)
         if (pathname === "/chat/groups") return handleListGroups(session);
         const groupMatch = pathname.match(/^\/chat\/groups\/(\d+)$/);
@@ -153,6 +180,13 @@ const server = Bun.serve({
         if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
         if (pathname === "/api/wingman/costs") return handleGetWingmanCosts(session);
         if (pathname === "/api/slashcommands") return handleGetSlashCommands(session);
+
+        // Community encryption routes
+        if (pathname === "/api/community/status") return handleCommunityStatus(session);
+        if (pathname === "/api/community/key") return handleGetCommunityKey(session);
+        if (pathname === "/api/invites") return handleListInvites(session);
+        if (pathname === "/api/community/migration/pending") return handleGetPendingMigration(session);
+        if (pathname === "/api/community/migration/messages") return handleGetMigrationMessages(session, url);
       }
 
       if (req.method === "POST") {
@@ -185,6 +219,12 @@ const server = Bun.serve({
         const addChannelGroupsMatch = pathname.match(/^\/chat\/channels\/(\d+)\/groups$/);
         if (addChannelGroupsMatch) return handleAddChannelGroups(req, session, Number(addChannelGroupsMatch[1]));
 
+        // Channel encryption key routes
+        const storeChannelKeyMatch = pathname.match(/^\/chat\/channels\/(\d+)\/keys$/);
+        if (storeChannelKeyMatch) return handleStoreChannelKey(req, session, Number(storeChannelKeyMatch[1]));
+        const storeChannelKeysBatchMatch = pathname.match(/^\/chat\/channels\/(\d+)\/keys\/batch$/);
+        if (storeChannelKeysBatchMatch) return handleStoreChannelKeysBatch(req, session, Number(storeChannelKeysBatchMatch[1]));
+
         // Group routes (admin only)
         if (pathname === "/chat/groups") return handleCreateGroup(req, session);
         const addGroupMembersMatch = pathname.match(/^\/chat\/groups\/(\d+)\/members$/);
@@ -199,6 +239,14 @@ const server = Bun.serve({
         if (pathname === "/api/tasks") return handleCreateTask(req, session);
         const linkThreadMatch = pathname.match(/^\/api\/tasks\/(\d+)\/threads$/);
         if (linkThreadMatch) return handleLinkThreadToTask(req, session, Number(linkThreadMatch[1]));
+
+        // Community encryption routes
+        if (pathname === "/api/community/bootstrap") return handleBootstrapCommunity(req, session);
+        if (pathname === "/api/community/key") return handleStoreCommunityKey(req, session);
+        if (pathname === "/api/invites") return handleCreateInvite(req, session);
+        if (pathname === "/api/invites/redeem") return handleRedeemInvite(req, session);
+        if (pathname === "/api/community/migration/batch") return handleMigrationBatch(req, session);
+        if (pathname === "/api/community/migration/complete") return handleCompleteMigration(session);
       }
 
       if (req.method === "PATCH") {
@@ -252,6 +300,10 @@ const server = Bun.serve({
             Number(unlinkThreadMatch[2])
           );
         }
+
+        // Community encryption routes
+        const deleteInviteMatch = pathname.match(/^\/api\/invites\/(\d+)$/);
+        if (deleteInviteMatch) return handleDeleteInvite(session, Number(deleteInviteMatch[1]));
       }
 
       return new Response("Not found", { status: 404 });

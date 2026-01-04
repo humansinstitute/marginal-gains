@@ -155,20 +155,25 @@ base64(nonce || ciphertext || tag)
 
 ### Encrypted Payload Structure
 
-Before encryption, the message is wrapped with sender authentication:
+Before encryption, the message is wrapped as a signed Nostr event:
 
 ```json
 {
+  "kind": 9420,
+  "pubkey": "<sender pubkey hex>",
+  "created_at": 1704067200,
+  "tags": [],
   "content": "The actual message text",
-  "sender": "<sender pubkey hex>",
-  "ts": 1704067200,
-  "sig": "<Nostr signature of content+ts by sender>"
+  "id": "<event id hash>",
+  "sig": "<schnorr signature>"
 }
 ```
 
+Kind 9420 is a custom event kind for Marginal Gains encrypted message payloads. This event is never published to relays - it exists only inside the encrypted message blob.
+
 This JSON is then encrypted with AES-256-GCM. On decryption, clients:
 1. Decrypt the payload
-2. Verify `sig` matches `content+ts` signed by `sender`
+2. Verify the event using `verifyEvent()` from nostr-tools
 3. Reject if signature invalid (display as `[Unverified message]`)
 
 **Why**: Prevents impersonation. Without this, anyone with the channel key could forge messages as any sender. The Nostr signature proves the message came from who it claims.
@@ -311,6 +316,212 @@ Alternative considered: Direct NIP-44 (pubkey-to-pubkey) without shared key. Dec
 
 ---
 
+## Community-Wide Encryption (All Channels)
+
+### Overview
+
+All channels (including "public" ones) are encrypted with a **community key**. This means:
+- The server database contains only ciphertext - no readable messages
+- All users must be onboarded to access any channel
+- "Public" channels are accessible to all community members, "Private" channels are group-restricted
+
+### Key Hierarchy
+
+```
+Community Key (AES-256-GCM)
+├── Public channels - encrypted with community key
+└── Private channels - encrypted with per-channel key (existing system)
+```
+
+### Onboarding via Invite Codes
+
+New users must have an invite code to join the community. The invite code is used to decrypt the community key.
+
+#### Invite Code Properties
+
+| Property | Options |
+|----------|---------|
+| TTL | 1-21 days (admin selects) |
+| Usage | Single-use OR multi-use until expiry |
+| Storage | Server stores hash only, never plaintext |
+
+#### Cryptographic Design
+
+The invite code serves as both authentication AND key transport:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 ADMIN GENERATES INVITE                       │
+├─────────────────────────────────────────────────────────────┤
+│  code = random_string("XXXX-XXXX-XXXX")                     │
+│  code_hash = SHA256(code)           // for DB lookup        │
+│  derived_key = HKDF(code, "mg-invite-v1")                   │
+│  encrypted_blob = AES-GCM(community_key, derived_key)       │
+│                                                             │
+│  Store in DB: {                                             │
+│    code_hash,           // lookup key                       │
+│    encrypted_blob,      // encrypted community key          │
+│    expires_at,          // TTL                              │
+│    single_use,          // boolean                          │
+│    redeemed_count       // for multi-use tracking           │
+│  }                                                          │
+│                                                             │
+│  Admin receives: code (plaintext to share with invitee)     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                 USER REDEEMS INVITE                          │
+├─────────────────────────────────────────────────────────────┤
+│  User enters code in login flow                             │
+│                                                             │
+│  CLIENT SIDE:                                               │
+│    code_hash = SHA256(code)                                 │
+│    → Send code_hash to server (NOT the code)                │
+│                                                             │
+│  SERVER SIDE:                                               │
+│    → Lookup by code_hash                                    │
+│    → Check not expired, not exhausted (if single-use)       │
+│    → Return encrypted_blob                                  │
+│                                                             │
+│  CLIENT SIDE:                                               │
+│    derived_key = HKDF(code, "mg-invite-v1")                 │
+│    community_key = AES-GCM-decrypt(encrypted_blob,          │
+│                                    derived_key)             │
+│    wrapped_key = NIP44-encrypt(community_key, user_pubkey)  │
+│    → Store wrapped_key for this user                        │
+│                                                             │
+│  User is now onboarded with their own wrapped community key │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Security Properties
+
+| What Server Sees | Can Server Decrypt? |
+|------------------|---------------------|
+| `code_hash` (SHA256) | No - one-way hash |
+| `encrypted_blob` (AES-GCM ciphertext) | No - needs code to derive key |
+| `expires_at` | N/A (metadata) |
+
+**The server never sees the plaintext invite code.** User enters it client-side, client hashes for lookup, client derives key for decryption.
+
+#### No Invite Code?
+
+If a user attempts to log in without a valid invite code:
+1. Login UI prompts for invite code
+2. Without valid code, login does not complete
+3. User sees: "Get an invite code from the community owner"
+4. No access to any channels or messages
+
+### Database Schema
+
+```sql
+CREATE TABLE invite_codes (
+  id INTEGER PRIMARY KEY,
+  code_hash TEXT UNIQUE NOT NULL,       -- SHA256(code) for lookup
+  encrypted_key TEXT NOT NULL,           -- AES-GCM(community_key, HKDF(code))
+  single_use INTEGER DEFAULT 0,          -- 1 = single-use, 0 = multi-use
+  created_by TEXT NOT NULL,              -- admin npub who created it
+  expires_at INTEGER NOT NULL,           -- unix timestamp
+  redeemed_count INTEGER DEFAULT 0,      -- times used (for tracking)
+  created_at INTEGER DEFAULT (unixepoch())
+);
+
+-- Track which users have redeemed (for single-use enforcement)
+CREATE TABLE invite_redemptions (
+  id INTEGER PRIMARY KEY,
+  invite_id INTEGER NOT NULL,
+  user_npub TEXT NOT NULL,
+  redeemed_at INTEGER DEFAULT (unixepoch()),
+  FOREIGN KEY (invite_id) REFERENCES invite_codes(id),
+  UNIQUE(invite_id, user_npub)
+);
+
+-- Add onboarded status to users
+ALTER TABLE users ADD COLUMN onboarded INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN onboarded_at INTEGER;
+```
+
+### Community Key Bootstrap
+
+The community key is generated by the first admin:
+
+1. First admin logs in
+2. If no community key exists, admin's client generates one
+3. Key is wrapped to admin's pubkey and stored
+4. Admin can now generate invite codes
+
+```javascript
+async function bootstrapCommunityKey() {
+  // Check if community key already exists
+  const existing = await fetch('/api/community/key');
+  if (existing.ok) return; // Already bootstrapped
+
+  // Generate new community key
+  const communityKey = await generateChannelKey(); // AES-256
+
+  // Wrap to admin's pubkey
+  const adminPubkey = await window.nostr.getPublicKey();
+  const wrappedKey = await wrapKeyForUser(communityKey, adminPubkey);
+
+  // Store
+  await fetch('/api/community/key', {
+    method: 'POST',
+    body: JSON.stringify({ wrappedKey })
+  });
+}
+```
+
+### Invite Code Flows
+
+#### Generate Invite (Admin UI)
+
+```
+┌────────────────────────────────────┐
+│        Generate Invite Code        │
+├────────────────────────────────────┤
+│                                    │
+│  Expires in:  [7 days ▾]           │
+│                                    │
+│  Usage:                            │
+│    ○ Single-use (one person)       │
+│    ● Multi-use until expiry        │
+│                                    │
+│  [Generate Code]                   │
+│                                    │
+├────────────────────────────────────┤
+│  Your invite code:                 │
+│  ┌────────────────────────────┐    │
+│  │   ABCD-1234-WXYZ-5678     │    │
+│  └────────────────────────────┘    │
+│           [Copy]                   │
+│                                    │
+│  Share this code with new users.   │
+│  Expires: Jan 10, 2025             │
+└────────────────────────────────────┘
+```
+
+#### Redeem Invite (Login Flow)
+
+```
+┌────────────────────────────────────┐
+│         Welcome to Team            │
+├────────────────────────────────────┤
+│                                    │
+│  Enter your invite code:           │
+│  ┌────────────────────────────┐    │
+│  │                            │    │
+│  └────────────────────────────┘    │
+│                                    │
+│  [Join Community]                  │
+│                                    │
+│  ─────────────────────────────     │
+│  Don't have a code?                │
+│  Contact the community owner.      │
+└────────────────────────────────────┘
+```
+
+---
+
 ## Future Considerations (Out of Scope)
 
 ### Key Rotation
@@ -356,118 +567,126 @@ Users with ephemeral login (localStorage keys) risk losing access if storage is 
 
 ## Implementation Work Packages
 
-### WP1: Database Schema
+### WP1: Database Schema [COMPLETED]
 
 **Objective**: Add tables and columns to support encryption
 
-- [ ] 1.1: Create `user_channel_keys` table
-- [ ] 1.2: Add `encrypted`, `key_version` columns to `messages` table
-- [ ] 1.3: Add `encrypted`, `encryption_enabled_at` columns to `channels` table
-- [ ] 1.4: Add migration script for existing databases
+- [x] 1.1: Create `user_channel_keys` table
+- [x] 1.2: Add `encrypted`, `key_version` columns to `messages` table
+- [x] 1.3: Add `encrypted`, `encryption_enabled_at` columns to `channels` table
+- [x] 1.4: Add migration script for existing databases (using SQLite addColumn pattern)
 
 **Files**: `src/db.ts`
 
 ---
 
-### WP2: Crypto Utilities (Client)
+### WP2: Crypto Utilities (Client) [COMPLETED]
 
 **Objective**: Create client-side encryption/decryption utilities
 
-- [ ] 2.1: Create `public/crypto.js` module
-- [ ] 2.2: Implement `generateChannelKey()` - AES-256-GCM key generation via Web Crypto
-- [ ] 2.3: Implement `encryptMessage(plaintext, key)` - AES-256-GCM encryption
-- [ ] 2.4: Implement `decryptMessage(ciphertext, key)` - AES-256-GCM decryption
-- [ ] 2.5: Implement `wrapKeyForUser(channelKey, recipientPubkey)` - NIP-44 key wrapping
-- [ ] 2.6: Implement `unwrapKey(wrappedKey, senderPubkey)` - NIP-44 key unwrapping
-- [ ] 2.7: Implement `createSignedPayload(content, senderPubkey)` - wrap content with Nostr signature
-- [ ] 2.8: Implement `verifySignedPayload(payload)` - verify signature matches sender
+- [x] 2.1: Create `public/crypto.js` module
+- [x] 2.2: Implement `generateChannelKey()` - AES-256-GCM key generation via Web Crypto
+- [x] 2.3: Implement `encryptMessage(plaintext, key)` - AES-256-GCM encryption
+- [x] 2.4: Implement `decryptMessage(ciphertext, key)` - AES-256-GCM decryption
+- [x] 2.5: Implement `wrapKeyForUser(channelKey, recipientPubkey)` - NIP-44 key wrapping
+- [x] 2.6: Implement `unwrapKey(wrappedKey, senderPubkey)` - NIP-44 key unwrapping
+- [x] 2.7: Implement `createSignedPayload(content)` - wrap content as signed kind 9420 Nostr event
+- [x] 2.8: Implement `verifySignedPayload(payload)` - verify event signature using nostr-tools
 - [ ] 2.9: Add unit tests for crypto operations
 
 **Signed Payload Functions**:
 ```javascript
-// Create payload with Nostr signature (uses NIP-07 extension or ephemeral key)
-async function createSignedPayload(content) {
-  const ts = Math.floor(Date.now() / 1000);
-  const message = `${content}:${ts}`;
-  const sig = await window.nostr.signSchnorr(message); // or use ephemeral key
-  const sender = await window.nostr.getPublicKey();
+import { verifyEvent } from 'nostr-tools';
 
-  return JSON.stringify({ content, sender, ts, sig });
+// Event kind for encrypted message payloads (not published to relays)
+const ENCRYPTED_MESSAGE_KIND = 9420;
+
+// Create payload as signed Nostr event (uses NIP-07 extension or ephemeral key)
+async function createSignedPayload(content) {
+  const pubkey = await window.nostr.getPublicKey();
+  const event = {
+    kind: ENCRYPTED_MESSAGE_KIND,
+    pubkey,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [],
+    content
+  };
+  const signedEvent = await window.nostr.signEvent(event);
+  return JSON.stringify(signedEvent);
 }
 
 // Verify payload signature
 function verifySignedPayload(payload) {
-  const { content, sender, ts, sig } = JSON.parse(payload);
-  const message = `${content}:${ts}`;
-  const valid = schnorr.verify(sig, message, sender); // nostr-tools
-  return { valid, content, sender, ts };
+  const event = JSON.parse(payload);
+  const valid = verifyEvent(event);
+  return { valid, content: event.content, sender: event.pubkey, ts: event.created_at };
 }
 ```
 
 **Files**: `public/crypto.js`, `tests/crypto.test.ts`
 
-**Dependencies**: `nostr-tools` for NIP-44 and Schnorr signatures
+**Dependencies**: `nostr-tools` for NIP-44, `verifyEvent()`, and event signing
 
 ---
 
-### WP3: Key Management API
+### WP3: Key Management API [COMPLETED]
 
 **Objective**: Server endpoints for storing/retrieving encrypted keys
 
-- [ ] 3.1: `POST /api/channels/:id/keys` - Store wrapped key for a user
-- [ ] 3.2: `GET /api/channels/:id/keys` - Get current user's wrapped key
-- [ ] 3.3: `POST /api/channels/:id/keys/batch` - Store keys for multiple users (channel creation/upgrade)
-- [ ] 3.4: Add authorization checks (owner-only for storing other users' keys)
+- [x] 3.1: `POST /chat/channels/:id/keys` - Store wrapped key for a user
+- [x] 3.2: `GET /chat/channels/:id/keys` - Get current user's wrapped key
+- [x] 3.3: `POST /chat/channels/:id/keys/batch` - Store keys for multiple users (channel creation/upgrade)
+- [x] 3.4: Add authorization checks (owner-only for storing other users' keys)
 
-**Files**: `src/routes/channels.ts`, `src/db.ts`
+**Files**: `src/routes/chat.ts`, `src/db.ts`, `src/server.ts`
 
 ---
 
-### WP4: Encrypted Channel Creation
+### WP4: Encrypted Channel Creation [COMPLETED]
 
 **Objective**: Generate and distribute keys when creating a private channel
 
-- [ ] 4.1: Update channel creation UI to support "encrypted" option for private channels
-- [ ] 4.2: On creation, client generates channel key
-- [ ] 4.3: Client wraps key to owner's pubkey
-- [ ] 4.4: Client sends wrapped key to server via `/api/channels/:id/keys`
-- [ ] 4.5: Server sets `channels.encrypted = 1`
+- [x] 4.1: Update channel creation UI to support "encrypted" option for private channels
+- [x] 4.2: On creation, client generates channel key
+- [x] 4.3: Client wraps key to owner's pubkey
+- [x] 4.4: Client sends wrapped key to server via `/chat/channels/:id/keys`
+- [x] 4.5: Server sets `channels.encrypted = 1`
 
-**Files**: `public/channels.js`, `src/routes/channels.ts`, `src/render/channels.ts`
+**Files**: `public/chat.js`, `public/chatCrypto.js`, `src/routes/chat.ts`, `src/render/chat.ts`
 
 ---
 
-### WP5: Member Invitation with Key Distribution
+### WP5: Member Invitation with Key Distribution [COMPLETED]
 
 **Objective**: Share channel key when inviting members (including offline users)
 
-- [ ] 5.1: When owner invites a member, fetch owner's wrapped key
-- [ ] 5.2: Unwrap to get channel key
-- [ ] 5.3: Wrap channel key to new member's pubkey (works even if user never logged in)
-- [ ] 5.4: Store new member's wrapped key via API
-- [ ] 5.5: Handle invitation UI flow
+- [x] 5.1: When owner invites a member, fetch owner's wrapped key
+- [x] 5.2: Unwrap to get channel key
+- [x] 5.3: Wrap channel key to new member's pubkey (works even if user never logged in)
+- [x] 5.4: Store new member's wrapped key via API
+- [ ] 5.5: Handle invitation UI flow (partially - group invitation UI not yet wired)
 - [ ] 5.6: On login, client checks for pre-distributed keys in channels user is member of
 
 **Note**: Key pre-distribution works because NIP-44 only needs recipient's pubkey (not nsec). User decrypts on first login.
 
-**Files**: `public/channels.js`, `public/crypto.js`, `public/app.js` (login flow)
+**Files**: `public/chat.js`, `public/chatCrypto.js`, `public/crypto.js`
 
 **Prerequisite**: WP2, WP3, WP4
 
 ---
 
-### WP6: Message Encryption/Decryption
+### WP6: Message Encryption/Decryption [COMPLETED]
 
 **Objective**: Encrypt outgoing messages, decrypt incoming messages
 
-- [ ] 6.1: Create key cache in client using `sessionStorage` (decrypt key once per session, clears on tab close)
-- [ ] 6.2: On send: wrap content in signed payload `{content, sender, ts, sig}`, then encrypt
-- [ ] 6.3: Server stores encrypted content with `encrypted=1`, `key_version`
-- [ ] 6.4: On receive: decrypt, verify sender signature, reject if invalid
-- [ ] 6.5: Handle SSE events for encrypted messages
-- [ ] 6.6: Update message rendering to handle encrypted, plaintext, and error states
-- [ ] 6.7: Show `[Unable to decrypt message]` placeholder on decryption failure
-- [ ] 6.8: Show `[Unverified message]` placeholder if signature verification fails
+- [x] 6.1: Create key cache in client using `sessionStorage` (decrypt key once per session, clears on tab close)
+- [x] 6.2: On send: wrap content in signed payload `{content, sender, ts, sig}`, then encrypt
+- [x] 6.3: Server stores encrypted content with `encrypted=1`, `key_version`
+- [x] 6.4: On receive: decrypt, verify sender signature, reject if invalid
+- [ ] 6.5: Handle SSE events for encrypted messages (partial - messages work, need live decryption)
+- [x] 6.6: Update message rendering to handle encrypted, plaintext, and error states
+- [x] 6.7: Show `[Unable to decrypt message]` placeholder on decryption failure
+- [x] 6.8: Show `[Unverified message]` placeholder if signature verification fails
 
 **Key Cache Strategy**:
 ```javascript
@@ -492,7 +711,7 @@ function setCachedKey(channelId, key) {
 
 ---
 
-### WP7: Channel Upgrade Flow
+### WP7: Channel Upgrade Flow [DEFERRED]
 
 **Objective**: Convert existing channel to encrypted, batch-encrypt old messages
 
@@ -504,22 +723,24 @@ function setCachedKey(channelId, key) {
 - [ ] 7.6: Mark channel as encrypted after batch completes
 - [ ] 7.7: Handle edge case: new messages during upgrade
 
+**Note**: Deferred for v1. New encrypted channels work; upgrading existing channels can be added later.
+
 **Files**: `public/channels.js`, `public/crypto.js`, `src/routes/channels.ts`, `src/routes/chat.ts`
 
 **Prerequisite**: WP2, WP3, WP4, WP5, WP6
 
 ---
 
-### WP8: UI Indicators
+### WP8: UI Indicators [COMPLETED]
 
 **Objective**: Visual feedback for encrypted content
 
-- [ ] 8.1: Add encrypted indicator icon/symbol next to message menu
-- [ ] 8.2: Style with faint grey, subtle appearance
-- [ ] 8.3: Only show for messages with `encrypted=1`
+- [x] 8.1: Add encrypted indicator icon (shield) in channel list
+- [x] 8.2: Style with accent color for encrypted channels
+- [ ] 8.3: Show encrypted indicator on individual messages (optional for v1)
 - [ ] 8.4: (Optional) Add "End-to-end encrypted" badge in channel header
 
-**Files**: `public/app.css`, `public/chat.js`, `src/render/chat.ts`
+**Files**: `public/app.css`, `public/chat.js`
 
 **Prerequisite**: WP6
 
@@ -565,3 +786,121 @@ WP1 (Schema)
 ```
 
 **Recommended execution order**: WP1 → WP2 → WP3 → WP4 → WP5 → WP6 → WP8 → WP7 → WP9
+
+---
+
+## Community-Wide Encryption Work Packages
+
+### WP10: Community Key Infrastructure [NOT STARTED]
+
+**Objective**: Bootstrap community-wide encryption with a shared key
+
+- [ ] 10.1: Add `community_keys` table to store wrapped community key per user
+- [ ] 10.2: Add `onboarded` and `onboarded_at` columns to users table
+- [ ] 10.3: Create `/api/community/key` GET endpoint (check if community key exists)
+- [ ] 10.4: Create `/api/community/key` POST endpoint (bootstrap community key, admin only)
+- [ ] 10.5: Implement `bootstrapCommunityKey()` client function
+- [ ] 10.6: Auto-trigger bootstrap on first admin login
+
+**Files**: `src/db.ts`, `src/routes/community.ts`, `src/server.ts`, `public/communityKey.js`
+
+---
+
+### WP11: Invite Code System [NOT STARTED]
+
+**Objective**: Generate and redeem invite codes for onboarding
+
+- [ ] 11.1: Create `invite_codes` table with schema from docs
+- [ ] 11.2: Create `invite_redemptions` table for tracking
+- [ ] 11.3: Implement `generateInviteCode(ttlDays, singleUse)` client function
+  - Generate random code
+  - Hash with SHA256 for lookup
+  - Derive key with HKDF
+  - Encrypt community key with derived key
+  - Store hash + encrypted blob on server
+- [ ] 11.4: Create `POST /api/invites` endpoint (admin only)
+- [ ] 11.5: Create `POST /api/invites/redeem` endpoint
+  - Accept code_hash
+  - Return encrypted_blob if valid and not expired
+  - Track redemption for single-use codes
+- [ ] 11.6: Implement `redeemInviteCode(code)` client function
+  - Hash code, send to server
+  - Derive key, decrypt community key
+  - Wrap to user's pubkey, store
+
+**Crypto Functions Needed**:
+```javascript
+// SHA256 hash for lookup
+async function hashCode(code) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(code);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
+}
+
+// HKDF for key derivation
+async function deriveKeyFromCode(code) {
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', encoder.encode(code), 'HKDF', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: encoder.encode('mg-invite-v1'), info: new Uint8Array() },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  );
+}
+```
+
+**Files**: `src/db.ts`, `src/routes/invites.ts`, `src/server.ts`, `public/crypto.js`, `public/invite.js`
+
+---
+
+### WP12: Onboarding Flow UI [NOT STARTED]
+
+**Objective**: User interface for invite code entry and admin invite generation
+
+- [ ] 12.1: Update login page to require invite code for non-onboarded users
+- [ ] 12.2: Create invite code entry form in login flow
+- [ ] 12.3: Show "Get an invite code from the community owner" message when no code
+- [ ] 12.4: Create admin "Generate Invite" modal in settings
+- [ ] 12.5: TTL selector (1-21 days dropdown)
+- [ ] 12.6: Single-use vs multi-use toggle
+- [ ] 12.7: Display generated code with copy button
+- [ ] 12.8: List active invite codes for admin (with expiry, usage count)
+- [ ] 12.9: Allow admin to revoke/delete invite codes
+
+**Files**: `src/render/login.ts`, `src/render/settings.ts`, `public/login.js`, `public/settings.js`, `public/app.css`
+
+---
+
+### WP13: Public Channel Encryption [NOT STARTED]
+
+**Objective**: Encrypt public channels with the community key
+
+- [ ] 13.1: Update public channel creation to use community key
+- [ ] 13.2: On message send to public channel, encrypt with community key
+- [ ] 13.3: On message receive, decrypt with community key
+- [ ] 13.4: Update SSE handler for public channel messages
+- [ ] 13.5: Ensure non-onboarded users cannot decrypt anything
+- [ ] 13.6: Update channel list to work only for onboarded users
+
+**Files**: `public/chat.js`, `public/chatCrypto.js`, `public/liveUpdates.js`
+
+---
+
+### Community Encryption Dependency Graph
+
+```
+WP10 (Community Key)
+ │
+ └── WP11 (Invite Codes)
+      │
+      ├── WP12 (Onboarding UI)
+      │
+      └── WP13 (Public Channel Encryption)
+```
+
+**Recommended execution order**: WP10 → WP11 → WP12 → WP13

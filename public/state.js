@@ -140,9 +140,23 @@ export const setReplyTarget = (message) => {
 
 export const addMessage = (channelId, message) => {
   const bucket = state.chat.messagesByChannel[channelId] || [];
-  // Check if message already exists (prevent duplicates from SSE + HTTP)
-  const exists = bucket.some((m) => m.id === message.id);
-  if (exists) return;
+  // Check if message already exists
+  const existingIndex = bucket.findIndex((m) => m.id === message.id);
+
+  if (existingIndex >= 0) {
+    // Message exists - update it if new one is decrypted and old one wasn't
+    const existing = bucket[existingIndex];
+    if (existing.decryptionFailed && !message.decryptionFailed) {
+      // Replace with decrypted version
+      const newBucket = [...bucket];
+      newBucket[existingIndex] = message;
+      state.chat.messagesByChannel[channelId] = newBucket;
+      refreshUI();
+    }
+    // Otherwise skip (don't add duplicate)
+    return;
+  }
+
   state.chat.messagesByChannel[channelId] = [...bucket, message];
   refreshUI();
 };

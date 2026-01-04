@@ -4,16 +4,17 @@ import { renderAppMenu, renderPinModal } from "./components";
 
 import type { DeepLink, Session } from "../types";
 
-export function renderChatPage(session: Session | null, deepLink?: DeepLink) {
+export function renderChatPage(session: Session | null, deepLink?: DeepLink, needsOnboarding = false) {
+  const bodyClass = needsOnboarding ? "chat-page onboarding-mode" : "chat-page";
   return `<!doctype html>
 <html lang="en">
 ${renderHead()}
-<body class="chat-page">
+<body class="${bodyClass}">
   <main class="chat-app-shell">
-    ${renderChatHeader(session)}
-    ${session ? renderChatContent() : renderAuthRequired()}
+    ${renderChatHeader(session, needsOnboarding)}
+    ${!session ? renderAuthRequired() : needsOnboarding ? renderOnboardingLobby() : renderChatContent()}
   </main>
-  ${renderSessionSeed(session, deepLink)}
+  ${renderSessionSeed(session, deepLink, needsOnboarding)}
   <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>`;
@@ -33,7 +34,20 @@ function renderHead() {
 </head>`;
 }
 
-function renderChatHeader(session: Session | null) {
+function renderChatHeader(session: Session | null, needsOnboarding = false) {
+  // Hide menu during onboarding - user can only enter invite code or log out
+  if (needsOnboarding) {
+    return `<header class="chat-page-header">
+      <div class="header-left">
+        <img src="/favicon.png" alt="" class="app-logo" />
+        <h1 class="app-title">${APP_NAME}</h1>
+      </div>
+      <div class="header-right">
+        ${session ? renderOnboardingAvatarMenu(session) : ""}
+      </div>
+    </header>`;
+  }
+
   return `<header class="chat-page-header">
     <div class="header-left">
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
@@ -47,6 +61,18 @@ function renderChatHeader(session: Session | null) {
     </div>
     ${renderAppMenu(session, "chat")}
   </header>`;
+}
+
+function renderOnboardingAvatarMenu(session: Session) {
+  return `<div class="session-controls" data-session-controls>
+    <button class="avatar-chip" type="button" data-avatar title="Account menu">
+      <span class="avatar-fallback" data-avatar-fallback>${formatAvatarFallback(session.npub)}</span>
+      <img data-avatar-img alt="Profile photo" loading="lazy" hidden />
+    </button>
+    <div class="avatar-menu" data-avatar-menu hidden>
+      <button type="button" data-logout>Log out</button>
+    </div>
+  </div>`;
 }
 
 function renderAvatarMenu(session: Session) {
@@ -124,33 +150,56 @@ function renderChatContent() {
 
 function renderChannelModal() {
   return `<div class="chat-modal" data-channel-modal hidden>
-    <div class="chat-modal-body">
+    <div class="chat-modal-body channel-wizard">
       <header class="chat-modal-header">
         <h3>Create channel</h3>
         <button type="button" class="ghost" data-close-channel-modal>&times;</button>
       </header>
-      <form class="chat-form" data-channel-form>
-        <label>
-          <span>Name (slug)</span>
-          <input name="name" required placeholder="general" />
-        </label>
-        <label>
-          <span>Display name</span>
-          <input name="displayName" required placeholder="General" />
-        </label>
-        <label>
-          <span>Description</span>
-          <textarea name="description" rows="2" placeholder="What is this channel about?"></textarea>
-        </label>
-        <label class="chat-checkbox" data-admin-only>
-          <input type="checkbox" name="isPublic" checked />
-          <span>Public channel (uncheck for private)</span>
-        </label>
-        <div class="chat-form-actions">
-          <button type="button" class="ghost" data-close-channel-modal>Cancel</button>
-          <button type="submit" class="primary">Create</button>
+      <div class="wizard-step wizard-step-1" data-wizard-step-1>
+        <p class="channel-type-prompt">What type of channel?</p>
+        <div class="channel-type-buttons">
+          <button type="button" class="channel-type-btn" data-select-channel-type="public">
+            <span class="channel-type-icon">&#127758;</span>
+            <span class="channel-type-label">Public</span>
+            <span class="channel-type-desc">Anyone can view and join</span>
+          </button>
+          <button type="button" class="channel-type-btn" data-select-channel-type="private">
+            <span class="channel-type-icon">&#128274;</span>
+            <span class="channel-type-label">Private</span>
+            <span class="channel-type-desc">Encrypted, group members only</span>
+          </button>
         </div>
-      </form>
+      </div>
+      <div class="wizard-step wizard-step-2" data-wizard-step-2 style="display: none;">
+        <div class="wizard-step-2-header">
+          <span class="wizard-type-badge" data-wizard-type-badge></span>
+        </div>
+        <form class="chat-form" data-channel-form>
+          <input type="hidden" name="isPublic" value="1" data-channel-is-public />
+          <label>
+            <span>Slug</span>
+            <input name="name" required placeholder="my-channel" pattern="[a-z0-9-]+" title="Lowercase letters, numbers, and hyphens only" />
+            <span class="field-hint">Lowercase, no spaces (e.g. team-updates)</span>
+          </label>
+          <label>
+            <span>Description</span>
+            <textarea name="description" rows="2" placeholder="What is this channel about?"></textarea>
+          </label>
+          <div class="channel-group-section" data-channel-group-section style="display: none;">
+            <label>
+              <span>Group</span>
+              <select name="groupId" data-channel-group-select>
+                <option value="">Select a group...</option>
+              </select>
+            </label>
+            <span class="field-hint">Members of this group will have access</span>
+          </div>
+          <div class="chat-form-actions">
+            <button type="button" class="ghost" data-channel-back>Back</button>
+            <button type="submit" class="primary">Create</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>`;
 }
@@ -188,6 +237,15 @@ function renderChannelSettingsModal() {
               <option value="">Add a group...</option>
             </select>
           </div>
+        </div>
+        <div class="channel-encryption-section" data-channel-encryption-section hidden>
+          <label>
+            <span>🔐 Encryption Keys</span>
+          </label>
+          <div class="encryption-status" data-encryption-status>
+            <p>Loading key status...</p>
+          </div>
+          <button type="button" class="secondary" data-distribute-keys>Distribute Keys to Pending Members</button>
         </div>
         <div class="chat-form-actions">
           <button type="button" class="ghost" data-close-channel-settings>Cancel</button>
@@ -350,12 +408,46 @@ function renderAuthRequired() {
   </section>`;
 }
 
-function renderSessionSeed(session: Session | null, deepLink?: DeepLink) {
+function renderSessionSeed(session: Session | null, deepLink?: DeepLink, needsOnboarding = false) {
   return `<script>
     window.__NOSTR_SESSION__ = ${JSON.stringify(session ?? null)};
     window.__CHAT_PAGE__ = true;
     window.__DEEP_LINK__ = ${JSON.stringify(deepLink ?? null)};
+    window.__NEEDS_ONBOARDING__ = ${needsOnboarding};
   </script>`;
+}
+
+function renderOnboardingLobby() {
+  return `<section class="onboarding-lobby" data-onboarding-lobby>
+    <div class="onboarding-card">
+      <div class="onboarding-icon">🔐</div>
+      <h2>Welcome to ${APP_NAME}</h2>
+      <p class="onboarding-desc">
+        This community uses end-to-end encryption.
+        Enter your invite code to get access.
+      </p>
+      <form class="onboarding-form" data-invite-form>
+        <input
+          type="text"
+          name="inviteCode"
+          placeholder="XXXX-XXXX-XXXX"
+          class="invite-input"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          data-invite-input
+          required
+        />
+        <button type="submit" class="primary onboarding-btn" data-invite-submit>
+          Join Community
+        </button>
+      </form>
+      <p class="onboarding-error" data-invite-error hidden></p>
+      <p class="onboarding-hint">
+        Don't have an invite code? Ask the community owner.
+      </p>
+    </div>
+  </section>`;
 }
 
 function formatAvatarFallback(npub: string) {

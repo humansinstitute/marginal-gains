@@ -1,5 +1,28 @@
 import { isAdmin } from "../config";
-import { canUserAccessChannel, deleteChannel, deleteMessage, getDmParticipants, getMessage, getOrCreateDmChannel, getOrCreatePersonalChannel, listAllChannels, listDmChannels, listUsers, listVisibleChannels, upsertUser } from "../db";
+import {
+  addChannelGroup,
+  canUserAccessChannel,
+  deleteChannel,
+  deleteMessage,
+  getChannel,
+  getChannelKeys,
+  getChannelMembersWithoutKeys,
+  getCommunityKey,
+  getDmParticipants,
+  getLatestKeyVersion,
+  getMessage,
+  getOrCreateDmChannel,
+  getOrCreatePersonalChannel,
+  getUserByNpub,
+  getUserChannelKey,
+  isCommunityBootstrapped,
+  listAllChannels,
+  listDmChannels,
+  listUsers,
+  listVisibleChannels,
+  storeUserChannelKey,
+  upsertUser,
+} from "../db";
 import { jsonResponse, unauthorized } from "../http";
 import { renderChatPage } from "../render/chat";
 import {
@@ -8,6 +31,7 @@ import {
   getChannelById,
   getChannelMessages,
   replyToMessage,
+  sendEncryptedMessage,
   sendMessage,
 } from "../services/chat";
 import { broadcast } from "../services/events";
@@ -21,7 +45,17 @@ function forbidden(message = "Forbidden") {
 }
 
 export function handleChatPage(session: Session | null, deepLink?: DeepLink) {
-  const page = renderChatPage(session, deepLink);
+  // Check if community encryption is active and user needs onboarding
+  let needsOnboarding = false;
+  if (session) {
+    const bootstrapped = isCommunityBootstrapped();
+    if (bootstrapped) {
+      const hasCommunityKey = !!getCommunityKey(session.pubkey);
+      needsOnboarding = !hasCommunityKey;
+    }
+  }
+
+  const page = renderChatPage(session, deepLink, needsOnboarding);
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
@@ -68,7 +102,7 @@ export async function handleCreateChannel(req: Request, session: Session | null)
   if (!session) return unauthorized();
 
   const body = await req.json();
-  const { name, displayName, description, isPublic } = body;
+  const { name, displayName, description, isPublic, groupId } = body;
 
   if (!name || typeof name !== "string") {
     return jsonResponse({ error: "Name is required" }, 400);
@@ -80,17 +114,26 @@ export async function handleCreateChannel(req: Request, session: Session | null)
     return forbidden("Only admins can create private channels");
   }
 
+  // Private channels are always encrypted
+  const channelEncrypted = !channelIsPublic;
+
   const normalizedName = name.trim().toLowerCase().replace(/\s+/g, "-");
   const channel = createNewChannel(
     normalizedName,
     displayName?.trim() || normalizedName,
     description?.trim() || "",
     session.npub,
-    channelIsPublic
+    channelIsPublic,
+    channelEncrypted
   );
 
   if (!channel) {
     return jsonResponse({ error: "Channel name already exists" }, 409);
+  }
+
+  // If a group was specified for a private channel, assign it
+  if (!channelIsPublic && groupId && typeof groupId === "number") {
+    addChannelGroup(channel.id, groupId);
   }
 
   // Broadcast new channel event
@@ -222,15 +265,27 @@ export async function handleSendMessage(req: Request, session: Session | null, c
   }
 
   const body = await req.json();
-  const { content, parentId } = body;
+  const { content, parentId, encrypted } = body;
 
   if (!content || typeof content !== "string" || !content.trim()) {
     return jsonResponse({ error: "Message content is required" }, 400);
   }
 
-  const message = parentId
-    ? replyToMessage(channelId, session.npub, content, parentId)
-    : sendMessage(channelId, session.npub, content);
+  let message;
+  if (encrypted) {
+    // Client has already encrypted the content
+    message = sendEncryptedMessage(
+      channelId,
+      session.npub,
+      content,
+      parentId ? Number(parentId) : null,
+      1 // keyVersion
+    );
+  } else {
+    message = parentId
+      ? replyToMessage(channelId, session.npub, content, parentId)
+      : sendMessage(channelId, session.npub, content);
+  }
 
   if (!message) {
     return jsonResponse({ error: "Failed to send message" }, 500);
@@ -393,4 +448,187 @@ export async function handleCreateDm(req: Request, session: Session | null) {
   });
 
   return jsonResponse(channel, 201);
+}
+
+// ============================================================
+// Channel Key Management (E2E Encryption)
+// ============================================================
+
+/**
+ * Get current user's wrapped channel key
+ * GET /chat/channels/:id/keys
+ */
+export function handleGetChannelKey(session: Session | null, channelId: number) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check access for private channels
+  if (channel.is_public === 0 && !isAdmin(session.npub)) {
+    if (!canUserAccessChannel(channelId, session.npub)) {
+      return forbidden("You don't have access to this channel");
+    }
+  }
+
+  // Get user's wrapped key
+  const key = getUserChannelKey(session.pubkey, channelId);
+  if (!key) {
+    return jsonResponse({ error: "No key found for this channel" }, 404);
+  }
+
+  return jsonResponse({
+    encrypted_key: key.encrypted_key,
+    key_version: key.key_version,
+    created_at: key.created_at,
+  });
+}
+
+/**
+ * Store a wrapped channel key for a user
+ * POST /chat/channels/:id/keys
+ * Body: { userPubkey, encryptedKey, keyVersion? }
+ */
+export async function handleStoreChannelKey(req: Request, session: Session | null, channelId: number) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Only channel creator or admin can store keys for other users
+  const isOwner = channel.creator === session.npub;
+  const userIsAdmin = isAdmin(session.npub);
+
+  const body = await req.json();
+  const { userPubkey, encryptedKey, keyVersion } = body;
+
+  if (!userPubkey || !encryptedKey) {
+    return jsonResponse({ error: "userPubkey and encryptedKey are required" }, 400);
+  }
+
+  // Users can only store their own keys unless they're the owner/admin
+  if (userPubkey !== session.pubkey && !isOwner && !userIsAdmin) {
+    return forbidden("Only channel owner can store keys for other users");
+  }
+
+  // Use provided key version or auto-increment
+  const version = keyVersion ?? (getLatestKeyVersion(channelId) + 1);
+
+  const stored = storeUserChannelKey(userPubkey, channelId, encryptedKey, version);
+  if (!stored) {
+    return jsonResponse({ error: "Failed to store key" }, 500);
+  }
+
+  return jsonResponse(stored, 201);
+}
+
+/**
+ * Store wrapped channel keys for multiple users (batch)
+ * POST /chat/channels/:id/keys/batch
+ * Body: { keys: [{ userPubkey, encryptedKey }], keyVersion? }
+ */
+export async function handleStoreChannelKeysBatch(req: Request, session: Session | null, channelId: number) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Only channel creator or admin can store keys in batch
+  const isOwner = channel.creator === session.npub;
+  const userIsAdmin = isAdmin(session.npub);
+
+  if (!isOwner && !userIsAdmin) {
+    return forbidden("Only channel owner can store keys for other users");
+  }
+
+  const body = await req.json();
+  const { keys, keyVersion } = body;
+
+  if (!Array.isArray(keys) || keys.length === 0) {
+    return jsonResponse({ error: "keys array is required" }, 400);
+  }
+
+  // Use provided key version or auto-increment
+  const version = keyVersion ?? (getLatestKeyVersion(channelId) + 1);
+
+  const results: Array<{ userPubkey: string; success: boolean }> = [];
+
+  for (const keyEntry of keys) {
+    const { userPubkey, encryptedKey } = keyEntry;
+    if (!userPubkey || !encryptedKey) {
+      results.push({ userPubkey: userPubkey || "unknown", success: false });
+      continue;
+    }
+
+    const stored = storeUserChannelKey(userPubkey, channelId, encryptedKey, version);
+    results.push({ userPubkey, success: !!stored });
+  }
+
+  return jsonResponse({ results, keyVersion: version }, 201);
+}
+
+/**
+ * Get all wrapped keys for a channel (admin/owner only, for key rotation)
+ * GET /chat/channels/:id/keys/all
+ */
+export function handleGetChannelKeysAll(session: Session | null, channelId: number) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Only channel creator or admin can see all keys
+  const isOwner = channel.creator === session.npub;
+  const userIsAdmin = isAdmin(session.npub);
+
+  if (!isOwner && !userIsAdmin) {
+    return forbidden("Only channel owner can view all keys");
+  }
+
+  const keys = getChannelKeys(channelId);
+  return jsonResponse({ keys });
+}
+
+/**
+ * Get channel members who don't have encryption keys yet
+ * GET /chat/channels/:id/keys/pending
+ */
+export function handleGetPendingKeyMembers(session: Session | null, channelId: number) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Only channel creator or admin can see pending members
+  const isOwner = channel.creator === session.npub;
+  const userIsAdmin = isAdmin(session.npub);
+
+  if (!isOwner && !userIsAdmin) {
+    return forbidden("Only channel owner can view pending key members");
+  }
+
+  // Get npubs that need keys
+  const pendingNpubs = getChannelMembersWithoutKeys(channelId);
+
+  // Convert to objects with pubkey for key wrapping
+  const pendingMembers = pendingNpubs.map(npub => {
+    const user = getUserByNpub(npub);
+    return {
+      npub,
+      pubkey: user?.pubkey || null,
+      displayName: user?.display_name || null,
+    };
+  }).filter(m => m.pubkey); // Only include members with known pubkeys
+
+  return jsonResponse({ pendingMembers, channelEncrypted: channel.encrypted === 1 });
 }

@@ -75,8 +75,94 @@ function renderSettingsContent(userIsAdmin: boolean) {
       <p class="settings-empty">Loading...</p>
     </section>
 
+    ${userIsAdmin ? renderCommunityEncryptionSection() : ""}
     ${userIsAdmin ? renderWingmanSection() : ""}
     ${userIsAdmin ? renderGroupsSection() : ""}
+  </div>`;
+}
+
+function renderCommunityEncryptionSection() {
+  return `<section class="settings-section" data-community-section>
+      <div class="settings-section-header">
+        <h2>Community Encryption</h2>
+      </div>
+      <div class="community-status" data-community-status>
+        <p class="settings-empty">Loading...</p>
+      </div>
+
+      <!-- Bootstrap Panel (shown if not bootstrapped) -->
+      <div class="community-bootstrap" data-community-bootstrap hidden>
+        <p class="community-info">
+          Community encryption protects all messages in the database.
+          Once enabled, users will need an invite code to join.
+        </p>
+        <button type="button" class="primary" data-bootstrap-community>
+          Enable Community Encryption
+        </button>
+      </div>
+
+      <!-- Invite Codes Panel (shown if bootstrapped) -->
+      <div class="community-invites" data-community-invites hidden>
+        <div class="invite-controls">
+          <button type="button" class="primary" data-create-invite>
+            Generate Invite Code
+          </button>
+        </div>
+        <div class="invite-list" data-invite-list>
+          <p class="settings-empty">No active invite codes</p>
+        </div>
+      </div>
+
+      <!-- Migration Panel (shown if migration needed) -->
+      <div class="community-migration" data-community-migration hidden>
+        <div class="migration-status" data-migration-status>
+          <p>Encrypting existing messages...</p>
+        </div>
+        <button type="button" class="primary" data-run-migration>
+          Encrypt Existing Messages
+        </button>
+      </div>
+
+      ${renderInviteCodeModal()}
+    </section>`;
+}
+
+function renderInviteCodeModal() {
+  return `<div class="settings-modal" data-invite-modal hidden>
+    <div class="settings-modal-body">
+      <header class="settings-modal-header">
+        <h3>Generate Invite Code</h3>
+        <button type="button" class="ghost" data-close-invite-modal>&times;</button>
+      </header>
+      <form class="settings-form" data-invite-form>
+        <label>
+          <span>Expires in</span>
+          <select name="ttlDays">
+            <option value="1">1 day</option>
+            <option value="3">3 days</option>
+            <option value="7" selected>7 days</option>
+            <option value="14">14 days</option>
+            <option value="21">21 days</option>
+          </select>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" name="singleUse" />
+          <span>Single-use (can only be used once)</span>
+        </label>
+        <div class="settings-form-actions">
+          <button type="button" class="ghost" data-close-invite-modal>Cancel</button>
+          <button type="submit" class="primary">Generate</button>
+        </div>
+      </form>
+      <div class="invite-result" data-invite-result hidden>
+        <p>Share this code with new users:</p>
+        <div class="invite-code-display">
+          <code data-invite-code-text></code>
+          <button type="button" class="ghost" data-copy-invite>Copy</button>
+        </div>
+        <p class="invite-hint">This code will not be shown again.</p>
+      </div>
+    </div>
   </div>`;
 }
 
