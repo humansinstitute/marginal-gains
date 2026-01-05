@@ -86,6 +86,7 @@ function renderAvatarMenu(session: Session) {
       <button type="button" data-export-secret ${session.method === "ephemeral" ? "" : "hidden"}>Export Secret</button>
       <button type="button" data-show-login-qr ${session.method === "ephemeral" ? "" : "hidden"}>Show Login QR</button>
       <button type="button" data-copy-id>Copy ID</button>
+      <a href="/wallet" class="avatar-menu-link">Wallet</a>
       <button type="button" data-logout>Log out</button>
     </div>
   </div>`;

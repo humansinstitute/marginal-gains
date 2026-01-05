@@ -7,19 +7,53 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
-# runtime files
-*.log
+# database files
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+marginal-gains.sqlite*
+
+# backups
+backups/
+*.backup
+*.bak
+*.sql.gz
+*.sqlite.gz
+
+# uploads (user-generated content)
+uploads/
+
+# runtime/logs
+*.log
+logs/
 
 # build output
 dist/
 build/
-assets/
-assets/*
 
-# environment files
+# user assets (uploaded files)
+assets/
+!assets/.gitkeep
+
+# environment and secrets
 .env
 .env.*
+*.pem
+*.key
+*.crt
+credentials.json
+secrets.json
+
+# test databases
+tests/tmp-*.sqlite
 
 # OS junk
 .DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

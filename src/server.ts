@@ -48,6 +48,29 @@ import {
   handleMigrationBatch,
   handleCompleteMigration,
 } from "./routes/community";
+import {
+  handleCrmPage,
+  handleCreateActivity,
+  handleCreateCompany,
+  handleCreateContact,
+  handleCreateOpportunity,
+  handleDeleteActivity,
+  handleDeleteCompany,
+  handleDeleteContact,
+  handleDeleteOpportunity,
+  handleGetActivity,
+  handleGetCompany,
+  handleGetContact,
+  handleGetOpportunity,
+  handleListActivities,
+  handleListCompanies,
+  handleListContacts,
+  handleListOpportunities,
+  handlePipelineSummary,
+  handleUpdateCompany,
+  handleUpdateContact,
+  handleUpdateOpportunity,
+} from "./routes/crm";
 import { handleChatEvents } from "./routes/events";
 import {
   handleAddChannelGroups,
@@ -81,6 +104,16 @@ import {
   handleUnlinkThreadFromTask,
 } from "./routes/tasks";
 import { handleApiTodoState, handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
+import {
+  handleWalletPage,
+  handleWalletConnect,
+  handleWalletDisconnect,
+  handleWalletStatus,
+  handleWalletBalance,
+  handleWalletTransactions,
+  handleWalletInvoice,
+  handleWalletPay,
+} from "./routes/wallet";
 import {
   handleGetSlashCommands,
   handleGetWingmanSettings,
@@ -164,6 +197,7 @@ const server = Bun.serve({
         if (pathname === "/") return handleHome(session);
         if (pathname === "/todo") return handleTodos(url, session);
         if (pathname === "/settings") return handleSettings(session);
+        if (pathname === "/wallet") return handleWalletPage(session);
 
         // Push notification routes
         if (pathname === "/api/push/vapid-public-key") return handleGetVapidPublicKey();
@@ -187,6 +221,42 @@ const server = Bun.serve({
         if (pathname === "/api/invites") return handleListInvites(session);
         if (pathname === "/api/community/migration/pending") return handleGetPendingMigration(session);
         if (pathname === "/api/community/migration/messages") return handleGetMigrationMessages(session, url);
+
+        // CRM routes (admin only)
+        if (pathname === "/crm") return handleCrmPage(session);
+        if (pathname === "/api/crm/companies") return handleListCompanies(session);
+        const crmCompanyMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)$/);
+        if (crmCompanyMatch) return handleGetCompany(session, Number(crmCompanyMatch[1]));
+        if (pathname === "/api/crm/contacts") {
+          const companyId = url.searchParams.get("company_id");
+          return handleListContacts(session, companyId ? Number(companyId) : undefined);
+        }
+        const crmContactMatch = pathname.match(/^\/api\/crm\/contacts\/(\d+)$/);
+        if (crmContactMatch) return handleGetContact(session, Number(crmContactMatch[1]));
+        if (pathname === "/api/crm/opportunities") {
+          const stage = url.searchParams.get("stage") ?? undefined;
+          return handleListOpportunities(session, stage);
+        }
+        const crmOpportunityMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)$/);
+        if (crmOpportunityMatch) return handleGetOpportunity(session, Number(crmOpportunityMatch[1]));
+        if (pathname === "/api/crm/activities") {
+          const contactId = url.searchParams.get("contact_id");
+          const opportunityId = url.searchParams.get("opportunity_id");
+          const companyId = url.searchParams.get("company_id");
+          return handleListActivities(session, {
+            contact_id: contactId ? Number(contactId) : undefined,
+            opportunity_id: opportunityId ? Number(opportunityId) : undefined,
+            company_id: companyId ? Number(companyId) : undefined,
+          });
+        }
+        const crmActivityMatch = pathname.match(/^\/api\/crm\/activities\/(\d+)$/);
+        if (crmActivityMatch) return handleGetActivity(session, Number(crmActivityMatch[1]));
+        if (pathname === "/api/crm/pipeline") return handlePipelineSummary(session);
+
+        // Wallet routes
+        if (pathname === "/api/wallet/status") return handleWalletStatus(req, session);
+        if (pathname === "/api/wallet/balance") return handleWalletBalance(req, session);
+        if (pathname === "/api/wallet/transactions") return handleWalletTransactions(req, session);
       }
 
       if (req.method === "POST") {
@@ -247,6 +317,17 @@ const server = Bun.serve({
         if (pathname === "/api/invites/redeem") return handleRedeemInvite(req, session);
         if (pathname === "/api/community/migration/batch") return handleMigrationBatch(req, session);
         if (pathname === "/api/community/migration/complete") return handleCompleteMigration(session);
+
+        // CRM routes (admin only)
+        if (pathname === "/api/crm/companies") return handleCreateCompany(req, session);
+        if (pathname === "/api/crm/contacts") return handleCreateContact(req, session);
+        if (pathname === "/api/crm/opportunities") return handleCreateOpportunity(req, session);
+        if (pathname === "/api/crm/activities") return handleCreateActivity(req, session);
+
+        // Wallet routes
+        if (pathname === "/api/wallet/connect") return handleWalletConnect(req, session);
+        if (pathname === "/api/wallet/invoice") return handleWalletInvoice(req, session);
+        if (pathname === "/api/wallet/pay") return handleWalletPay(req, session);
       }
 
       if (req.method === "PATCH") {
@@ -260,6 +341,14 @@ const server = Bun.serve({
 
         // Wingman routes
         if (pathname === "/api/wingman/settings") return handleUpdateWingmanSettings(req, session);
+
+        // CRM routes (admin only)
+        const updateCrmCompanyMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)$/);
+        if (updateCrmCompanyMatch) return handleUpdateCompany(req, session, Number(updateCrmCompanyMatch[1]));
+        const updateCrmContactMatch = pathname.match(/^\/api\/crm\/contacts\/(\d+)$/);
+        if (updateCrmContactMatch) return handleUpdateContact(req, session, Number(updateCrmContactMatch[1]));
+        const updateCrmOpportunityMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)$/);
+        if (updateCrmOpportunityMatch) return handleUpdateOpportunity(req, session, Number(updateCrmOpportunityMatch[1]));
       }
 
       if (req.method === "DELETE") {
@@ -304,6 +393,19 @@ const server = Bun.serve({
         // Community encryption routes
         const deleteInviteMatch = pathname.match(/^\/api\/invites\/(\d+)$/);
         if (deleteInviteMatch) return handleDeleteInvite(session, Number(deleteInviteMatch[1]));
+
+        // CRM routes (admin only)
+        const deleteCrmCompanyMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)$/);
+        if (deleteCrmCompanyMatch) return handleDeleteCompany(session, Number(deleteCrmCompanyMatch[1]));
+        const deleteCrmContactMatch = pathname.match(/^\/api\/crm\/contacts\/(\d+)$/);
+        if (deleteCrmContactMatch) return handleDeleteContact(session, Number(deleteCrmContactMatch[1]));
+        const deleteCrmOpportunityMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)$/);
+        if (deleteCrmOpportunityMatch) return handleDeleteOpportunity(session, Number(deleteCrmOpportunityMatch[1]));
+        const deleteCrmActivityMatch = pathname.match(/^\/api\/crm\/activities\/(\d+)$/);
+        if (deleteCrmActivityMatch) return handleDeleteActivity(session, Number(deleteCrmActivityMatch[1]));
+
+        // Wallet routes
+        if (pathname === "/api/wallet/disconnect") return handleWalletDisconnect(req, session);
       }
 
       return new Response("Not found", { status: 404 });
