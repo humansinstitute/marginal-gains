@@ -83,12 +83,30 @@ export function parseSlashCommands(
 /**
  * Execute slash commands found in a message
  * Called after message is saved to database
+ *
+ * @param message - The saved message
+ * @param authorNpub - npub of the message author
+ * @param commandsMetadata - Optional array of command names (for encrypted messages)
+ *                           When provided, uses this instead of parsing message.body
  */
 export async function executeSlashCommands(
   message: Message,
-  authorNpub: string
+  authorNpub: string,
+  commandsMetadata?: string[]
 ): Promise<void> {
-  const parsed = parseSlashCommands(message.body);
+  // For encrypted messages, use the metadata provided by the client
+  // For plaintext messages, parse from the message body
+  let parsed: Array<{ command: string; args: string }>;
+
+  if (commandsMetadata && commandsMetadata.length > 0) {
+    // Use metadata - args are empty since we can't extract them from encrypted content
+    // The bot will decrypt the full message to get the actual args
+    parsed = commandsMetadata.map(cmd => ({ command: cmd.toLowerCase(), args: "" }));
+    console.log(`[SlashCommands] Using metadata for encrypted message: ${commandsMetadata.join(", ")}`);
+  } else {
+    const bodyParsed = parseSlashCommands(message.body);
+    parsed = bodyParsed.map(p => ({ command: p.command, args: p.args }));
+  }
 
   if (parsed.length === 0) return;
 

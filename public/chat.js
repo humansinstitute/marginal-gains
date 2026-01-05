@@ -17,6 +17,18 @@ import {
   renderMessageMenu,
   groupByParent,
 } from "./messageRenderer.js";
+import {
+  setupChannelEncryption,
+  distributeKeyToMember,
+  distributeKeysToAllPendingMembers,
+  encryptMessageForChannel,
+  processMessagesForDisplay,
+  isChannelEncrypted,
+  channelNeedsEncryption,
+  usesCommunityEncryption,
+} from "./chatCrypto.js";
+import { checkEncryptionSupport } from "./crypto.js";
+import { fetchCommunityKey, getCommunityStatus } from "./communityCrypto.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();
@@ -32,6 +44,42 @@ let threadExpanded = false;
 
 // Track if we should scroll to bottom (only on initial load or explicit action)
 let shouldScrollToBottom = false;
+
+/**
+ * Parse slash commands from message text (client-side, before encryption)
+ * Returns array of command names found in the message
+ * @param {string} text - Message text
+ * @returns {string[]} Array of command names (e.g., ["wingman", "image-wingman"])
+ */
+function parseSlashCommands(text) {
+  const commands = [];
+  const commandPattern = /\/([\w-]+)/g;
+  let match;
+  while ((match = commandPattern.exec(text)) !== null) {
+    commands.push(match[1].toLowerCase());
+  }
+  return commands;
+}
+
+/**
+ * Parse @mentions from message text (client-side, before encryption)
+ * Extracts npubs from nostr:npub... format used by the mention system
+ * @param {string} text - Message text
+ * @returns {string[]} Array of mentioned npubs
+ */
+function parseMentions(text) {
+  const mentions = [];
+  // Match nostr:npub1... format (npub is 63 chars: npub1 + 58 bech32 chars)
+  const mentionPattern = /nostr:(npub1[a-z0-9]{58})/gi;
+  let match;
+  while ((match = mentionPattern.exec(text)) !== null) {
+    const npub = match[1].toLowerCase();
+    if (!mentions.includes(npub)) {
+      mentions.push(npub);
+    }
+  }
+  return mentions;
+}
 
 /**
  * Auto-resize textarea to fit content (up to max-height set in CSS)
@@ -546,6 +594,11 @@ function updateAvatarConnectionStatus(connState) {
 }
 
 export const initChat = async () => {
+  // Skip chat initialization if user needs onboarding (no community key)
+  if (window.__NEEDS_ONBOARDING__) {
+    return;
+  }
+
   // Check if we're on the chat page
   const isChatPage = window.__CHAT_PAGE__ === true;
 
@@ -581,6 +634,13 @@ export const initChat = async () => {
 
     // Fetch channels via HTTP first (more reliable than SSE for initial load)
     await fetchChannels();
+
+    // Pre-fetch community key if available (enables community encryption for public channels)
+    try {
+      await fetchCommunityKey();
+    } catch (_err) {
+      // Community key may not be available - that's OK
+    }
 
     // Handle deep link if present (e.g., /chat/channel/general?thread=123)
     const deepLink = handleDeepLink();
@@ -663,7 +723,9 @@ async function fetchChannels() {
       displayName: ch.display_name,
       description: ch.description,
       isPublic: ch.is_public === 1,
+      encrypted: ch.encrypted === 1,
     }));
+    console.log("[Chat] Loaded channels with encryption status:", channels.map(c => ({ id: c.id, name: c.name, encrypted: c.encrypted })));
 
     // Map DM channels - include other participant's npub for display
     const dmChannels = (data.dmChannels || []).map((ch) => ({
@@ -672,6 +734,7 @@ async function fetchChannels() {
       displayName: ch.display_name,
       description: ch.description,
       otherNpub: ch.other_npub || null,
+      encrypted: ch.encrypted === 1,
     }));
 
     // Map personal channel
@@ -691,18 +754,39 @@ async function fetchChannels() {
 
 async function fetchMessages(channelId) {
   if (!state.session) return;
+
+  // For encrypted channels, admins should auto-distribute keys to pending members
+  const channel = state.chat.channels.find(c => c.id === channelId) ||
+                  state.chat.dmChannels.find(c => c.id === channelId);
+  if (channel?.encrypted && state.isAdmin) {
+    // Don't await - let it run in background
+    distributeKeysToAllPendingMembers(channelId).then(result => {
+      if (result.success > 0) {
+        console.log(`[Chat] Auto-distributed keys to ${result.success} pending member(s) for channel ${channelId}`);
+      }
+    }).catch(err => {
+      console.warn("[Chat] Failed to auto-distribute keys:", err);
+    });
+  }
+
   try {
     const res = await fetch(`/chat/channels/${channelId}/messages`);
     if (!res.ok) return;
     const messages = await res.json();
-    const mapped = messages.map((m) => ({
+    let mapped = messages.map((m) => ({
       id: String(m.id),
       channelId: String(m.channel_id),
       author: m.author,
       body: m.body,
       createdAt: m.created_at,
       parentId: m.parent_id ? String(m.parent_id) : null,
+      encrypted: m.encrypted === 1,
+      keyVersion: m.key_version,
     }));
+
+    // Decrypt encrypted messages if needed
+    mapped = await processMessagesForDisplay(mapped, channelId);
+
     setChannelMessages(channelId, mapped);
 
     // Scroll to bottom on initial load of channel messages
@@ -721,57 +805,142 @@ async function fetchMessages(channelId) {
 
 
 function wireChannelModal() {
-  const closeModal = () => hide(el.channelModal);
+  let selectedChannelType = null; // 'public' or 'private'
+
+  const closeModal = () => {
+    hide(el.channelModal);
+    goToStep1();
+  };
+
+  const goToStep1 = () => {
+    selectedChannelType = null;
+    // Show step 1, hide step 2
+    if (el.wizardStep1) el.wizardStep1.style.display = "";
+    if (el.wizardStep2) el.wizardStep2.style.display = "none";
+    el.channelForm?.reset();
+  };
+
+  const goToStep2 = async (type) => {
+    selectedChannelType = type;
+    // Hide step 1, show step 2
+    if (el.wizardStep1) el.wizardStep1.style.display = "none";
+    if (el.wizardStep2) el.wizardStep2.style.display = "";
+
+    // Set the hidden isPublic value
+    if (el.channelIsPublic) {
+      el.channelIsPublic.value = type === "public" ? "1" : "0";
+    }
+
+    // Update the badge to show selected type
+    if (el.wizardTypeBadge) {
+      if (type === "public") {
+        el.wizardTypeBadge.innerHTML = "🌐 Public Channel";
+        el.wizardTypeBadge.className = "wizard-type-badge badge-public";
+      } else {
+        el.wizardTypeBadge.innerHTML = "🔒 Private Encrypted Channel";
+        el.wizardTypeBadge.className = "wizard-type-badge badge-private";
+      }
+    }
+
+    // For private channels, show group selection (encryption is automatic)
+    if (type === "private") {
+      await loadGroupsForDropdown();
+      if (el.channelGroupSection) el.channelGroupSection.style.display = "";
+    } else {
+      if (el.channelGroupSection) el.channelGroupSection.style.display = "none";
+    }
+  };
+
+  const loadGroupsForDropdown = async () => {
+    if (!el.channelGroupSelect) return;
+    try {
+      const res = await fetch("/chat/groups");
+      if (!res.ok) return;
+      const groups = await res.json();
+      el.channelGroupSelect.innerHTML = `<option value="">Select a group...</option>` +
+        groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
+    } catch (_err) {
+      console.error("[Chat] Failed to load groups for channel creation");
+    }
+  };
+
   el.channelModal?.addEventListener("click", (event) => {
     if (event.target === el.channelModal) closeModal();
   });
 
-  // Auto-generate display name from slug (Title Case)
-  const nameInput = el.channelForm?.querySelector('input[name="name"]');
-  const displayNameInput = el.channelForm?.querySelector('input[name="displayName"]');
-  nameInput?.addEventListener("input", () => {
-    if (!displayNameInput) return;
-    // Convert slug to Title Case: "my-channel" → "My Channel"
-    const slug = nameInput.value;
-    const titleCase = slug
-      .split(/[-_\s]+/)
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(" ");
-    displayNameInput.value = titleCase;
+  // Wire up channel type buttons using event delegation
+  el.channelModal?.addEventListener("click", async (event) => {
+    const typeBtn = event.target.closest("[data-select-channel-type]");
+    if (typeBtn) {
+      const type = typeBtn.dataset.selectChannelType;
+      await goToStep2(type);
+    }
+  });
+
+  // Back button handler
+  el.channelBackBtn?.addEventListener("click", () => {
+    goToStep1();
   });
 
   el.newChannelTriggers?.forEach((btn) =>
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       if (!state.session) return;
-      // Reset form to fresh state
-      el.channelForm?.reset();
-      // Show/hide private channel option based on admin status
-      const privateField = el.channelModal?.querySelector('[data-admin-only]');
-      if (privateField) {
-        if (state.isAdmin) {
-          privateField.style.display = '';
-        } else {
-          privateField.style.display = 'none';
-        }
+
+      // Reset modal to step 1
+      goToStep1();
+
+      // For non-admins, skip type selection and go directly to public channel form
+      if (!state.isAdmin) {
+        await goToStep2("public");
       }
+
       show(el.channelModal);
     })
   );
+
   el.closeChannelModalBtns?.forEach((btn) => btn.addEventListener("click", closeModal));
+
   el.channelForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.session) return;
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
 
-    // Only admins can create private channels (isPublic defaults to true if not admin)
-    const isPublicChecked = data.get("isPublic") === "on";
-    const isPublic = state.isAdmin ? isPublicChecked : true;
+    const isPublic = data.get("isPublic") === "1";
+    // Private channels are always encrypted
+    const encrypted = !isPublic;
+    const groupId = !isPublic ? data.get("groupId") : null;
+
+    // Validate group selection for private channels
+    if (!isPublic && !groupId) {
+      alert("Please select a group for the private channel");
+      return;
+    }
+
+    // For private channels, verify encryption is available BEFORE creating
+    if (!isPublic) {
+      const encryptCheck = await checkEncryptionSupport();
+      if (!encryptCheck.available) {
+        alert(`Cannot create encrypted channel: ${encryptCheck.reason}\n\nPrivate channels require a secure connection (HTTPS) and a Nostr signer.`);
+        return;
+      }
+    }
+
+    // Ensure slug format (lowercase, hyphens only)
+    const rawName = String(data.get("name") || "").trim();
+    const name = rawName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || "untitled";
+    const displayName = name
+      .split(/-+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(" ");
 
     const payload = {
-      name: String(data.get("name") || "").trim().toLowerCase() || "untitled",
-      displayName: String(data.get("displayName") || "").trim() || "Untitled channel",
+      name,
+      displayName,
       description: String(data.get("description") || "").trim(),
       isPublic,
+      encrypted,
+      groupId: groupId ? Number(groupId) : null,
     };
 
     try {
@@ -782,25 +951,58 @@ function wireChannelModal() {
       });
       if (res.ok) {
         const created = await res.json();
+        const channelId = String(created.id);
+        let channelEncrypted = created.encrypted === 1;
+
+        // If encrypted, setup channel encryption keys
+        if (channelEncrypted && state.session?.pubkey) {
+          const keySetup = await setupChannelEncryption(channelId, state.session.pubkey);
+          if (!keySetup) {
+            // Encryption setup failed - delete the channel to avoid orphaned unencrypted channels
+            console.error('[Chat] Failed to setup encryption keys, deleting channel');
+            try {
+              await fetch(`/chat/channels/${channelId}`, { method: "DELETE" });
+            } catch (_e) {
+              console.error('[Chat] Failed to delete channel after encryption failure');
+            }
+            alert('Failed to setup encryption. Channel was not created.\n\nPlease ensure you have a secure connection (HTTPS) and try again.');
+            return;
+          }
+
+          // Distribute keys to all group members immediately
+          const keyDistResult = await distributeKeysToAllPendingMembers(channelId);
+          if (keyDistResult.success > 0) {
+            console.log(`[Chat] Distributed encryption keys to ${keyDistResult.success} group member(s)`);
+          }
+          if (keyDistResult.failed > 0) {
+            console.warn(`[Chat] Failed to distribute keys to ${keyDistResult.failed} group member(s)`);
+          }
+        }
+
         upsertChannel({
-          id: String(created.id),
+          id: channelId,
           name: created.name,
           displayName: created.display_name,
           description: created.description,
           isPublic: created.is_public === 1,
+          encrypted: channelEncrypted,
         });
-        selectChannel(String(created.id));
-        updateChatUrl(String(created.id));
+        selectChannel(channelId);
+        updateChatUrl(channelId);
+        renderChannels();
+        await fetchMessages(channelId);
       } else {
         const err = await res.json().catch(() => ({}));
         console.error('[Chat] Failed to create channel:', err.error || res.status);
+        alert(err.error || 'Failed to create channel');
       }
     } catch (_err) {
       // Ignore errors
     }
 
     hide(el.channelModal);
-    event.currentTarget.reset();
+    form?.reset();
+    goToStep1();
   });
 }
 
@@ -983,16 +1185,49 @@ async function sendMessage() {
   const channelId = state.chat.selectedChannelId;
   const parentId = state.chat.replyingTo?.id || null;
 
+  // Save message text before clearing (in case of error)
+  const savedBody = body;
+
   el.chatInput.value = "";
   el.chatInput.style.height = "auto"; // Reset height after sending
   el.chatSendBtn?.setAttribute("disabled", "disabled");
   setReplyTarget(null);
 
   try {
+    let content = body;
+    let encrypted = false;
+
+    // Parse slash commands and mentions from plaintext BEFORE encryption
+    // This allows the server to handle these without decrypting
+    const commands = parseSlashCommands(body);
+    const mentions = parseMentions(body);
+
+    // Encrypt message if channel needs encryption (private or community)
+    if (channelNeedsEncryption(channelId)) {
+      const encResult = await encryptMessageForChannel(body, channelId);
+      if (encResult) {
+        content = encResult.encrypted;
+        encrypted = true;
+      } else {
+        console.error('[Chat] Failed to encrypt message - no encryption key available');
+        // Restore message text and show error
+        el.chatInput.value = savedBody;
+        el.chatSendBtn?.removeAttribute("disabled");
+        alert('Unable to send message: encryption key not available. Try refreshing the page or check if you have access to this encrypted channel.');
+        return;
+      }
+    }
+
     const res = await fetch(`/chat/channels/${channelId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: body, parentId: parentId ? Number(parentId) : null }),
+      body: JSON.stringify({
+        content,
+        parentId: parentId ? Number(parentId) : null,
+        encrypted,
+        commands: commands.length > 0 ? commands : undefined,
+        mentions: mentions.length > 0 ? mentions : undefined,
+      }),
     });
     if (res.ok) {
       await fetchMessages(channelId);
@@ -1027,9 +1262,19 @@ function renderChannels() {
     el.chatChannelList.innerHTML = channels
       .map((channel) => {
         const isActive = channel.id === state.chat.selectedChannelId;
-        const lockIcon = channel.isPublic ? '' : '<span class="channel-lock" title="Private">&#128274;</span>';
+        // Show shield for encrypted, lock for private non-encrypted
+        let statusIcon = '';
+        if (channel.encrypted) {
+          statusIcon = '<span class="channel-encrypted" title="E2E Encrypted">&#128737;</span>';
+        } else if (!channel.isPublic) {
+          statusIcon = '<span class="channel-lock" title="Private">&#128274;</span>';
+        }
+        // Show wingman icon if Wingman has access
+        const wingmanIcon = channel.hasWingmanAccess
+          ? '<img src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />'
+          : '';
         return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
-          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${lockIcon}</div>
+          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}${wingmanIcon}</div>
         </button>`;
       })
       .join("");
@@ -1355,10 +1600,35 @@ async function sendThreadReply() {
   el.threadSendBtn?.setAttribute("disabled", "disabled");
 
   try {
+    let content = body;
+    let encrypted = false;
+
+    // Parse slash commands and mentions from plaintext BEFORE encryption
+    const commands = parseSlashCommands(body);
+    const mentions = parseMentions(body);
+
+    // Encrypt message if channel needs encryption (private or community)
+    if (channelNeedsEncryption(channelId)) {
+      const encResult = await encryptMessageForChannel(body, channelId);
+      if (encResult) {
+        content = encResult.encrypted;
+        encrypted = true;
+      } else {
+        console.error('[Chat] Failed to encrypt message');
+        return;
+      }
+    }
+
     const res = await fetch(`/chat/channels/${channelId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: body, parentId: Number(parentId) }),
+      body: JSON.stringify({
+        content,
+        parentId: Number(parentId),
+        encrypted,
+        commands: commands.length > 0 ? commands : undefined,
+        mentions: mentions.length > 0 ? mentions : undefined,
+      }),
     });
     if (res.ok) {
       await fetchMessages(channelId);
@@ -1444,7 +1714,89 @@ async function openChannelSettingsModal() {
     el.channelDangerZone.style.display = state.isAdmin && !isPersonalChannel ? "" : "none";
   }
 
+  // Show encryption section for encrypted channels (admin only)
+  if (el.channelEncryptionSection) {
+    console.log("[Chat] Channel settings - channel:", channel, "isAdmin:", state.isAdmin, "encrypted:", channel.encrypted);
+    if (channel.encrypted && state.isAdmin) {
+      show(el.channelEncryptionSection);
+      // Load encryption key status
+      await loadEncryptionKeyStatus(channel.id);
+    } else {
+      hide(el.channelEncryptionSection);
+    }
+  } else {
+    console.log("[Chat] channelEncryptionSection element not found");
+  }
+
   show(el.channelSettingsModal);
+}
+
+// Load and display encryption key status
+async function loadEncryptionKeyStatus(channelId) {
+  if (!el.encryptionStatus) return;
+
+  el.encryptionStatus.innerHTML = "<p>Loading key status...</p>";
+
+  try {
+    // Fetch all keys for the channel
+    const keysRes = await fetch(`/chat/channels/${channelId}/keys/all`, {
+      credentials: "same-origin",
+    });
+    const keysData = keysRes.ok ? await keysRes.json() : { keys: [] };
+
+    // Fetch pending members
+    const pendingRes = await fetch(`/chat/channels/${channelId}/keys/pending`, {
+      credentials: "same-origin",
+    });
+    const pendingData = pendingRes.ok ? await pendingRes.json() : { pendingMembers: [] };
+
+    const keys = keysData.keys || [];
+    const pending = pendingData.pendingMembers || [];
+
+    let html = "";
+
+    if (keys.length > 0) {
+      html += `<div class="encryption-keys-list"><strong>Users with keys (${keys.length}):</strong><ul>`;
+      for (const key of keys) {
+        const displayName = await getDisplayNameForPubkey(key.user_pubkey);
+        html += `<li>✅ ${escapeHtml(displayName || key.user_pubkey.slice(0, 12) + "...")}</li>`;
+      }
+      html += `</ul></div>`;
+    }
+
+    if (pending.length > 0) {
+      html += `<div class="encryption-pending-list"><strong>Pending keys (${pending.length}):</strong><ul>`;
+      for (const member of pending) {
+        const displayName = member.displayName || member.npub.slice(0, 16) + "...";
+        html += `<li>⏳ ${escapeHtml(displayName)}</li>`;
+      }
+      html += `</ul></div>`;
+    }
+
+    if (keys.length === 0 && pending.length === 0) {
+      html = "<p>No members assigned to this channel's groups.</p>";
+    }
+
+    el.encryptionStatus.innerHTML = html;
+  } catch (err) {
+    console.error("[Chat] Failed to load encryption key status:", err);
+    el.encryptionStatus.innerHTML = "<p>Failed to load key status</p>";
+  }
+}
+
+// Get display name for a pubkey
+async function getDisplayNameForPubkey(pubkey) {
+  // Check local cache first
+  if (localUserCache.has(pubkey)) {
+    return localUserCache.get(pubkey)?.display_name || null;
+  }
+  // Check users loaded from server
+  for (const [, user] of localUserCache) {
+    if (user.pubkey === pubkey) {
+      return user.display_name || null;
+    }
+  }
+  return null;
 }
 
 // Update groups section visibility and content
@@ -1508,9 +1860,21 @@ async function addChannelGroup(groupId) {
       body: JSON.stringify({ groupIds: [groupId] }),
     });
     if (res.ok) {
+      const data = await res.json();
       channelSettingsGroups = await fetchChannelGroups(state.chat.selectedChannelId);
       renderChannelGroups();
       updateGroupDropdown();
+
+      // If this is an encrypted channel, distribute keys to new group members
+      if (data.needsKeyDistribution) {
+        console.log(`[Chat] Distributing keys for encrypted channel ${data.channelName}`);
+        try {
+          const result = await distributeKeysToAllPendingMembers(state.chat.selectedChannelId);
+          console.log(`[Chat] Key distribution result:`, result);
+        } catch (err) {
+          console.error(`[Chat] Failed to distribute keys:`, err);
+        }
+      }
     }
   } catch (_err) {
     console.error("[Chat] Failed to add group to channel");
@@ -1645,6 +2009,31 @@ function wireChannelSettingsModal() {
 
   // Handle delete channel
   el.deleteChannelBtn?.addEventListener("click", deleteChannel);
+
+  // Handle manual key distribution
+  el.distributeKeysBtn?.addEventListener("click", async () => {
+    if (!state.chat.selectedChannelId) return;
+
+    el.distributeKeysBtn.disabled = true;
+    el.distributeKeysBtn.textContent = "Distributing...";
+
+    try {
+      const result = await distributeKeysToAllPendingMembers(state.chat.selectedChannelId);
+      if (result.success > 0 || result.failed > 0) {
+        alert(`Keys distributed: ${result.success} success, ${result.failed} failed`);
+      } else {
+        alert("No pending members to distribute keys to.");
+      }
+      // Reload the status
+      await loadEncryptionKeyStatus(state.chat.selectedChannelId);
+    } catch (err) {
+      console.error("[Chat] Failed to distribute keys:", err);
+      alert("Failed to distribute keys. Check console for details.");
+    } finally {
+      el.distributeKeysBtn.disabled = false;
+      el.distributeKeysBtn.textContent = "Distribute Keys to Pending Members";
+    }
+  });
 }
 
 // ========== DM Modal ==========

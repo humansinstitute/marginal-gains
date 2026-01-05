@@ -36,6 +36,8 @@ export type Channel = {
   creator: string;
   is_public: number;
   owner_npub: string | null; // If set, this is a personal channel visible only to this user
+  encrypted: number; // 0 = plaintext, 1 = E2E encrypted
+  encryption_enabled_at: string | null;
   created_at: string;
 };
 
@@ -52,6 +54,8 @@ export type Message = {
   thread_root_id: number | null;
   parent_id: number | null;
   quoted_message_id: number | null;
+  encrypted: number; // 0 = plaintext, 1 = AES-256-GCM ciphertext
+  key_version: number | null; // Which key version was used for encryption
   created_at: string;
   edited_at: string | null;
 };
@@ -130,6 +134,44 @@ export type WingmanCost = {
   total_tokens: number;
   cost_usd: number;
   created_at: string;
+};
+
+export type UserChannelKey = {
+  user_pubkey: string;
+  channel_id: number;
+  encrypted_key: string; // JSON structure with NIP-44 encrypted channel key
+  key_version: number;
+  created_at: string;
+};
+
+export type CommunityKey = {
+  user_pubkey: string;
+  encrypted_key: string; // NIP-44 wrapped community key
+  created_at: string;
+};
+
+export type CommunityState = {
+  key: string;
+  value: string;
+  updated_at: string;
+};
+
+export type InviteCode = {
+  id: number;
+  code_hash: string;
+  encrypted_key: string; // AES-GCM(community_key, HKDF(code))
+  single_use: number;
+  created_by: string;
+  expires_at: number;
+  redeemed_count: number;
+  created_at: number;
+};
+
+export type InviteRedemption = {
+  id: number;
+  invite_id: number;
+  user_npub: string;
+  redeemed_at: number;
 };
 
 // CRM Types
@@ -468,6 +510,77 @@ db.run(`
 db.run("CREATE INDEX IF NOT EXISTS idx_wingman_costs_npub ON wingman_costs(npub)");
 db.run("CREATE INDEX IF NOT EXISTS idx_wingman_costs_created ON wingman_costs(created_at)");
 
+// User channel keys for E2E encryption
+db.run(`
+  CREATE TABLE IF NOT EXISTS user_channel_keys (
+    user_pubkey TEXT NOT NULL,
+    channel_id INTEGER NOT NULL,
+    encrypted_key TEXT NOT NULL,
+    key_version INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_pubkey, channel_id, key_version),
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_user_channel_keys_channel ON user_channel_keys(channel_id)");
+
+// Add encryption columns to channels table
+addColumn("ALTER TABLE channels ADD COLUMN encrypted INTEGER DEFAULT 0");
+addColumn("ALTER TABLE channels ADD COLUMN encryption_enabled_at TEXT DEFAULT NULL");
+
+// Add encryption columns to messages table
+addColumn("ALTER TABLE messages ADD COLUMN encrypted INTEGER DEFAULT 0");
+addColumn("ALTER TABLE messages ADD COLUMN key_version INTEGER DEFAULT NULL");
+
+// Community key storage - wrapped community key per user
+db.run(`
+  CREATE TABLE IF NOT EXISTS community_keys (
+    user_pubkey TEXT PRIMARY KEY,
+    encrypted_key TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+// Community state - tracks bootstrap and migration status
+db.run(`
+  CREATE TABLE IF NOT EXISTS community_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+// Invite codes for onboarding
+db.run(`
+  CREATE TABLE IF NOT EXISTS invite_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_hash TEXT UNIQUE NOT NULL,
+    encrypted_key TEXT NOT NULL,
+    single_use INTEGER DEFAULT 0,
+    created_by TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    redeemed_count INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch())
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_invite_codes_expires ON invite_codes(expires_at)");
+
+// Track invite code redemptions
+db.run(`
+  CREATE TABLE IF NOT EXISTS invite_redemptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invite_id INTEGER NOT NULL,
+    user_npub TEXT NOT NULL,
+    redeemed_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (invite_id) REFERENCES invite_codes(id) ON DELETE CASCADE,
+    UNIQUE(invite_id, user_npub)
+  )
+`);
+
+// Add onboarded status to users
+addColumn("ALTER TABLE users ADD COLUMN onboarded INTEGER DEFAULT 0");
+addColumn("ALTER TABLE users ADD COLUMN onboarded_at INTEGER DEFAULT NULL");
+
 // CRM Tables
 db.run(`
   CREATE TABLE IF NOT EXISTS crm_companies (
@@ -693,6 +806,11 @@ const insertChannelStmt = db.query<Channel>(
    VALUES (?, ?, ?, ?, ?)
    RETURNING *`
 );
+const insertEncryptedChannelStmt = db.query<Channel>(
+  `INSERT INTO channels (name, display_name, description, creator, is_public, encrypted, encryption_enabled_at)
+   VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+   RETURNING *`
+);
 const updateChannelStmt = db.query<Channel>(
   `UPDATE channels SET display_name = ?, description = ?, is_public = ?
    WHERE id = ? RETURNING *`
@@ -711,6 +829,11 @@ const listThreadMessagesStmt = db.query<Message>(
 const insertMessageStmt = db.query<Message>(
   `INSERT INTO messages (channel_id, author, body, thread_root_id, parent_id, quoted_message_id)
    VALUES (?, ?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const insertEncryptedMessageStmt = db.query<Message>(
+  `INSERT INTO messages (channel_id, author, body, thread_root_id, parent_id, quoted_message_id, encrypted, key_version)
+   VALUES (?, ?, ?, ?, ?, ?, 1, ?)
    RETURNING *`
 );
 const getMessageByIdStmt = db.query<Message>(
@@ -911,6 +1034,16 @@ export function createChannel(
   return insertChannelStmt.get(name, displayName, description, creator, isPublic ? 1 : 0) as Channel | undefined ?? null;
 }
 
+export function createEncryptedChannel(
+  name: string,
+  displayName: string,
+  description: string,
+  creator: string,
+  isPublic: boolean
+) {
+  return insertEncryptedChannelStmt.get(name, displayName, description, creator, isPublic ? 1 : 0) as Channel | undefined ?? null;
+}
+
 export function updateChannel(id: number, displayName: string, description: string, isPublic: boolean) {
   return updateChannelStmt.get(displayName, description, isPublic ? 1 : 0, id) as Channel | undefined ?? null;
 }
@@ -941,6 +1074,18 @@ export function createMessage(
   quotedMessageId: number | null
 ) {
   return insertMessageStmt.get(channelId, author, body, threadRootId, parentId, quotedMessageId) as Message | undefined ?? null;
+}
+
+export function createEncryptedMessage(
+  channelId: number,
+  author: string,
+  encryptedBody: string,
+  threadRootId: number | null,
+  parentId: number | null,
+  quotedMessageId: number | null,
+  keyVersion: number
+) {
+  return insertEncryptedMessageStmt.get(channelId, author, encryptedBody, threadRootId, parentId, quotedMessageId, keyVersion) as Message | undefined ?? null;
 }
 
 export function deleteMessage(id: number): boolean {
@@ -1180,6 +1325,123 @@ export function addChannelGroup(channelId: number, groupId: number) {
 
 export function removeChannelGroup(channelId: number, groupId: number) {
   removeChannelGroupStmt.run(channelId, groupId);
+}
+
+/**
+ * Get all npubs who have access to a channel (via groups) but don't have encryption keys
+ */
+export function getChannelMembersWithoutKeys(channelId: number): string[] {
+  // Get all unique npubs from assigned groups
+  const groups = listChannelGroupsStmt.all(channelId);
+  const memberNpubs = new Set<string>();
+
+  for (const group of groups) {
+    const members = listGroupMembersStmt.all(group.group_id);
+    for (const member of members) {
+      memberNpubs.add(member.npub);
+    }
+  }
+
+  // Get npubs who already have keys
+  const existingKeys = getChannelKeysStmt.all(channelId);
+  const npubsWithKeys = new Set(existingKeys.map(k => {
+    // Convert pubkey to npub for comparison (keys are stored with hex pubkey)
+    // We need to check against the actual stored user_pubkey
+    return k.user_pubkey;
+  }));
+
+  // Return npubs that don't have keys (need to convert npub to pubkey for comparison)
+  // Actually, we store keys by pubkey (hex), but group members are stored by npub
+  // We need to look up the user's pubkey from their npub
+  const result: string[] = [];
+  for (const npub of memberNpubs) {
+    // Get user's pubkey from users table
+    const user = getUserByNpub(npub);
+    if (user && !npubsWithKeys.has(user.pubkey)) {
+      result.push(npub);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Get encrypted channels that use a specific group
+ */
+export function getEncryptedChannelsForGroup(groupId: number): Channel[] {
+  // This query gets channels where this group is assigned
+  const stmt = db.query<Channel>(
+    `SELECT c.* FROM channels c
+     JOIN channel_groups cg ON c.id = cg.channel_id
+     WHERE cg.group_id = ? AND c.encrypted = 1`
+  );
+  return stmt.all(groupId);
+}
+
+/**
+ * Check if a user still has access to a channel through any group
+ * (used to determine if their key should be revoked)
+ */
+export function userHasChannelAccessViaGroups(channelId: number, npub: string): boolean {
+  const channelGroups = listChannelGroupsStmt.all(channelId);
+  for (const cg of channelGroups) {
+    const members = listGroupMembersStmt.all(cg.group_id);
+    if (members.some(m => m.npub === npub)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Revoke encryption keys for a user on a channel
+ */
+export function revokeUserChannelKeys(userPubkey: string, channelId: number) {
+  deleteUserChannelKeysStmt.run(userPubkey, channelId);
+}
+
+/**
+ * Handle key revocation when a member is removed from a group
+ * Removes keys for encrypted channels they no longer have access to
+ */
+export function handleGroupMemberRemoval(groupId: number, npub: string) {
+  const user = getUserByNpub(npub);
+  if (!user) return;
+
+  // Get all encrypted channels that use this group
+  const encryptedChannels = getEncryptedChannelsForGroup(groupId);
+
+  for (const channel of encryptedChannels) {
+    // Check if user still has access via other groups
+    if (!userHasChannelAccessViaGroups(channel.id, npub)) {
+      // User no longer has access - revoke their key
+      deleteUserChannelKeysStmt.run(user.pubkey, channel.id);
+      console.log(`[Encryption] Revoked key for ${npub} on channel ${channel.id}`);
+    }
+  }
+}
+
+/**
+ * Handle key revocation when a group is removed from a channel
+ */
+export function handleGroupRemovedFromChannel(channelId: number, groupId: number) {
+  const channel = getChannelByIdStmt.get(channelId) as Channel | undefined;
+  if (!channel || channel.encrypted !== 1) return;
+
+  // Get all members of the removed group
+  const members = listGroupMembersStmt.all(groupId);
+
+  for (const member of members) {
+    const user = getUserByNpub(member.npub);
+    if (!user) continue;
+
+    // Check if user still has access via other groups
+    if (!userHasChannelAccessViaGroups(channelId, member.npub)) {
+      // User no longer has access - revoke their key
+      deleteUserChannelKeysStmt.run(user.pubkey, channelId);
+      console.log(`[Encryption] Revoked key for ${member.npub} on channel ${channelId}`);
+    }
+  }
 }
 
 // Channel visibility functions
@@ -1486,6 +1748,331 @@ export function getWingmanCostSummary() {
 
 export function getWingmanTotalCost() {
   return getWingmanTotalCostStmt.get() ?? { total_cost: 0, total_tokens: 0, request_count: 0 };
+}
+
+// User channel key statements (E2E encryption)
+const getUserChannelKeyStmt = db.query<UserChannelKey>(
+  `SELECT * FROM user_channel_keys
+   WHERE user_pubkey = ? AND channel_id = ?
+   ORDER BY key_version DESC
+   LIMIT 1`
+);
+const getUserChannelKeyByVersionStmt = db.query<UserChannelKey>(
+  `SELECT * FROM user_channel_keys
+   WHERE user_pubkey = ? AND channel_id = ? AND key_version = ?`
+);
+const getChannelKeysStmt = db.query<UserChannelKey>(
+  `SELECT * FROM user_channel_keys WHERE channel_id = ? ORDER BY key_version DESC`
+);
+const getLatestKeyVersionStmt = db.query<{ max_version: number }>(
+  `SELECT MAX(key_version) as max_version FROM user_channel_keys WHERE channel_id = ?`
+);
+const insertUserChannelKeyStmt = db.query<UserChannelKey>(
+  `INSERT INTO user_channel_keys (user_pubkey, channel_id, encrypted_key, key_version)
+   VALUES (?, ?, ?, ?)
+   RETURNING *`
+);
+const deleteUserChannelKeysStmt = db.query(
+  `DELETE FROM user_channel_keys WHERE user_pubkey = ? AND channel_id = ?`
+);
+const setChannelEncryptedStmt = db.query<Channel>(
+  `UPDATE channels SET encrypted = 1, encryption_enabled_at = CURRENT_TIMESTAMP
+   WHERE id = ? RETURNING *`
+);
+
+// User channel key functions
+export function getUserChannelKey(userPubkey: string, channelId: number) {
+  return getUserChannelKeyStmt.get(userPubkey, channelId) as UserChannelKey | undefined ?? null;
+}
+
+export function getUserChannelKeyByVersion(userPubkey: string, channelId: number, keyVersion: number) {
+  return getUserChannelKeyByVersionStmt.get(userPubkey, channelId, keyVersion) as UserChannelKey | undefined ?? null;
+}
+
+export function getChannelKeys(channelId: number) {
+  return getChannelKeysStmt.all(channelId);
+}
+
+export function getLatestKeyVersion(channelId: number): number {
+  const result = getLatestKeyVersionStmt.get(channelId);
+  return result?.max_version ?? 0;
+}
+
+export function storeUserChannelKey(
+  userPubkey: string,
+  channelId: number,
+  encryptedKey: string,
+  keyVersion: number
+) {
+  return insertUserChannelKeyStmt.get(userPubkey, channelId, encryptedKey, keyVersion) as UserChannelKey | undefined ?? null;
+}
+
+export function deleteUserChannelKeys(userPubkey: string, channelId: number) {
+  deleteUserChannelKeysStmt.run(userPubkey, channelId);
+}
+
+export function setChannelEncrypted(channelId: number) {
+  return setChannelEncryptedStmt.get(channelId) as Channel | undefined ?? null;
+}
+
+// ============================================================
+// Community Key Functions
+// ============================================================
+
+const getCommunityKeyStmt = db.query<CommunityKey>(
+  `SELECT * FROM community_keys WHERE user_pubkey = ?`
+);
+const updateCommunityKeyStmt = db.query<CommunityKey>(
+  `INSERT OR REPLACE INTO community_keys (user_pubkey, encrypted_key, created_at)
+   VALUES (?, ?, CURRENT_TIMESTAMP) RETURNING *`
+);
+const listCommunityKeysStmt = db.query<CommunityKey>(
+  `SELECT * FROM community_keys`
+);
+const countCommunityKeysStmt = db.query<{ count: number }>(
+  `SELECT COUNT(*) as count FROM community_keys`
+);
+
+export function getCommunityKey(userPubkey: string) {
+  return getCommunityKeyStmt.get(userPubkey) as CommunityKey | undefined ?? null;
+}
+
+export function storeCommunityKey(userPubkey: string, encryptedKey: string) {
+  return updateCommunityKeyStmt.get(userPubkey, encryptedKey) as CommunityKey | undefined ?? null;
+}
+
+export function listAllCommunityKeys() {
+  return listCommunityKeysStmt.all();
+}
+
+export function countCommunityKeys(): number {
+  const result = countCommunityKeysStmt.get();
+  return result?.count ?? 0;
+}
+
+export function storeCommunityKeysBatch(keys: Array<{ userPubkey: string; encryptedKey: string }>) {
+  const stmt = db.prepare(
+    `INSERT OR REPLACE INTO community_keys (user_pubkey, encrypted_key, created_at)
+     VALUES (?, ?, CURRENT_TIMESTAMP)`
+  );
+  const transaction = db.transaction((keyList: typeof keys) => {
+    for (const k of keyList) {
+      stmt.run(k.userPubkey, k.encryptedKey);
+    }
+  });
+  transaction(keys);
+}
+
+// ============================================================
+// Community State Functions
+// ============================================================
+
+const getCommunityStateStmt = db.query<CommunityState>(
+  `SELECT * FROM community_state WHERE key = ?`
+);
+const setCommunityStateStmt = db.query<CommunityState>(
+  `INSERT OR REPLACE INTO community_state (key, value, updated_at)
+   VALUES (?, ?, CURRENT_TIMESTAMP) RETURNING *`
+);
+
+export function getCommunityState(key: string): string | null {
+  const result = getCommunityStateStmt.get(key);
+  return result?.value ?? null;
+}
+
+export function setCommunityState(key: string, value: string) {
+  return setCommunityStateStmt.get(key, value);
+}
+
+export function isCommunityBootstrapped(): boolean {
+  return getCommunityState("bootstrapped") === "1";
+}
+
+export function isMessageMigrationComplete(): boolean {
+  return getCommunityState("message_migration_complete") === "1";
+}
+
+// ============================================================
+// Invite Code Functions
+// ============================================================
+
+const getInviteByHashStmt = db.query<InviteCode>(
+  `SELECT * FROM invite_codes WHERE code_hash = ?`
+);
+const insertInviteCodeStmt = db.query<InviteCode>(
+  `INSERT INTO invite_codes (code_hash, encrypted_key, single_use, created_by, expires_at)
+   VALUES (?, ?, ?, ?, ?) RETURNING *`
+);
+const incrementRedeemCountStmt = db.query(
+  `UPDATE invite_codes SET redeemed_count = redeemed_count + 1 WHERE id = ?`
+);
+const listActiveInvitesStmt = db.query<InviteCode>(
+  `SELECT * FROM invite_codes WHERE expires_at > unixepoch() ORDER BY created_at DESC`
+);
+const listInvitesByCreatorStmt = db.query<InviteCode>(
+  `SELECT * FROM invite_codes WHERE created_by = ? ORDER BY created_at DESC`
+);
+const deleteInviteCodeStmt = db.query(
+  `DELETE FROM invite_codes WHERE id = ?`
+);
+const insertRedemptionStmt = db.query<InviteRedemption>(
+  `INSERT INTO invite_redemptions (invite_id, user_npub) VALUES (?, ?) RETURNING *`
+);
+const getRedemptionStmt = db.query<InviteRedemption>(
+  `SELECT * FROM invite_redemptions WHERE invite_id = ? AND user_npub = ?`
+);
+
+export function getInviteByHash(codeHash: string) {
+  return getInviteByHashStmt.get(codeHash) as InviteCode | undefined ?? null;
+}
+
+export function createInviteCode(
+  codeHash: string,
+  encryptedKey: string,
+  singleUse: boolean,
+  createdBy: string,
+  expiresAt: number
+) {
+  return insertInviteCodeStmt.get(
+    codeHash,
+    encryptedKey,
+    singleUse ? 1 : 0,
+    createdBy,
+    expiresAt
+  ) as InviteCode | undefined ?? null;
+}
+
+export function listActiveInvites() {
+  return listActiveInvitesStmt.all();
+}
+
+export function listInvitesByCreator(npub: string) {
+  return listInvitesByCreatorStmt.all(npub);
+}
+
+export function deleteInviteCode(id: number) {
+  deleteInviteCodeStmt.run(id);
+}
+
+export function redeemInvite(inviteId: number, userNpub: string): boolean {
+  const invite = db.query<InviteCode>(`SELECT * FROM invite_codes WHERE id = ?`).get(inviteId);
+  if (!invite) return false;
+
+  // Check expiry
+  if (invite.expires_at < Math.floor(Date.now() / 1000)) {
+    return false;
+  }
+
+  // Check single-use
+  if (invite.single_use === 1 && invite.redeemed_count > 0) {
+    return false;
+  }
+
+  // Check if already redeemed by this user
+  const existing = getRedemptionStmt.get(inviteId, userNpub);
+  if (existing) {
+    return true; // Already redeemed, that's ok
+  }
+
+  // Record redemption
+  insertRedemptionStmt.get(inviteId, userNpub);
+  incrementRedeemCountStmt.run(inviteId);
+
+  return true;
+}
+
+export function hasUserRedeemedInvite(inviteId: number, userNpub: string): boolean {
+  const result = getRedemptionStmt.get(inviteId, userNpub);
+  return !!result;
+}
+
+// ============================================================
+// User Onboarding Functions
+// ============================================================
+
+const setUserOnboardedStmt = db.query(
+  `UPDATE users SET onboarded = 1, onboarded_at = unixepoch() WHERE npub = ?`
+);
+const isUserOnboardedStmt = db.query<{ onboarded: number }>(
+  `SELECT onboarded FROM users WHERE npub = ?`
+);
+const listOnboardedUsersStmt = db.query<User>(
+  `SELECT * FROM users WHERE onboarded = 1`
+);
+const listNonOnboardedUsersStmt = db.query<User>(
+  `SELECT * FROM users WHERE onboarded = 0 OR onboarded IS NULL`
+);
+
+export function setUserOnboarded(npub: string) {
+  setUserOnboardedStmt.run(npub);
+}
+
+export function isUserOnboarded(npub: string): boolean {
+  const result = isUserOnboardedStmt.get(npub);
+  return result?.onboarded === 1;
+}
+
+export function listOnboardedUsers() {
+  return listOnboardedUsersStmt.all();
+}
+
+export function listNonOnboardedUsers() {
+  return listNonOnboardedUsersStmt.all();
+}
+
+// ============================================================
+// Message Migration Functions
+// ============================================================
+
+const getUnencryptedPublicMessagesStmt = db.query<Message>(
+  `SELECT m.* FROM messages m
+   JOIN channels c ON m.channel_id = c.id
+   WHERE c.is_public = 1 AND c.owner_npub IS NULL AND m.encrypted = 0
+   ORDER BY m.id ASC
+   LIMIT ?`
+);
+const getUnencryptedPublicMessagesAfterStmt = db.query<Message>(
+  `SELECT m.* FROM messages m
+   JOIN channels c ON m.channel_id = c.id
+   WHERE c.is_public = 1 AND c.owner_npub IS NULL AND m.encrypted = 0 AND m.id > ?
+   ORDER BY m.id ASC
+   LIMIT ?`
+);
+const countUnencryptedPublicMessagesStmt = db.query<{ count: number }>(
+  `SELECT COUNT(*) as count FROM messages m
+   JOIN channels c ON m.channel_id = c.id
+   WHERE c.is_public = 1 AND c.owner_npub IS NULL AND m.encrypted = 0`
+);
+const updateMessageEncryptedStmt = db.query(
+  `UPDATE messages SET body = ?, encrypted = 1, key_version = ? WHERE id = ?`
+);
+
+export function getUnencryptedPublicMessages(limit: number, afterId?: number) {
+  if (afterId) {
+    return getUnencryptedPublicMessagesAfterStmt.all(afterId, limit);
+  }
+  return getUnencryptedPublicMessagesStmt.all(limit);
+}
+
+export function countUnencryptedPublicMessages(): number {
+  const result = countUnencryptedPublicMessagesStmt.get();
+  return result?.count ?? 0;
+}
+
+export function updateMessageToEncrypted(messageId: number, encryptedBody: string, keyVersion: number) {
+  updateMessageEncryptedStmt.run(encryptedBody, keyVersion, messageId);
+}
+
+export function updateMessagesToEncryptedBatch(
+  messages: Array<{ id: number; body: string; keyVersion: number }>
+) {
+  const stmt = db.prepare(`UPDATE messages SET body = ?, encrypted = 1, key_version = ? WHERE id = ?`);
+  const transaction = db.transaction((msgList: typeof messages) => {
+    for (const msg of msgList) {
+      stmt.run(msg.body, msg.keyVersion, msg.id);
+    }
+  });
+  transaction(messages);
 }
 
 // CRM Companies statements
@@ -1845,6 +2432,7 @@ export function resetDatabase() {
   db.run("DELETE FROM channel_groups");
   db.run("DELETE FROM group_members");
   db.run("DELETE FROM groups");
+  db.run("DELETE FROM user_channel_keys");
   db.run("DELETE FROM dm_participants");
   db.run("DELETE FROM channels");
   db.run("DELETE FROM channel_members");
@@ -1854,6 +2442,10 @@ export function resetDatabase() {
   db.run("DELETE FROM users");
   db.run("DELETE FROM push_subscriptions");
   db.run("DELETE FROM wingman_costs");
+  db.run("DELETE FROM community_keys");
+  db.run("DELETE FROM community_state");
+  db.run("DELETE FROM invite_redemptions");
+  db.run("DELETE FROM invite_codes");
   db.run("DELETE FROM crm_activities");
   db.run("DELETE FROM crm_opportunities");
   db.run("DELETE FROM crm_contacts");
@@ -1861,6 +2453,6 @@ export function resetDatabase() {
   db.run("DELETE FROM wallet_transactions");
   // Note: vapid_config is intentionally NOT reset to preserve VAPID keys
   db.run(
-    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'crm_companies', 'crm_contacts', 'crm_opportunities', 'crm_activities', 'wallet_transactions')"
+    "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'invite_codes', 'invite_redemptions', 'crm_companies', 'crm_contacts', 'crm_opportunities', 'crm_activities', 'wallet_transactions')"
   );
 }

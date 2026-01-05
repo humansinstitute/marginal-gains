@@ -5,8 +5,11 @@ import {
   createGroup,
   deleteGroup,
   getChannel,
+  getEncryptedChannelsForGroup,
   getGroup,
   getGroupByName,
+  handleGroupMemberRemoval,
+  handleGroupRemovedFromChannel,
   listChannelGroups,
   listGroupMembers,
   listGroups,
@@ -161,7 +164,15 @@ export async function handleAddGroupMembers(req: Request, session: Session | nul
     if (result) added.push(npub);
   }
 
-  return jsonResponse({ added, group_id: groupId });
+  // Check for encrypted channels that may need key distribution
+  const encryptedChannels = getEncryptedChannelsForGroup(groupId);
+  const encryptedChannelsNeedingKeys = encryptedChannels.map((c) => ({ id: c.id, name: c.name }));
+
+  return jsonResponse({
+    added,
+    group_id: groupId,
+    encryptedChannelsNeedingKeys,
+  });
 }
 
 // Remove a member from a group (admin only)
@@ -174,7 +185,13 @@ export function handleRemoveGroupMember(session: Session | null, groupId: number
     return jsonResponse({ error: "Group not found" }, 404);
   }
 
+  // Remove member from group first
   removeGroupMember(groupId, npub);
+
+  // Handle encryption key revocation AFTER removing member
+  // so the access check correctly excludes this group
+  handleGroupMemberRemoval(groupId, npub);
+
   return jsonResponse({ success: true });
 }
 
@@ -223,7 +240,15 @@ export async function handleAddChannelGroups(req: Request, session: Session | nu
     if (result) added.push(groupId);
   }
 
-  return jsonResponse({ added, channel_id: channelId });
+  // If channel is encrypted, new group members need keys
+  const needsKeyDistribution = channel.encrypted === 1 && added.length > 0;
+
+  return jsonResponse({
+    added,
+    channel_id: channelId,
+    needsKeyDistribution,
+    channelName: needsKeyDistribution ? channel.name : undefined,
+  });
 }
 
 // Remove a group from a channel (admin only)
@@ -236,6 +261,12 @@ export function handleRemoveChannelGroup(session: Session | null, channelId: num
     return jsonResponse({ error: "Channel not found" }, 404);
   }
 
+  // Remove group from channel first
   removeChannelGroup(channelId, groupId);
+
+  // Handle encryption key revocation AFTER removing group
+  // so the access check correctly excludes this group
+  handleGroupRemovedFromChannel(channelId, groupId);
+
   return jsonResponse({ success: true });
 }

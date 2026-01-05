@@ -20,6 +20,7 @@ import {
   setChannelMessages,
 } from "./state.js";
 import { elements as el } from "./dom.js";
+import { decryptMessageFromChannel } from "./chatCrypto.js";
 
 // Check if scroll container is near bottom (within threshold)
 function isNearBottom(container) {
@@ -283,14 +284,48 @@ async function handleNewMessage(data) {
 
   // Transform message to match UI expected format
   // (same transformation as fetchMessages in chat.js)
+  let messageBody = rawMessage.body;
+  let decryptedSender = null;
+  let decryptionFailed = false;
+  const isEncrypted = rawMessage.encrypted === 1;
+
+  // Decrypt if message is encrypted - trust the message's encrypted flag directly
+  // (don't rely on isChannelEncrypted which depends on state that might not be loaded)
+  if (isEncrypted) {
+    console.log("[LiveUpdates] Decrypting message:", rawMessage.id);
+    try {
+      const result = await decryptMessageFromChannel(rawMessage.body, String(channelId));
+      if (result && result.valid) {
+        messageBody = result.content;
+        decryptedSender = result.sender;
+        console.log("[LiveUpdates] Decrypted successfully");
+      } else if (result && !result.valid) {
+        messageBody = "[Message signature invalid]";
+        decryptionFailed = true;
+        console.warn("[LiveUpdates] Message signature invalid");
+      } else {
+        messageBody = "[Unable to decrypt - no key available]";
+        decryptionFailed = true;
+        console.warn("[LiveUpdates] No key available for decryption");
+      }
+    } catch (err) {
+      console.error("[LiveUpdates] Error decrypting message:", err);
+      messageBody = "[Decryption failed]";
+      decryptionFailed = true;
+    }
+  }
+
   const message = {
     id: String(rawMessage.id),
     channelId: String(channelId),
     author: rawMessage.author,
-    body: rawMessage.body,
+    body: messageBody,
     createdAt: rawMessage.created_at,
     parentId: rawMessage.parent_id ? String(rawMessage.parent_id) : null,
     threadRootId: rawMessage.thread_root_id ? String(rawMessage.thread_root_id) : null,
+    encrypted: isEncrypted,
+    decryptedSender,
+    decryptionFailed,
   };
 
   // Add to app state if this channel's messages are loaded

@@ -79,6 +79,7 @@ function formatChannel(ch: {
   description: string;
   is_public: number;
   owner_npub?: string | null;
+  encrypted?: number;
 }) {
   return {
     id: ch.id,
@@ -87,6 +88,7 @@ function formatChannel(ch: {
     description: ch.description,
     isPublic: ch.is_public === 1,
     ownerNpub: ch.owner_npub || null,
+    encrypted: ch.encrypted === 1,
   };
 }
 
