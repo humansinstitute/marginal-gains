@@ -1274,6 +1274,39 @@ details summary {
 .chat-channel.active .chat-channel-desc {
   color: rgba(255, 255, 255, 0.8);
 }
+/* Unread channel - bold white text */
+.chat-channel.unread .chat-channel-name {
+  font-weight: 700;
+  color: var(--chat-text);
+}
+.chat-channel.active.unread .chat-channel-name {
+  color: #fff;
+}
+/* Unread badge base */
+.unread-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-left: auto;
+  padding: 0.125rem 0.375rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--chat-text);
+  flex-shrink: 0;
+}
+/* Mention badge - red for @mentions */
+.unread-badge.mention {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+/* Active channel badge adjustments */
+.chat-channel.active .unread-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+.chat-channel.active .unread-badge.mention {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
 .chat-channel-name {
   font-weight: 600;
   font-size: 0.9rem;
@@ -2162,6 +2195,31 @@ body.chat-page {
 }
 .chat-shell-page .chat-channel-desc {
   color: var(--muted);
+}
+/* Unread channel in shell page - bold dark text */
+.chat-shell-page .chat-channel.unread .chat-channel-name {
+  font-weight: 700;
+  color: var(--text);
+}
+.chat-shell-page .chat-channel.active.unread .chat-channel-name {
+  color: var(--surface);
+}
+/* Unread badge in shell page */
+.chat-shell-page .unread-badge {
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--text);
+}
+.chat-shell-page .unread-badge.mention {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+}
+.chat-shell-page .chat-channel.active .unread-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--surface);
+}
+.chat-shell-page .chat-channel.active .unread-badge.mention {
+  background: rgba(255, 255, 255, 0.25);
+  color: var(--surface);
 }
 .chat-shell-page .chat-channel-chip {
   background: var(--bg);

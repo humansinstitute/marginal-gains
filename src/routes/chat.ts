@@ -10,9 +10,11 @@ import {
   getCommunityKey,
   getDmParticipants,
   getLatestKeyVersion,
+  getLatestMessageId,
   getMessage,
   getOrCreateDmChannel,
   getOrCreatePersonalChannel,
+  getUnreadCounts,
   getUserByNpub,
   getUserChannelKey,
   isCommunityBootstrapped,
@@ -21,6 +23,7 @@ import {
   listUsers,
   listVisibleChannels,
   storeUserChannelKey,
+  updateChannelReadState,
   upsertUser,
   userHasChannelAccessViaGroups,
 } from "../db";
@@ -113,10 +116,16 @@ export function handleListChannels(session: Session | null) {
   // Get or create personal "Note to self" channel and append at end
   const personalChannel = getOrCreatePersonalChannel(session.npub);
 
+  // Get unread counts for all channels
+  const unreadCounts = getUnreadCounts(session.npub);
+
   return jsonResponse({
     channels,
     dmChannels,
     personalChannel,
+    unreadState: Object.fromEntries(
+      unreadCounts.map((u) => [u.channel_id, { unread: u.unread_count, mentions: u.mention_count }])
+    ),
   });
 }
 
@@ -268,6 +277,28 @@ export function handleDeleteChannel(session: Session | null, id: number) {
 
   deleteChannel(id);
   return jsonResponse({ success: true });
+}
+
+export function handleMarkChannelRead(session: Session | null, channelId: number) {
+  if (!session) return unauthorized();
+
+  const channel = getChannelById(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check access
+  if (!canUserAccessChannel(channelId, session.npub) && !isAdmin(session.npub)) {
+    return forbidden("Access denied");
+  }
+
+  // Get the latest message ID for this channel
+  const latestMessageId = getLatestMessageId(channelId);
+
+  // Update the read state
+  updateChannelReadState(session.npub, channelId, latestMessageId);
+
+  return jsonResponse({ success: true, lastReadMessageId: latestMessageId });
 }
 
 export function handleGetMessages(session: Session | null, channelId: number) {

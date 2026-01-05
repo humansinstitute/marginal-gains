@@ -3,7 +3,7 @@
  */
 
 import { isAdmin } from "../config";
-import { listAllChannels, listDmChannels, listVisibleChannels, getOrCreatePersonalChannel } from "../db";
+import { getUnreadCounts, listAllChannels, listDmChannels, listVisibleChannels, getOrCreatePersonalChannel } from "../db";
 import { unauthorized } from "../http";
 import { registerClient, unregisterClient, sendInitialSync } from "../services/events";
 
@@ -61,10 +61,16 @@ function getInitialSyncData(npub: string) {
   // Get personal channel
   const personalChannel = getOrCreatePersonalChannel(npub);
 
+  // Get unread counts
+  const unreadCounts = getUnreadCounts(npub);
+
   return {
     channels: channels.map(formatChannel),
     dmChannels: dmChannels.map(formatDmChannel),
     personalChannel: personalChannel ? formatChannel(personalChannel) : null,
+    unreadState: Object.fromEntries(
+      unreadCounts.map((u) => [u.channel_id, { unread: u.unread_count, mentions: u.mention_count }])
+    ),
     timestamp: Date.now(),
   };
 }
