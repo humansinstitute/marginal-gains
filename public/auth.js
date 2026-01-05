@@ -56,6 +56,11 @@ const wireLoginButtons = () => {
       target.disabled = true;
       clearError();
       try {
+        // For new ephemeral key generation, use PIN-protected flow
+        if (method === "ephemeral" && !localStorage.getItem(EPHEMERAL_SECRET_KEY)) {
+          await handleNewEphemeralSignup(target);
+          return;
+        }
         const signedEvent = await signLoginEvent(method);
         await completeLogin(method, signedEvent);
       } catch (err) {
@@ -66,6 +71,50 @@ const wireLoginButtons = () => {
       }
     });
   });
+};
+
+/**
+ * Handle new ephemeral key generation with PIN protection
+ * Treats it the same as importing an nsec
+ */
+const handleNewEphemeralSignup = async (button) => {
+  try {
+    // Check for secure context before PIN encryption
+    if (!isSecureContext()) {
+      showError("PIN encryption requires HTTPS. Please access via https:// or localhost.");
+      return;
+    }
+
+    // Prompt for PIN to encrypt the new key
+    const pin = await promptForNewPin();
+    if (!pin) {
+      showError("PIN is required to securely store your key.");
+      return;
+    }
+
+    // Generate new secret key
+    const { pure } = await loadNostrLibs();
+    const secretBytes = pure.generateSecretKey();
+    const secretHex = bytesToHex(secretBytes);
+
+    // Encrypt and store the secret (same as nsec import)
+    const encrypted = await encryptWithPin(secretHex, pin);
+    localStorage.setItem(ENCRYPTED_SECRET_KEY, encrypted);
+    localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "secret");
+
+    // Also store unencrypted for current session operations
+    // (will be cleared on logout, PIN-encrypted version persists)
+    localStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
+
+    // Sign login event
+    const signedEvent = pure.finalizeEvent(buildUnsignedEvent("ephemeral"), secretBytes);
+    await completeLogin("ephemeral", signedEvent);
+  } catch (err) {
+    console.error(err);
+    showError(err?.message || "Failed to create account.");
+  } finally {
+    button.disabled = false;
+  }
 };
 
 const wireForms = () => {
@@ -378,7 +427,13 @@ const completeLogin = async (method, event) => {
   const session = await response.json();
   setSession(session);
   if (method === "ephemeral") {
-    localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "ephemeral");
+    // If we have a PIN-encrypted key, use "secret" method for auto-login
+    // Otherwise fall back to unencrypted ephemeral (legacy)
+    if (localStorage.getItem(ENCRYPTED_SECRET_KEY)) {
+      localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "secret");
+    } else {
+      localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "ephemeral");
+    }
     localStorage.setItem(AUTO_LOGIN_PUBKEY_KEY, session.pubkey);
   } else if (method === "secret") {
     // Keep encrypted secret - it was stored during login

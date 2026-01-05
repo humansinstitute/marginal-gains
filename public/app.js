@@ -8,6 +8,7 @@ import { initAppMenu } from "./menu.js";
 import { initSettings } from "./settings.js";
 import { initKanban } from "./kanban.js";
 import { initTaskModal } from "./taskModal.js";
+import { initOnboarding } from "./onboarding.js";
 
 window.addEventListener("load", focusHeroInput);
 
@@ -16,6 +17,7 @@ initAvatarMenu();
 initUI();
 initAuth();
 initTagInputs();
+initOnboarding();
 initChat();
 initSettings();
 initKanban();

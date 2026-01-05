@@ -16,6 +16,7 @@ import {
 import { getSetting, listThreadMessages, createMessage, getUserByNpub, recordWingmanCost } from "../db";
 import { ASSETS_ROOT } from "../routes/assets";
 
+import { getWingmanChannelAccess, decryptMessageForWingman } from "./crypto";
 import { broadcast } from "./events";
 
 import type { Message } from "../db";
@@ -87,23 +88,61 @@ export function isWingmanAvailable(): boolean {
   return settings.enabled;
 }
 
+export interface BuildThreadContextResult {
+  context: string;
+  hasEncryptedMessages: boolean;
+  accessError?: string;
+}
+
 /**
  * Build context from a thread for the LLM
  * Format: [Author - Time]\nMessage body
  *
+ * Handles decryption of encrypted messages if Wingman has access.
  * This function is isolated for easy future modification
  * (token limits, truncation, summarization, etc.)
  */
-export function buildThreadContext(threadRootId: number): string {
+export async function buildThreadContext(
+  threadRootId: number,
+  channelId: number
+): Promise<BuildThreadContextResult> {
   const messages = listThreadMessages(threadRootId);
 
-  return messages
-    .map((msg) => {
-      const author = getAuthorDisplayName(msg.author);
-      const time = formatTime(msg.created_at);
-      return `[${author} - ${time}]\n${msg.body}`;
-    })
-    .join("\n\n");
+  // Check if any messages are encrypted
+  const hasEncryptedMessages = messages.some((msg) => msg.encrypted);
+
+  // If there are encrypted messages, check Wingman's access first
+  if (hasEncryptedMessages) {
+    const access = getWingmanChannelAccess(channelId);
+    if (!access.hasAccess) {
+      return {
+        context: "",
+        hasEncryptedMessages: true,
+        accessError: access.reason,
+      };
+    }
+  }
+
+  // Build context, decrypting messages as needed
+  const contextParts: string[] = [];
+
+  for (const msg of messages) {
+    const author = getAuthorDisplayName(msg.author);
+    const time = formatTime(msg.created_at);
+
+    let body = msg.body;
+    if (msg.encrypted) {
+      const decrypted = await decryptMessageForWingman(msg.body, true, channelId);
+      body = decrypted.content;
+    }
+
+    contextParts.push(`[${author} - ${time}]\n${body}`);
+  }
+
+  return {
+    context: contextParts.join("\n\n"),
+    hasEncryptedMessages,
+  };
 }
 
 /**
@@ -361,18 +400,44 @@ export async function handleWingmanRequest(
   });
 
   try {
-    // Build context from thread
-    const threadContext = buildThreadContext(threadRootId);
+    // Build context from thread (handles decryption if needed)
+    const threadResult = await buildThreadContext(threadRootId, channelId);
+
+    // Check if Wingman lacks access to encrypted content
+    if (threadResult.accessError) {
+      console.log(`[Wingman] Access denied: ${threadResult.accessError}`);
+
+      const accessDeniedMessage = createMessage(
+        channelId,
+        identity.npub,
+        threadResult.accessError,
+        threadRootId,
+        triggeringMessage.id,
+        null
+      );
+
+      if (accessDeniedMessage) {
+        broadcast({
+          type: "message:new",
+          data: {
+            ...accessDeniedMessage,
+            channelId,
+          },
+          channelId,
+        });
+      }
+      return;
+    }
 
     // Build the user prompt
     let userPrompt = "Please answer this user question based on the conversation context:\n\n";
-    userPrompt += threadContext;
+    userPrompt += threadResult.context;
 
     if (args.trim()) {
       userPrompt += `\n\nAdditional instructions: ${args.trim()}`;
     }
 
-    console.log(`[Wingman] Processing request in thread ${threadRootId}`);
+    console.log(`[Wingman] Processing request in thread ${threadRootId}${threadResult.hasEncryptedMessages ? " (decrypted)" : ""}`);
 
     // Call OpenRouter
     const result = await callOpenRouter(
@@ -495,19 +560,45 @@ export async function handleImageWingmanRequest(
   });
 
   try {
-    // Build context from thread
-    const threadContext = buildThreadContext(threadRootId);
+    // Build context from thread (handles decryption if needed)
+    const threadResult = await buildThreadContext(threadRootId, channelId);
+
+    // Check if Wingman lacks access to encrypted content
+    if (threadResult.accessError) {
+      console.log(`[Wingman] Access denied: ${threadResult.accessError}`);
+
+      const accessDeniedMessage = createMessage(
+        channelId,
+        identity.npub,
+        threadResult.accessError,
+        threadRootId,
+        triggeringMessage.id,
+        null
+      );
+
+      if (accessDeniedMessage) {
+        broadcast({
+          type: "message:new",
+          data: {
+            ...accessDeniedMessage,
+            channelId,
+          },
+          channelId,
+        });
+      }
+      return;
+    }
 
     // Build the user prompt - emphasize image generation
     let userPrompt = "Generate an image based on this request. ";
     userPrompt += "The user is asking for visual content.\n\n";
-    userPrompt += threadContext;
+    userPrompt += threadResult.context;
 
     if (args.trim()) {
       userPrompt += `\n\nImage request: ${args.trim()}`;
     }
 
-    console.log(`[Wingman] Processing image request in thread ${threadRootId}`);
+    console.log(`[Wingman] Processing image request in thread ${threadRootId}${threadResult.hasEncryptedMessages ? " (decrypted)" : ""}`);
 
     // Call OpenRouter with image model
     const result = await callOpenRouter(

@@ -1,3 +1,15 @@
+import { distributeKeysToAllPendingMembers } from "./chatCrypto.js";
+import {
+  getCommunityStatus,
+  bootstrapCommunityEncryption,
+  createInviteCode,
+  listInviteCodes,
+  deleteInviteCode,
+  getMigrationStatus,
+  getMigrationMessages,
+  submitMigrationBatch,
+  completeMigration,
+} from "./communityCrypto.js";
 import { elements as el, hide, show, escapeHtml } from "./dom.js";
 import { initNotifications } from "./notifications.js";
 import { state } from "./state.js";
@@ -18,6 +30,9 @@ export async function initSettings() {
 
   // Admin-only sections
   if (window.__IS_ADMIN__) {
+    // Community encryption settings
+    await initCommunityEncryption();
+
     // Wingman AI settings
     await initWingmanSettings();
 
@@ -230,6 +245,16 @@ async function addMember(npub) {
     return;
   }
 
+  // Check if adding Wingman - show privacy warning
+  if (communityStatus?.wingmanNpub && npub === communityStatus.wingmanNpub) {
+    const confirmed = confirm(
+      "Please be aware adding Wingman to your group has privacy implications " +
+      "and conversation threads may get leaked to 3rd party AI or server logs.\n\n" +
+      "Continue?"
+    );
+    if (!confirmed) return;
+  }
+
   try {
     const res = await fetch(`/chat/groups/${selectedGroupId}/members`, {
       method: "POST",
@@ -237,10 +262,24 @@ async function addMember(npub) {
       body: JSON.stringify({ npubs: [npub] }),
     });
     if (res.ok) {
+      const data = await res.json();
       await fetchGroupMembers(selectedGroupId);
       // Clear the input
       const input = document.querySelector("[data-member-input]");
       if (input) input.value = "";
+
+      // Distribute keys to encrypted channels that need them
+      if (data.encryptedChannelsNeedingKeys?.length > 0) {
+        console.log("[Settings] Distributing keys to encrypted channels:", data.encryptedChannelsNeedingKeys);
+        for (const channel of data.encryptedChannelsNeedingKeys) {
+          try {
+            const result = await distributeKeysToAllPendingMembers(channel.id);
+            console.log(`[Settings] Distributed keys for channel ${channel.name}:`, result);
+          } catch (err) {
+            console.error(`[Settings] Failed to distribute keys for channel ${channel.name}:`, err);
+          }
+        }
+      }
     } else {
       const err = await res.json().catch(() => ({}));
       alert(err.error || "Failed to add member");
@@ -323,4 +362,290 @@ function wireEventListeners() {
       if (npub) addMember(npub);
     }
   });
+}
+
+// ============================================================
+// Community Encryption Management
+// ============================================================
+
+let communityStatus = null;
+let inviteCodes = [];
+
+async function initCommunityEncryption() {
+  // Load community status
+  communityStatus = await getCommunityStatus();
+  if (!communityStatus) {
+    console.warn("[Settings] Could not load community status");
+    return;
+  }
+
+  renderCommunityStatus();
+  wireCommunityEventListeners();
+
+  // If bootstrapped, load invite codes
+  if (communityStatus.bootstrapped) {
+    inviteCodes = await listInviteCodes();
+    renderInviteCodes();
+  }
+}
+
+function renderCommunityStatus() {
+  const statusEl = document.querySelector("[data-community-status]");
+  const bootstrapPanel = document.querySelector("[data-community-bootstrap]");
+  const invitesPanel = document.querySelector("[data-community-invites]");
+  const migrationPanel = document.querySelector("[data-community-migration]");
+
+  if (!statusEl) return;
+
+  if (!communityStatus.bootstrapped) {
+    // Not bootstrapped - show bootstrap panel
+    statusEl.innerHTML = `<p class="community-status-text">
+      <span class="status-icon warning">!</span>
+      Community encryption is not enabled yet.
+    </p>`;
+    show(bootstrapPanel);
+    hide(invitesPanel);
+    hide(migrationPanel);
+  } else {
+    // Bootstrapped - show status and invite panel
+    const admin = communityStatus.admin;
+    statusEl.innerHTML = `<p class="community-status-text">
+      <span class="status-icon success">&#10003;</span>
+      Community encryption is active.
+      ${admin ? `<br><small>${admin.keysDistributed} users have keys, ${admin.pendingMessages} messages pending encryption.</small>` : ""}
+    </p>`;
+    hide(bootstrapPanel);
+    show(invitesPanel);
+
+    // Show migration panel if needed
+    if (admin?.needsMigration) {
+      show(migrationPanel);
+      renderMigrationStatus(admin.pendingMessages);
+    } else {
+      hide(migrationPanel);
+    }
+  }
+}
+
+function renderMigrationStatus(pendingCount) {
+  const statusEl = document.querySelector("[data-migration-status]");
+  if (!statusEl) return;
+
+  if (pendingCount === 0) {
+    statusEl.innerHTML = `<p class="migration-complete">All messages are encrypted.</p>`;
+  } else {
+    statusEl.innerHTML = `<p>${pendingCount} messages need encryption.</p>`;
+  }
+}
+
+function renderInviteCodes() {
+  const container = document.querySelector("[data-invite-list]");
+  if (!container) return;
+
+  if (inviteCodes.length === 0) {
+    container.innerHTML = `<p class="settings-empty">No active invite codes</p>`;
+    return;
+  }
+
+  container.innerHTML = inviteCodes
+    .map((invite) => {
+      const expiresDate = new Date(invite.expiresAt * 1000);
+      const expiresStr = expiresDate.toLocaleDateString();
+      const useType = invite.singleUse ? "Single-use" : "Multi-use";
+      const usedCount = invite.redeemedCount || 0;
+
+      return `<div class="invite-item">
+        <div class="invite-info">
+          <span class="invite-type">${escapeHtml(useType)}</span>
+          <span class="invite-meta">Expires ${escapeHtml(expiresStr)} &middot; Used ${usedCount} times</span>
+        </div>
+        <button type="button" class="ghost danger" data-delete-invite="${invite.id}">Delete</button>
+      </div>`;
+    })
+    .join("");
+
+  // Wire up delete handlers
+  container.querySelectorAll("[data-delete-invite]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.deleteInvite);
+      if (confirm("Delete this invite code?")) {
+        const success = await deleteInviteCode(id);
+        if (success) {
+          inviteCodes = inviteCodes.filter((i) => i.id !== id);
+          renderInviteCodes();
+        }
+      }
+    });
+  });
+}
+
+function wireCommunityEventListeners() {
+  // Bootstrap button
+  const bootstrapBtn = document.querySelector("[data-bootstrap-community]");
+  bootstrapBtn?.addEventListener("click", handleBootstrapCommunity);
+
+  // Invite modal
+  const createInviteBtn = document.querySelector("[data-create-invite]");
+  const inviteModal = document.querySelector("[data-invite-modal]");
+  const closeInviteModalBtns = document.querySelectorAll("[data-close-invite-modal]");
+  const inviteForm = document.querySelector("[data-invite-form]");
+  const inviteResult = document.querySelector("[data-invite-result]");
+  const copyInviteBtn = document.querySelector("[data-copy-invite]");
+
+  createInviteBtn?.addEventListener("click", () => {
+    // Reset modal state
+    hide(inviteResult);
+    show(inviteForm);
+    inviteForm?.reset();
+    show(inviteModal);
+  });
+
+  closeInviteModalBtns?.forEach((btn) =>
+    btn.addEventListener("click", () => hide(inviteModal))
+  );
+
+  inviteModal?.addEventListener("click", (e) => {
+    if (e.target === inviteModal) hide(inviteModal);
+  });
+
+  inviteForm?.addEventListener("submit", handleCreateInvite);
+
+  copyInviteBtn?.addEventListener("click", () => {
+    const codeEl = document.querySelector("[data-invite-code-text]");
+    if (codeEl?.textContent) {
+      navigator.clipboard.writeText(codeEl.textContent);
+      copyInviteBtn.textContent = "Copied!";
+      setTimeout(() => {
+        copyInviteBtn.textContent = "Copy";
+      }, 2000);
+    }
+  });
+
+  // Migration button
+  const migrationBtn = document.querySelector("[data-run-migration]");
+  migrationBtn?.addEventListener("click", handleRunMigration);
+}
+
+async function handleBootstrapCommunity() {
+  const btn = document.querySelector("[data-bootstrap-community]");
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = "Enabling...";
+
+  try {
+    // Include Wingman in key distribution if configured
+    const wingmanPubkey = communityStatus?.admin?.wingmanPubkey ?? null;
+    const result = await bootstrapCommunityEncryption(users, wingmanPubkey);
+
+    if (result.success) {
+      // Refresh status
+      communityStatus = await getCommunityStatus();
+      renderCommunityStatus();
+
+      // Load invite codes
+      inviteCodes = await listInviteCodes();
+      renderInviteCodes();
+
+      alert(`Community encryption enabled! ${result.keysDistributed} users have been given keys.`);
+    } else {
+      alert(`Failed to enable encryption: ${result.error}`);
+    }
+  } catch (err) {
+    console.error("[Settings] Bootstrap error:", err);
+    alert("Failed to enable community encryption");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Enable Community Encryption";
+  }
+}
+
+async function handleCreateInvite(e) {
+  e.preventDefault();
+
+  const form = e.currentTarget;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const formData = new FormData(form);
+
+  const ttlDays = Number(formData.get("ttlDays")) || 7;
+  const singleUse = formData.get("singleUse") === "on";
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Generating...";
+
+  try {
+    const result = await createInviteCode({ singleUse, ttlDays });
+
+    if (result.success) {
+      // Show the code
+      const inviteResult = document.querySelector("[data-invite-result]");
+      const codeText = document.querySelector("[data-invite-code-text]");
+
+      if (codeText) codeText.textContent = result.code;
+      hide(form);
+      show(inviteResult);
+
+      // Refresh invite list
+      inviteCodes = await listInviteCodes();
+      renderInviteCodes();
+    } else {
+      alert(`Failed to create invite: ${result.error}`);
+    }
+  } catch (err) {
+    console.error("[Settings] Create invite error:", err);
+    alert("Failed to create invite code");
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Generate";
+  }
+}
+
+async function handleRunMigration() {
+  const btn = document.querySelector("[data-run-migration]");
+  const statusEl = document.querySelector("[data-migration-status]");
+  if (!btn || !statusEl) return;
+
+  btn.disabled = true;
+  btn.textContent = "Encrypting...";
+
+  try {
+    let lastId = null;
+    let totalProcessed = 0;
+
+    // Process in batches
+    while (true) {
+      const batch = await getMigrationMessages(100, lastId);
+      if (!batch || batch.messages.length === 0) break;
+
+      statusEl.innerHTML = `<p>Processing batch... (${totalProcessed} messages done)</p>`;
+
+      const result = await submitMigrationBatch(batch.messages);
+      if (!result) {
+        console.error("[Settings] Migration batch failed");
+        break;
+      }
+
+      totalProcessed += result.updated;
+      lastId = batch.messages[batch.messages.length - 1].id;
+
+      if (result.complete || !batch.hasMore) {
+        break;
+      }
+    }
+
+    // Complete migration
+    await completeMigration();
+
+    // Refresh status
+    communityStatus = await getCommunityStatus();
+    renderCommunityStatus();
+
+    statusEl.innerHTML = `<p class="migration-complete">Migration complete! ${totalProcessed} messages encrypted.</p>`;
+  } catch (err) {
+    console.error("[Settings] Migration error:", err);
+    statusEl.innerHTML = `<p class="migration-error">Migration failed. Please try again.</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Encrypt Existing Messages";
+  }
 }

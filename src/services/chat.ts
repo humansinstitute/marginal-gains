@@ -1,5 +1,7 @@
 import {
   createChannel,
+  createEncryptedChannel,
+  createEncryptedMessage,
   createMessage,
   getChannel,
   getChannelByName,
@@ -37,10 +39,15 @@ export function createNewChannel(
   displayName: string,
   description: string,
   creator: string,
-  isPublic: boolean
+  isPublic: boolean,
+  encrypted: boolean = false
 ): Channel | null {
   const existing = getChannelByName(name);
   if (existing) return null; // Channel name already taken
+
+  if (encrypted) {
+    return createEncryptedChannel(name, displayName, description, creator, isPublic);
+  }
   return createChannel(name, displayName, description, creator, isPublic);
 }
 
@@ -93,4 +100,28 @@ export function replyToMessage(
   parentId: number
 ): Message | null {
   return sendMessage(channelId, author, body, parentId);
+}
+
+export function sendEncryptedMessage(
+  channelId: number,
+  author: string,
+  encryptedBody: string,
+  parentId: number | null = null,
+  keyVersion: number = 1
+): Message | null {
+  if (!encryptedBody) return null;
+
+  const channel = getChannel(channelId);
+  if (!channel) return null;
+
+  // Determine thread_root_id based on parent
+  let threadRootId: number | null = null;
+  if (parentId) {
+    const parent = getMessage(parentId);
+    if (parent) {
+      threadRootId = parent.thread_root_id ?? parent.id;
+    }
+  }
+
+  return createEncryptedMessage(channelId, author, encryptedBody, threadRootId, parentId, null, keyVersion);
 }
