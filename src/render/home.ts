@@ -103,6 +103,7 @@ function renderHeader(session: Session | null) {
           <button type="button" data-export-secret ${session?.method === "ephemeral" ? "" : "hidden"}>Export Secret</button>
           <button type="button" data-show-login-qr ${session?.method === "ephemeral" ? "" : "hidden"}>Show Login QR</button>
           <button type="button" data-copy-id ${session ? "" : "hidden"}>Copy ID</button>
+          <a href="/wallet" class="avatar-menu-link" ${session ? "" : "hidden"}>Wallet</a>
           <button type="button" data-logout>Log out</button>
         </div>
       </div>

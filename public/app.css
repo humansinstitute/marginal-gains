@@ -1,6 +1,7 @@
 /* Import modular styles */
 @import url("./mobile.css");
 @import url("./settings.css");
+@import url("./wallet.css");
 
 /* Global box-sizing */
 *,
