@@ -2488,6 +2488,47 @@ body.chat-page {
 .chat-auth-container .auth-panel {
   text-align: left;
 }
+.auth-logo {
+  display: block;
+  width: 120px;
+  height: 120px;
+  margin: 0 auto 1.5rem;
+  border-radius: 12px;
+}
+.auth-extension {
+  background: #5b21b6;
+  color: #fff;
+  border-color: #5b21b6;
+}
+.auth-extension:hover:not(:disabled) {
+  background: #4c1d95;
+  border-color: #4c1d95;
+  color: #fff;
+}
+.secret-input-wrapper {
+  display: flex;
+  flex: 1;
+  position: relative;
+}
+.secret-input-wrapper input {
+  flex: 1;
+  padding-right: 2.5rem;
+}
+.secret-toggle {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  font-size: 1rem;
+  opacity: 0.6;
+}
+.secret-toggle:hover {
+  opacity: 1;
+}
 /* Landing page */
 .welcome-section {
   text-align: center;

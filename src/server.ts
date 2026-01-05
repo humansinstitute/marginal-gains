@@ -1,5 +1,5 @@
 import {
-  APP_NAME,
+  APP_NAME_DEFAULT,
   APP_TAG,
   COOKIE_SECURE,
   LOGIN_EVENT_KIND,
@@ -12,6 +12,7 @@ import {
 import { withErrorHandling } from "./http";
 import { logError } from "./logger";
 import { handleAiTasks, handleAiTasksPost, handleLatestSummary, handleSummaryPost } from "./routes/ai";
+import { handleGetAppSettings, handleManifest, handleUpdateAppSettings } from "./routes/app-settings";
 import { handleAssetUpload, serveAsset } from "./routes/assets";
 import { createAuthHandlers } from "./routes/auth";
 import {
@@ -151,6 +152,9 @@ const server = Bun.serve({
       const session = sessionFromRequest(req);
 
       if (req.method === "GET") {
+        // Dynamic manifest with custom app name
+        if (pathname === "/manifest.webmanifest") return handleManifest();
+
         const staticResponse = await serveStatic(pathname);
         if (staticResponse) return staticResponse;
 
@@ -214,6 +218,9 @@ const server = Bun.serve({
         if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
         if (pathname === "/api/wingman/costs") return handleGetWingmanCosts(session);
         if (pathname === "/api/slashcommands") return handleGetSlashCommands(session);
+
+        // App settings routes (admin only)
+        if (pathname === "/api/app/settings") return handleGetAppSettings(session);
 
         // Community encryption routes
         if (pathname === "/api/community/status") return handleCommunityStatus(session);
@@ -342,6 +349,9 @@ const server = Bun.serve({
         // Wingman routes
         if (pathname === "/api/wingman/settings") return handleUpdateWingmanSettings(req, session);
 
+        // App settings routes (admin only)
+        if (pathname === "/api/app/settings") return handleUpdateAppSettings(req, session);
+
         // CRM routes (admin only)
         const updateCrmCompanyMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)$/);
         if (updateCrmCompanyMatch) return handleUpdateCompany(req, session, Number(updateCrmCompanyMatch[1]));
@@ -414,4 +424,4 @@ const server = Bun.serve({
   ),
 });
 
-console.log(`${APP_NAME} ready on http://localhost:${server.port}`);
+console.log(`${APP_NAME_DEFAULT} ready on http://localhost:${server.port}`);

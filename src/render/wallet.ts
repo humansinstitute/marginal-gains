@@ -1,4 +1,4 @@
-import { APP_NAME } from "../config";
+import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
 import { renderAppMenu, renderPinModal } from "./components";
 
@@ -21,13 +21,15 @@ ${renderHead()}
 }
 
 function renderHead() {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
   return `<head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Wallet - ${APP_NAME}</title>
+  <title>Wallet - ${appName}</title>
   <meta name="theme-color" content="#6b3a6b" />
-  <meta name="application-name" content="${APP_NAME}" />
-  <link rel="icon" type="image/png" href="/favicon.png" />
+  <meta name="application-name" content="${appName}" />
+  <link rel="icon" type="image/png" href="${faviconUrl}" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/app.css?v=3" />
@@ -35,12 +37,13 @@ function renderHead() {
 }
 
 function renderHeader(session: Session) {
+  const appName = getAppName();
   return `<header class="wallet-header">
     <div class="header-left">
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
         <span class="hamburger-icon"></span>
       </button>
-      <h1 class="app-title">${APP_NAME}</h1>
+      <h1 class="app-title">${appName}</h1>
     </div>
     <div class="header-right">
       ${renderAvatarMenu(session)}

@@ -1,4 +1,3 @@
-import { APP_NAME } from "../config";
 import {
   getCrmPipelineSummary,
   listCrmActivities,
@@ -6,6 +5,7 @@ import {
   listCrmContacts,
   listCrmOpportunities,
 } from "../db";
+import { getAppName, getFaviconUrl } from "../routes/app-settings";
 import { escapeHtml } from "../utils/html";
 
 import { renderAppMenu, renderPinModal } from "./components";
@@ -34,25 +34,29 @@ ${renderHead()}
 }
 
 function renderHead() {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
   return `<head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>CRM - ${APP_NAME}</title>
+  <title>CRM - ${appName}</title>
   <meta name="theme-color" content="#6b3a6b" />
-  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="icon" type="image/png" href="${faviconUrl}" />
   <link rel="stylesheet" href="/app.css?v=4" />
   <link rel="stylesheet" href="/crm.css?v=6" />
 </head>`;
 }
 
 function renderCrmHeader(session: Session | null) {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
   return `<header class="chat-page-header">
     <div class="header-left">
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
         <span class="hamburger-icon"></span>
       </button>
-      <img src="/favicon.png" alt="" class="app-logo" />
-      <h1 class="app-title">${APP_NAME}</h1>
+      <img src="${faviconUrl}" alt="" class="app-logo" />
+      <h1 class="app-title">${appName}</h1>
     </div>
     <div class="header-right">
       ${session ? renderAvatarMenu(session) : ""}

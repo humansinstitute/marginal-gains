@@ -28,6 +28,7 @@ export const initAuth = () => {
   wireForms();
   wireMenuButtons();
   wireQrModal();
+  wireSecretToggle();
   initPinModal();
 
   if (state.session) {
@@ -268,6 +269,20 @@ const closeQrModal = () => {
 
 const handleQrEscape = (event) => {
   if (event.key === "Escape") closeQrModal();
+};
+
+const wireSecretToggle = () => {
+  document.querySelectorAll("[data-toggle-secret]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const wrapper = btn.closest(".secret-input-wrapper");
+      const input = wrapper?.querySelector("input[name='secret']");
+      if (!input) return;
+      const isPassword = input.type === "password";
+      input.type = isPassword ? "text" : "password";
+      btn.textContent = isPassword ? "\u{1F648}" : "\u{1F441}";
+      btn.setAttribute("aria-label", isPassword ? "Hide secret" : "Show secret");
+    });
+  });
 };
 
 const checkFragmentLogin = async () => {

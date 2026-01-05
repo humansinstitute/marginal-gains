@@ -1,4 +1,4 @@
-import { APP_NAME } from "../config";
+import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
 import { renderAppMenu, renderPinModal } from "./components";
 
@@ -21,13 +21,15 @@ ${renderHead()}
 }
 
 function renderHead() {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
   return `<head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Chat - ${APP_NAME}</title>
+  <title>Chat - ${appName}</title>
   <meta name="theme-color" content="#6b3a6b" />
-  <meta name="application-name" content="${APP_NAME}" />
-  <link rel="icon" type="image/png" href="/favicon.png" />
+  <meta name="application-name" content="${appName}" />
+  <link rel="icon" type="image/png" href="${faviconUrl}" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/app.css?v=3" />
@@ -35,12 +37,14 @@ function renderHead() {
 }
 
 function renderChatHeader(session: Session | null, needsOnboarding = false) {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
   // Hide menu during onboarding - user can only enter invite code or log out
   if (needsOnboarding) {
     return `<header class="chat-page-header">
       <div class="header-left">
-        <img src="/favicon.png" alt="" class="app-logo" />
-        <h1 class="app-title">${APP_NAME}</h1>
+        <img src="${faviconUrl}" alt="" class="app-logo" />
+        <h1 class="app-title">${appName}</h1>
       </div>
       <div class="header-right">
         ${session ? renderOnboardingAvatarMenu(session) : ""}
@@ -53,8 +57,8 @@ function renderChatHeader(session: Session | null, needsOnboarding = false) {
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
         <span class="hamburger-icon"></span>
       </button>
-      <img src="/favicon.png" alt="" class="app-logo" />
-      <h1 class="app-title">${APP_NAME}</h1>
+      <img src="${faviconUrl}" alt="" class="app-logo" />
+      <h1 class="app-title">${appName}</h1>
     </div>
     <div class="header-right">
       ${session ? renderAvatarMenu(session) : ""}
@@ -380,24 +384,30 @@ function renderQrModal() {
 }
 
 function renderAuthRequired() {
+  const appName = getAppName();
+  const logoUrl = getFaviconUrl() || "/logo.png";
   return `<section class="chat-auth-section">
     <div class="chat-auth-container">
-      <h2>Welcome to ${APP_NAME}</h2>
-      <p class="auth-description">Sign in with Nostr to start chatting.</p>
+      <img src="${logoUrl}" alt="${appName}" class="auth-logo" />
+      <h2>Welcome to ${appName}</h2>
+      <p class="auth-description">A nostr native community chat app, think slack, but client side encrypted and with a service that respects its users.</p>
       <section class="auth-panel" data-login-panel>
         <div class="auth-actions">
           <button class="auth-option" type="button" data-login-method="ephemeral">Sign Up</button>
+          <button class="auth-option auth-extension" type="button" data-login-method="extension">Log in with Nostr Extension</button>
         </div>
         <details class="auth-advanced">
-          <summary>Advanced options</summary>
-          <p>Use a browser extension or connect to a remote bunker.</p>
-          <button class="auth-option" type="button" data-login-method="extension">Browser extension</button>
+          <summary>Advanced Options (nsec, bunker://...)</summary>
+          <p>Connect to a remote bunker or sign in with your secret key.</p>
           <form data-bunker-form>
             <input name="bunker" placeholder="nostrconnect://… or name@example.com" autocomplete="off" />
             <button class="bunker-submit" type="submit">Connect bunker</button>
           </form>
           <form data-secret-form>
-            <input name="secret" placeholder="nsec1…" autocomplete="off" />
+            <div class="secret-input-wrapper">
+              <input type="password" name="secret" placeholder="nsec1…" autocomplete="off" />
+              <button type="button" class="secret-toggle" data-toggle-secret aria-label="Show secret">&#128065;</button>
+            </div>
             <button class="bunker-submit" type="submit">Sign in with secret</button>
           </form>
         </details>
@@ -419,10 +429,11 @@ function renderSessionSeed(session: Session | null, deepLink?: DeepLink, needsOn
 }
 
 function renderOnboardingLobby() {
+  const appName = getAppName();
   return `<section class="onboarding-lobby" data-onboarding-lobby>
     <div class="onboarding-card">
       <div class="onboarding-icon">🔐</div>
-      <h2>Welcome to ${APP_NAME}</h2>
+      <h2>Welcome to ${appName}</h2>
       <p class="onboarding-desc">
         This community uses end-to-end encryption.
         Enter your invite code to get access.

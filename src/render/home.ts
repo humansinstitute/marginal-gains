@@ -1,6 +1,6 @@
-import { APP_NAME } from "../config";
 import { getThreadLinkCount } from "../db";
 import { ALLOWED_STATE_TRANSITIONS, formatPriorityLabel, formatStateLabel } from "../domain/todos";
+import { getAppName, getFaviconUrl } from "../routes/app-settings";
 import { escapeHtml } from "../utils/html";
 
 import { renderAppMenu, renderPinModal } from "./components";
@@ -71,13 +71,15 @@ ${renderHead()}
 }
 
 function renderHead() {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
   return `<head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>${APP_NAME}</title>
+  <title>${appName}</title>
   <meta name="theme-color" content="#6b3a6b" />
-  <meta name="application-name" content="${APP_NAME}" />
-  <link rel="icon" type="image/png" href="/favicon.png" />
+  <meta name="application-name" content="${appName}" />
+  <link rel="icon" type="image/png" href="${faviconUrl}" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/app.css?v=3" />
@@ -85,12 +87,13 @@ function renderHead() {
 }
 
 function renderHeader(session: Session | null) {
+  const appName = getAppName();
   return `<header class="tasks-page-header">
     <div class="header-left">
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
         <span class="hamburger-icon"></span>
       </button>
-      <h1 class="app-title">${APP_NAME}</h1>
+      <h1 class="app-title">${appName}</h1>
     </div>
     <div class="header-right">
       <div class="session-controls" data-session-controls ${session ? "" : "hidden"}>
@@ -118,17 +121,20 @@ function renderAuth(session: Session | null) {
     <p class="auth-description">Start with a quick Ephemeral ID or bring your own signer.</p>
     <div class="auth-actions">
       <button class="auth-option" type="button" data-login-method="ephemeral">Sign Up</button>
+      <button class="auth-option auth-extension" type="button" data-login-method="extension">Log in with Nostr Extension</button>
     </div>
     <details class="auth-advanced">
-      <summary>Advanced options</summary>
-      <p>Use a browser extension or connect to a remote bunker.</p>
-      <button class="auth-option" type="button" data-login-method="extension">Browser extension</button>
+      <summary>Advanced Options (nsec, bunker://...)</summary>
+      <p>Connect to a remote bunker or sign in with your secret key.</p>
       <form data-bunker-form>
         <input name="bunker" placeholder="nostrconnect://… or name@example.com" autocomplete="off" />
         <button class="bunker-submit" type="submit">Connect bunker</button>
       </form>
       <form data-secret-form>
-        <input name="secret" placeholder="nsec1…" autocomplete="off" />
+        <div class="secret-input-wrapper">
+          <input type="password" name="secret" placeholder="nsec1…" autocomplete="off" />
+          <button type="button" class="secret-toggle" data-toggle-secret aria-label="Show secret">&#128065;</button>
+        </div>
         <button class="bunker-submit" type="submit">Sign in with secret</button>
       </form>
     </details>
