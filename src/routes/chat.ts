@@ -1,4 +1,4 @@
-import { isAdmin } from "../config";
+import { getWingmanIdentity, isAdmin } from "../config";
 import {
   addChannelGroup,
   canUserAccessChannel,
@@ -22,6 +22,7 @@ import {
   listVisibleChannels,
   storeUserChannelKey,
   upsertUser,
+  userHasChannelAccessViaGroups,
 } from "../db";
 import { jsonResponse, unauthorized } from "../http";
 import { renderChatPage } from "../render/chat";
@@ -44,6 +45,23 @@ function forbidden(message = "Forbidden") {
   return jsonResponse({ error: message }, 403);
 }
 
+/**
+ * Parse @mentions from plaintext message body
+ * Returns array of npub strings
+ */
+function parseMentionsFromBody(body: string): string[] {
+  const mentions: string[] = [];
+  const mentionPattern = /nostr:(npub1[a-z0-9]{58})/gi;
+  let match;
+  while ((match = mentionPattern.exec(body)) !== null) {
+    const npub = match[1].toLowerCase();
+    if (!mentions.includes(npub)) {
+      mentions.push(npub);
+    }
+  }
+  return mentions;
+}
+
 export function handleChatPage(session: Session | null, deepLink?: DeepLink) {
   // Check if community encryption is active and user needs onboarding
   let needsOnboarding = false;
@@ -63,9 +81,31 @@ export function handleListChannels(session: Session | null) {
   if (!session) return unauthorized();
 
   // Admins see all channels, regular users see only visible ones
-  const channels = isAdmin(session.npub)
+  const rawChannels = isAdmin(session.npub)
     ? listAllChannels()
     : listVisibleChannels(session.npub);
+
+  // Check Wingman access for each channel
+  const wingman = getWingmanIdentity();
+  const wingmanHasCommunityKey = wingman ? !!getCommunityKey(wingman.pubkey) : false;
+  const communityBootstrapped = isCommunityBootstrapped();
+
+  const channels = rawChannels.map((channel) => {
+    let hasWingmanAccess = false;
+
+    if (wingman) {
+      if (channel.is_public === 1) {
+        // Public channels: Wingman has access if community encryption is not active
+        // or if Wingman has the community key
+        hasWingmanAccess = !communityBootstrapped || wingmanHasCommunityKey;
+      } else {
+        // Private channels: Wingman needs group membership
+        hasWingmanAccess = userHasChannelAccessViaGroups(channel.id, wingman.npub);
+      }
+    }
+
+    return { ...channel, hasWingmanAccess };
+  });
 
   // Get DM channels for this user
   const dmChannels = listDmChannels(session.npub);
@@ -265,7 +305,7 @@ export async function handleSendMessage(req: Request, session: Session | null, c
   }
 
   const body = await req.json();
-  const { content, parentId, encrypted } = body;
+  const { content, parentId, encrypted, commands, mentions } = body;
 
   if (!content || typeof content !== "string" || !content.trim()) {
     return jsonResponse({ error: "Message content is required" }, 400);
@@ -325,16 +365,39 @@ export async function handleSendMessage(req: Request, session: Session | null, c
     ? `/chat/dm/${channelId}`
     : `/chat/channel/${encodeURIComponent(channel.name)}`;
 
-  // Send push notifications to users with "on_update" frequency (async, don't await)
+  // For encrypted messages, don't show content in notification (it's ciphertext)
+  // For plaintext messages, show a preview
+  const notificationBody = encrypted
+    ? "New encrypted message"
+    : content.length > 100 ? content.slice(0, 100) + "..." : content;
+
+  // Send push notifications to channel members (async, don't await)
   notifyChannelMessage(recipientNpubs, session.npub, {
     title: channel.display_name || channel.name,
-    body: content.length > 100 ? content.slice(0, 100) + "..." : content,
+    body: notificationBody,
     url: pushUrl,
     tag: `channel-${channelId}`,
   }).catch((err) => console.error("[Push] Failed to send notifications:", err));
 
+  // Send special "you were mentioned" notifications to mentioned users
+  // For encrypted messages, use client-provided mentions metadata
+  const mentionedNpubs = encrypted && Array.isArray(mentions) ? mentions : parseMentionsFromBody(content);
+  if (mentionedNpubs.length > 0) {
+    const sender = getUserByNpub(session.npub);
+    const senderName = sender?.display_name || sender?.name || session.npub.slice(0, 12) + "...";
+    notifyChannelMessage(mentionedNpubs, session.npub, {
+      title: `${senderName} mentioned you`,
+      body: encrypted ? "in an encrypted message" : notificationBody,
+      url: pushUrl,
+      tag: `mention-${channelId}-${message.id}`,
+    }).catch((err) => console.error("[Push] Failed to send mention notifications:", err));
+  }
+
   // Execute any slash commands in the message (async, don't await)
-  executeSlashCommands(message, session.npub).catch((err) =>
+  // For encrypted messages, use client-provided commands metadata
+  // For plaintext messages, parse from the message body
+  const commandsMetadata = encrypted && Array.isArray(commands) ? commands : undefined;
+  executeSlashCommands(message, session.npub, commandsMetadata).catch((err) =>
     console.error("[SlashCommands] Failed to execute:", err)
   );
 

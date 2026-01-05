@@ -46,6 +46,42 @@ let threadExpanded = false;
 let shouldScrollToBottom = false;
 
 /**
+ * Parse slash commands from message text (client-side, before encryption)
+ * Returns array of command names found in the message
+ * @param {string} text - Message text
+ * @returns {string[]} Array of command names (e.g., ["wingman", "image-wingman"])
+ */
+function parseSlashCommands(text) {
+  const commands = [];
+  const commandPattern = /\/([\w-]+)/g;
+  let match;
+  while ((match = commandPattern.exec(text)) !== null) {
+    commands.push(match[1].toLowerCase());
+  }
+  return commands;
+}
+
+/**
+ * Parse @mentions from message text (client-side, before encryption)
+ * Extracts npubs from nostr:npub... format used by the mention system
+ * @param {string} text - Message text
+ * @returns {string[]} Array of mentioned npubs
+ */
+function parseMentions(text) {
+  const mentions = [];
+  // Match nostr:npub1... format (npub is 63 chars: npub1 + 58 bech32 chars)
+  const mentionPattern = /nostr:(npub1[a-z0-9]{58})/gi;
+  let match;
+  while ((match = mentionPattern.exec(text)) !== null) {
+    const npub = match[1].toLowerCase();
+    if (!mentions.includes(npub)) {
+      mentions.push(npub);
+    }
+  }
+  return mentions;
+}
+
+/**
  * Auto-resize textarea to fit content (up to max-height set in CSS)
  */
 function autoResizeTextarea(textarea) {
@@ -1161,6 +1197,11 @@ async function sendMessage() {
     let content = body;
     let encrypted = false;
 
+    // Parse slash commands and mentions from plaintext BEFORE encryption
+    // This allows the server to handle these without decrypting
+    const commands = parseSlashCommands(body);
+    const mentions = parseMentions(body);
+
     // Encrypt message if channel needs encryption (private or community)
     if (channelNeedsEncryption(channelId)) {
       const encResult = await encryptMessageForChannel(body, channelId);
@@ -1184,6 +1225,8 @@ async function sendMessage() {
         content,
         parentId: parentId ? Number(parentId) : null,
         encrypted,
+        commands: commands.length > 0 ? commands : undefined,
+        mentions: mentions.length > 0 ? mentions : undefined,
       }),
     });
     if (res.ok) {
@@ -1226,8 +1269,12 @@ function renderChannels() {
         } else if (!channel.isPublic) {
           statusIcon = '<span class="channel-lock" title="Private">&#128274;</span>';
         }
+        // Show wingman icon if Wingman has access
+        const wingmanIcon = channel.hasWingmanAccess
+          ? '<img src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />'
+          : '';
         return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
-          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}</div>
+          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}${wingmanIcon}</div>
         </button>`;
       })
       .join("");
@@ -1556,6 +1603,10 @@ async function sendThreadReply() {
     let content = body;
     let encrypted = false;
 
+    // Parse slash commands and mentions from plaintext BEFORE encryption
+    const commands = parseSlashCommands(body);
+    const mentions = parseMentions(body);
+
     // Encrypt message if channel needs encryption (private or community)
     if (channelNeedsEncryption(channelId)) {
       const encResult = await encryptMessageForChannel(body, channelId);
@@ -1575,6 +1626,8 @@ async function sendThreadReply() {
         content,
         parentId: Number(parentId),
         encrypted,
+        commands: commands.length > 0 ? commands : undefined,
+        mentions: mentions.length > 0 ? mentions : undefined,
       }),
     });
     if (res.ok) {

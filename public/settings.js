@@ -245,6 +245,16 @@ async function addMember(npub) {
     return;
   }
 
+  // Check if adding Wingman - show privacy warning
+  if (communityStatus?.wingmanNpub && npub === communityStatus.wingmanNpub) {
+    const confirmed = confirm(
+      "Please be aware adding Wingman to your group has privacy implications " +
+      "and conversation threads may get leaked to 3rd party AI or server logs.\n\n" +
+      "Continue?"
+    );
+    if (!confirmed) return;
+  }
+
   try {
     const res = await fetch(`/chat/groups/${selectedGroupId}/members`, {
       method: "POST",
@@ -524,7 +534,9 @@ async function handleBootstrapCommunity() {
   btn.textContent = "Enabling...";
 
   try {
-    const result = await bootstrapCommunityEncryption(users);
+    // Include Wingman in key distribution if configured
+    const wingmanPubkey = communityStatus?.admin?.wingmanPubkey ?? null;
+    const result = await bootstrapCommunityEncryption(users, wingmanPubkey);
 
     if (result.success) {
       // Refresh status

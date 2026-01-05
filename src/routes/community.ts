@@ -3,7 +3,7 @@
  * Handles community key management, invite codes, and onboarding
  */
 
-import { isAdmin } from "../config";
+import { getWingmanIdentity, isAdmin } from "../config";
 import {
   countCommunityKeys,
   countUnencryptedPublicMessages,
@@ -47,6 +47,7 @@ export function handleCommunityStatus(session: Session | null) {
   const migrationComplete = isMessageMigrationComplete();
   const userOnboarded = isUserOnboarded(session.npub);
   const hasCommunityKey = !!getCommunityKey(session.pubkey);
+  const wingmanIdentity = getWingmanIdentity();
 
   // Admin-only info
   let adminInfo = null;
@@ -61,6 +62,7 @@ export function handleCommunityStatus(session: Session | null) {
       pendingMessages,
       needsBootstrap: !bootstrapped,
       needsMigration: bootstrapped && !migrationComplete && pendingMessages > 0,
+      wingmanPubkey: wingmanIdentity?.pubkey ?? null,
     };
   }
 
@@ -71,6 +73,8 @@ export function handleCommunityStatus(session: Session | null) {
     hasCommunityKey,
     isAdmin: isAdmin(session.npub),
     admin: adminInfo,
+    // Wingman npub exposed to all users for UI warnings
+    wingmanNpub: wingmanIdentity?.npub ?? null,
   });
 }
 

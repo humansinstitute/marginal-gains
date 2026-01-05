@@ -256,9 +256,10 @@ async function getCurrentPubkey() {
  * Bootstrap the community encryption (admin only)
  * Generates a community key and wraps it for all existing users
  * @param {Array<{pubkey: string, npub: string}>} users - All existing users
+ * @param {string|null} wingmanPubkey - Wingman's pubkey (optional)
  * @returns {Promise<{success: boolean, keysDistributed: number, error?: string}>}
  */
-export async function bootstrapCommunityEncryption(users = []) {
+export async function bootstrapCommunityEncryption(users = [], wingmanPubkey = null) {
   try {
     // Generate new community key
     const communityKey = await generateChannelKey();
@@ -282,6 +283,20 @@ export async function bootstrapCommunityEncryption(users = []) {
         } catch (err) {
           console.error(`[CommunityCrypto] Failed to wrap key for ${user.npub}:`, err);
         }
+      }
+    }
+
+    // Include Wingman in key distribution if configured
+    if (wingmanPubkey && wingmanPubkey !== adminPubkey) {
+      try {
+        const wingmanWrappedKey = await wrapKeyForUser(communityKey, wingmanPubkey);
+        userKeys.push({
+          userPubkey: wingmanPubkey,
+          wrappedKey: wingmanWrappedKey,
+        });
+        console.log("[CommunityCrypto] Included Wingman in community key distribution");
+      } catch (err) {
+        console.error("[CommunityCrypto] Failed to wrap key for Wingman:", err);
       }
     }
 
