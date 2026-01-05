@@ -1,4 +1,5 @@
-import { APP_NAME, isAdmin } from "../config";
+import { isAdmin } from "../config";
+import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
 import { renderAppMenu } from "./components";
 
@@ -22,13 +23,15 @@ ${renderHead()}
 }
 
 function renderHead() {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
   return `<head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>Settings - ${APP_NAME}</title>
+  <title>Settings - ${appName}</title>
   <meta name="theme-color" content="#6b3a6b" />
-  <meta name="application-name" content="${APP_NAME}" />
-  <link rel="icon" type="image/png" href="/favicon.png" />
+  <meta name="application-name" content="${appName}" />
+  <link rel="icon" type="image/png" href="${faviconUrl}" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/app.css?v=3" />
@@ -36,12 +39,13 @@ function renderHead() {
 }
 
 function renderHeader(session: Session) {
+  const appName = getAppName();
   return `<header class="settings-header">
     <div class="header-left">
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
         <span class="hamburger-icon"></span>
       </button>
-      <h1 class="app-title">${APP_NAME}</h1>
+      <h1 class="app-title">${appName}</h1>
     </div>
     <div class="header-right">
       ${renderAvatarMenu(session)}
@@ -76,10 +80,38 @@ function renderSettingsContent(userIsAdmin: boolean) {
       <p class="settings-empty">Loading...</p>
     </section>
 
+    ${userIsAdmin ? renderAppSettingsSection() : ""}
     ${userIsAdmin ? renderCommunityEncryptionSection() : ""}
     ${userIsAdmin ? renderWingmanSection() : ""}
     ${userIsAdmin ? renderGroupsSection() : ""}
   </div>`;
+}
+
+function renderAppSettingsSection() {
+  return `<section class="settings-section" data-app-settings-section>
+      <div class="settings-section-header">
+        <h2>App Settings</h2>
+      </div>
+      <div class="app-settings-content" data-app-settings-content>
+        <p class="settings-empty">Loading...</p>
+      </div>
+      <form class="settings-form app-settings-form" data-app-settings-form hidden>
+        <label>
+          <span>App Name</span>
+          <input type="text" name="appName" placeholder="Marginal Gains" maxlength="50" />
+          <small class="form-hint">Leave empty to use default</small>
+        </label>
+        <label>
+          <span>Favicon URL</span>
+          <input type="url" name="faviconUrl" placeholder="https://example.com/favicon.png" />
+          <small class="form-hint">URL to a PNG or ICO file (leave empty for default)</small>
+        </label>
+        <div class="settings-form-actions">
+          <button type="submit" class="primary" data-save-app-settings>Save</button>
+        </div>
+        <p class="app-settings-status" data-app-settings-status hidden></p>
+      </form>
+    </section>`;
 }
 
 function renderCommunityEncryptionSection() {

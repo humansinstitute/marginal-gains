@@ -1,3 +1,4 @@
+import { initAppSettings } from "./appSettings.js";
 import { distributeKeysToAllPendingMembers } from "./chatCrypto.js";
 import {
   getCommunityStatus,
@@ -30,6 +31,9 @@ export async function initSettings() {
 
   // Admin-only sections
   if (window.__IS_ADMIN__) {
+    // App settings (name, favicon)
+    await initAppSettings();
+
     // Community encryption settings
     await initCommunityEncryption();
 

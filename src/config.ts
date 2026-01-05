@@ -8,7 +8,7 @@ export const LOGIN_EVENT_KIND = 27235;
 export const LOGIN_MAX_AGE_SECONDS = 60;
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 export const COOKIE_SECURE = Bun.env.NODE_ENV === "production";
-export const APP_NAME = "Marginal Gains";
+export const APP_NAME_DEFAULT = "Marginal Gains";
 export const APP_TAG = "marginal-gains";
 export const PUBLIC_DIR = join(import.meta.dir, "../public");
 export const PUSH_CONTACT_EMAIL = Bun.env.PUSH_CONTACT_EMAIL || "admin@example.com";
@@ -29,7 +29,7 @@ export const STATIC_FILES = new Map<string, string>([
   ["/apple-touch-icon.png", "apple-touch-icon.png"],
   ["/icon-192.png", "icon-192.png"],
   ["/icon-512.png", "icon-512.png"],
-  ["/manifest.webmanifest", "manifest.webmanifest"],
+  // manifest.webmanifest is now served dynamically from app-settings
   ["/app.js", "app.js"],
   ["/app.css", "app.css"],
   ["/sw.js", "sw.js"],
