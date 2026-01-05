@@ -18,6 +18,9 @@ import {
   upsertChannel,
   addMessage as addMessageToState,
   setChannelMessages,
+  setUnreadState,
+  incrementUnread,
+  incrementSessionMention,
 } from "./state.js";
 import { elements as el } from "./dom.js";
 import { decryptMessageFromChannel } from "./chatCrypto.js";
@@ -243,7 +246,7 @@ function scheduleReconnect() {
  * and doesn't overwrite app state (HTTP is more reliable for initial load)
  */
 async function handleInitialSync(data) {
-  const { channels, dmChannels, personalChannel } = data;
+  const { channels, dmChannels, personalChannel, unreadState } = data;
 
   // Save to local database for offline support
   try {
@@ -260,8 +263,13 @@ async function handleInitialSync(data) {
     console.error("[LiveUpdates] Error saving sync data to local DB:", err);
   }
 
-  // Don't update app state - HTTP fetch handles initial channel load
-  // SSE sync:init is only used for local DB caching now
+  // Update unread state from server (useful for reconnects after disconnect)
+  if (unreadState) {
+    setUnreadState(unreadState);
+  }
+
+  // Don't update app state for channels - HTTP fetch handles initial channel load
+  // SSE sync:init is only used for local DB caching and unread state sync
 }
 
 /**
@@ -330,6 +338,23 @@ async function handleNewMessage(data) {
 
   // Add to app state if this channel's messages are loaded
   addMessageToState(String(channelId), message);
+
+  // Track unread state - increment if not viewing channel or not at bottom
+  const shouldIncrementUnread = !isViewingChannel || !wasNearBottom;
+  if (shouldIncrementUnread) {
+    incrementUnread(String(channelId));
+  }
+
+  // Check if current user is mentioned in this message (session-based tracking)
+  // Only count mentions for messages from other users
+  if (state.session && rawMessage.author !== state.session.npub) {
+    const currentNpub = state.session.npub.toLowerCase();
+    // Check both the raw body (encrypted may have mentions in metadata) and decrypted body
+    const bodyToCheck = messageBody.toLowerCase();
+    if (bodyToCheck.includes(`nostr:${currentNpub}`)) {
+      incrementSessionMention(String(channelId));
+    }
+  }
 
   // Return the pre-captured scroll state for the event handler
   return { wasNearBottom };

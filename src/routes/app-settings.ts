@@ -56,16 +56,15 @@ export function handleManifest() {
   const faviconUrl = getFaviconUrl();
 
   // Use custom favicon if set, otherwise use default icons
+  // Android uses 192x192 and 512x512, iOS uses apple-touch-icon link tag
   const icons = faviconUrl
     ? [
-        { src: faviconUrl, sizes: "192x192", type: "image/png" },
-        { src: faviconUrl, sizes: "512x512", type: "image/png" },
-        { src: faviconUrl, sizes: "180x180", type: "image/png", purpose: "apple-touch-icon" },
+        { src: faviconUrl, sizes: "192x192", type: "image/png", purpose: "any maskable" },
+        { src: faviconUrl, sizes: "512x512", type: "image/png", purpose: "any maskable" },
       ]
     : [
-        { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-        { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
-        { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+        { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
       ];
 
   const manifest = {

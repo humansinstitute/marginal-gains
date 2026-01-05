@@ -80,7 +80,7 @@ function renderHead() {
   <meta name="theme-color" content="#6b3a6b" />
   <meta name="application-name" content="${appName}" />
   <link rel="icon" type="image/png" href="${faviconUrl}" />
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" href="${faviconUrl}" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/app.css?v=3" />
 </head>`;

@@ -2,7 +2,7 @@ import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
 import { loadNostrLibs } from "./nostr.js";
 import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent, getConnectionState } from "./liveUpdates.js";
-import { addDmChannel, addMessage, getActiveChannelMessages, removeMessageFromChannel, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, state, updateAllChannels, upsertChannel, setChannelMessages, refreshUI } from "./state.js";
+import { addDmChannel, addMessage, clearUnread, getActiveChannelMessages, getSessionMentionCount, getUnreadCount, incrementSessionMention, incrementUnread, removeMessageFromChannel, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, setUnreadState, state, updateAllChannels, upsertChannel, setChannelMessages, refreshUI } from "./state.js";
 import { init as initMentions, handleMentionInput, handleMentionKeydown, closeMentionPopup } from "./mentions.js";
 import { init as initSlashCommands, handleSlashInput, handleSlashKeydown, closePopup as closeSlashPopup } from "./slashCommands.js";
 import { wirePasteAndDrop } from "./uploads.js";
@@ -674,10 +674,15 @@ export const initChat = async () => {
     // Set up live update event handlers
     setupLiveUpdateHandlers();
 
-    // Hide new message indicator when user scrolls to bottom
+    // Hide new message indicator and mark channel as read when user scrolls to bottom
     el.chatThreadList?.addEventListener("scroll", () => {
       if (isNearBottom(el.chatThreadList)) {
         hideNewMessageIndicator();
+        // Mark channel as read when scrolled to bottom
+        const channelId = state.chat.selectedChannelId;
+        if (channelId && getUnreadCount(channelId) > 0) {
+          markChannelAsRead(channelId);
+        }
       }
     });
 
@@ -747,8 +752,34 @@ async function fetchChannels() {
 
     // Update all channels at once
     updateAllChannels(channels, dmChannels, personalChannel);
+
+    // Set unread state from server
+    if (data.unreadState) {
+      setUnreadState(data.unreadState);
+    }
   } catch (_err) {
     // Ignore fetch errors
+  }
+}
+
+/**
+ * Mark a channel as read - called when user scrolls to bottom
+ */
+async function markChannelAsRead(channelId) {
+  if (!state.session || !channelId) return;
+
+  try {
+    const res = await fetch(`/chat/channels/${channelId}/read`, {
+      method: "POST",
+    });
+    if (res.ok) {
+      // Clear unread state locally
+      clearUnread(channelId);
+      // Re-render channel list to update badges
+      renderChannels();
+    }
+  } catch (_err) {
+    // Ignore errors - non-critical operation
   }
 }
 
@@ -1262,6 +1293,9 @@ function renderChannels() {
     el.chatChannelList.innerHTML = channels
       .map((channel) => {
         const isActive = channel.id === state.chat.selectedChannelId;
+        const unreadCount = getUnreadCount(channel.id);
+        const mentionCount = getSessionMentionCount(channel.id);
+        const hasUnread = unreadCount > 0 && !isActive;
         // Show shield for encrypted, lock for private non-encrypted
         let statusIcon = '';
         if (channel.encrypted) {
@@ -1273,8 +1307,13 @@ function renderChannels() {
         const wingmanIcon = channel.hasWingmanAccess
           ? '<img src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />'
           : '';
-        return `<button class="chat-channel${isActive ? " active" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
-          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}${wingmanIcon}</div>
+        // Show unread badge
+        let unreadBadge = '';
+        if (mentionCount > 0 && !isActive) {
+          unreadBadge = `<span class="unread-badge mention">(${mentionCount > 99 ? '99+' : mentionCount})</span>`;
+        }
+        return `<button class="chat-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
+          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}${wingmanIcon}${unreadBadge}</div>
         </button>`;
       })
       .join("");
@@ -1289,12 +1328,17 @@ function renderChannels() {
       el.dmList.innerHTML = dmChannels
         .map((dm) => {
           const isActive = dm.id === state.chat.selectedChannelId;
+          const unreadCount = getUnreadCount(dm.id);
+          const hasUnread = unreadCount > 0 && !isActive;
           const displayName = getDmDisplayName(dm);
           const avatarUrl = getAuthorAvatarUrl(dm.otherNpub);
-          return `<button class="chat-channel dm-channel${isActive ? " active" : ""}" data-channel-id="${dm.id}">
+          const unreadBadge = hasUnread
+            ? `<span class="unread-badge">(${unreadCount > 99 ? '99+' : unreadCount})</span>`
+            : '';
+          return `<button class="chat-channel dm-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${dm.id}">
             <img class="dm-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
             <div class="dm-info">
-              <div class="chat-channel-name">${escapeHtml(displayName)}</div>
+              <div class="chat-channel-name">${escapeHtml(displayName)}${unreadBadge}</div>
             </div>
           </button>`;
         })

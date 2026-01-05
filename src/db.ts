@@ -60,6 +60,19 @@ export type Message = {
   edited_at: string | null;
 };
 
+export type ChannelReadState = {
+  npub: string;
+  channel_id: number;
+  last_read_at: string;
+  last_read_message_id: number | null;
+};
+
+export type UnreadCount = {
+  channel_id: number;
+  unread_count: number;
+  mention_count: number;
+};
+
 export type User = {
   npub: string;
   pubkey: string;
@@ -392,6 +405,19 @@ db.run(`
     UNIQUE(message_id, reactor, emoji)
   )
 `);
+
+// Channel read state - tracks when user last read each channel
+db.run(`
+  CREATE TABLE IF NOT EXISTS channel_read_state (
+    npub TEXT NOT NULL,
+    channel_id INTEGER NOT NULL,
+    last_read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_read_message_id INTEGER,
+    PRIMARY KEY (npub, channel_id),
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_channel_read_state_npub ON channel_read_state(npub)");
 
 db.run(`
   CREATE TABLE IF NOT EXISTS users (
@@ -841,6 +867,32 @@ const getMessageByIdStmt = db.query<Message>(
 );
 const deleteMessageStmt = db.query("DELETE FROM messages WHERE id = ?");
 
+// Channel read state statements
+const getReadStateStmt = db.query<ChannelReadState>(
+  "SELECT * FROM channel_read_state WHERE npub = ? AND channel_id = ?"
+);
+const upsertReadStateStmt = db.query<ChannelReadState>(
+  `INSERT INTO channel_read_state (npub, channel_id, last_read_at, last_read_message_id)
+   VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+   ON CONFLICT(npub, channel_id) DO UPDATE SET
+     last_read_at = CURRENT_TIMESTAMP,
+     last_read_message_id = excluded.last_read_message_id
+   RETURNING *`
+);
+const getUnreadCountsStmt = db.query<UnreadCount>(
+  `SELECT
+     c.id as channel_id,
+     COALESCE(SUM(CASE WHEN m.id > COALESCE(crs.last_read_message_id, 0) THEN 1 ELSE 0 END), 0) as unread_count,
+     COALESCE(SUM(CASE WHEN m.id > COALESCE(crs.last_read_message_id, 0)
+       AND EXISTS (SELECT 1 FROM message_mentions mm WHERE mm.message_id = m.id AND mm.mentioned_npub = ?)
+       THEN 1 ELSE 0 END), 0) as mention_count
+   FROM channels c
+   LEFT JOIN messages m ON m.channel_id = c.id
+   LEFT JOIN channel_read_state crs ON crs.channel_id = c.id AND crs.npub = ?
+   WHERE c.owner_npub IS NULL OR c.owner_npub = ?
+   GROUP BY c.id`
+);
+
 export function listTodos(owner: string | null, filterTags?: string[]) {
   if (!owner) return [];
   const todos = listByOwnerStmt.all(owner);
@@ -1091,6 +1143,26 @@ export function createEncryptedMessage(
 export function deleteMessage(id: number): boolean {
   const result = deleteMessageStmt.run(id);
   return result.changes > 0;
+}
+
+// Channel read state functions
+export function getChannelReadState(npub: string, channelId: number) {
+  return getReadStateStmt.get(npub, channelId) as ChannelReadState | undefined ?? null;
+}
+
+export function updateChannelReadState(npub: string, channelId: number, lastMessageId: number | null) {
+  return upsertReadStateStmt.get(npub, channelId, lastMessageId) as ChannelReadState | undefined ?? null;
+}
+
+export function getUnreadCounts(npub: string): UnreadCount[] {
+  return getUnreadCountsStmt.all(npub, npub, npub);
+}
+
+export function getLatestMessageId(channelId: number): number | null {
+  const result = db.query<{ max_id: number | null }>(
+    "SELECT MAX(id) as max_id FROM messages WHERE channel_id = ?"
+  ).get(channelId);
+  return result?.max_id ?? null;
 }
 
 // User statements

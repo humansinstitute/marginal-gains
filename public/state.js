@@ -13,6 +13,8 @@ export const state = {
     selectedChannelId: null,
     replyingTo: null,
     messagesByChannel: {},
+    unreadState: {},      // { channelId: { unread: number, mentions: number } } - from server
+    sessionMentions: {},  // { channelId: number } - session only, resets on page load
   },
 };
 
@@ -183,6 +185,45 @@ export const removeMessageFromChannel = (channelId, messageId) => {
     return m.id !== messageId && m.parentId !== messageId;
   });
   refreshUI();
+};
+
+// Unread state management
+export const setUnreadState = (unreadState) => {
+  state.chat.unreadState = unreadState || {};
+  refreshUI();
+};
+
+export const incrementUnread = (channelId) => {
+  const current = state.chat.unreadState[channelId] || { unread: 0, mentions: 0 };
+  state.chat.unreadState[channelId] = {
+    ...current,
+    unread: current.unread + 1,
+  };
+  refreshUI();
+};
+
+export const clearUnread = (channelId) => {
+  if (state.chat.unreadState[channelId]) {
+    state.chat.unreadState[channelId] = { unread: 0, mentions: 0 };
+  }
+  // Also clear session mentions when clearing unread
+  if (state.chat.sessionMentions[channelId]) {
+    delete state.chat.sessionMentions[channelId];
+  }
+  refreshUI();
+};
+
+export const incrementSessionMention = (channelId) => {
+  state.chat.sessionMentions[channelId] = (state.chat.sessionMentions[channelId] || 0) + 1;
+  refreshUI();
+};
+
+export const getUnreadCount = (channelId) => {
+  return state.chat.unreadState[channelId]?.unread || 0;
+};
+
+export const getSessionMentionCount = (channelId) => {
+  return state.chat.sessionMentions[channelId] || 0;
 };
 
 export const onRefresh = (callback) => {
