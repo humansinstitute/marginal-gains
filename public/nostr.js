@@ -3,10 +3,19 @@ import { APP_TAG, LOGIN_KIND } from "./constants.js";
 export const loadNostrLibs = async () => {
   if (!window.__NOSTR_LIBS__) {
     const base = "https://esm.sh/nostr-tools@2.7.2";
+    const [pure, nip19, nip46, nip44, pool] = await Promise.all([
+      import(`${base}/pure?bundle`),
+      import(`${base}/nip19?bundle`),
+      import(`${base}/nip46?bundle`),
+      import(`${base}/nip44?bundle`),
+      import(`${base}/pool?bundle`),
+    ]);
     window.__NOSTR_LIBS__ = {
-      pure: await import(`${base}/pure?bundle`),
-      nip19: await import(`${base}/nip19?bundle`),
-      nip46: await import(`${base}/nip46?bundle`),
+      pure,
+      nip19,
+      nip46,
+      nip44,
+      SimplePool: pool.SimplePool,
     };
   }
   return window.__NOSTR_LIBS__;

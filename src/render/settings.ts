@@ -73,6 +73,8 @@ function renderAvatarMenu(session: Session) {
 
 function renderSettingsContent(userIsAdmin: boolean) {
   return `<div class="settings-content">
+    ${renderAccountSection()}
+
     <section class="settings-section" data-notifications-section>
       <div class="settings-section-header">
         <h2>Notifications</h2>
@@ -85,6 +87,22 @@ function renderSettingsContent(userIsAdmin: boolean) {
     ${userIsAdmin ? renderWingmanSection() : ""}
     ${userIsAdmin ? renderGroupsSection() : ""}
   </div>`;
+}
+
+function renderAccountSection() {
+  return `<section class="settings-section" data-account-section>
+      <div class="settings-section-header">
+        <h2>Account</h2>
+      </div>
+      <div class="account-settings-content" data-account-content>
+        <p class="settings-empty">Loading...</p>
+      </div>
+      <div class="account-bunker-settings" data-bunker-settings hidden>
+        <p class="bunker-info">You are signed in with a remote signer (Nostr Connect).</p>
+        <button type="button" class="ghost danger" data-clear-bunker>Clear Bunker Connection</button>
+        <p class="bunker-hint">This will log you out and remove the saved connection.</p>
+      </div>
+    </section>`;
 }
 
 function renderAppSettingsSection() {

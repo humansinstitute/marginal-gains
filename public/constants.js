@@ -6,3 +6,9 @@ export const EPHEMERAL_SECRET_KEY = "nostr_ephemeral_secret";
 export const ENCRYPTED_SECRET_KEY = "nostr_encrypted_secret";
 export const PROFILE_CACHE_KEY = "nostr_profile_cache";
 export const APP_TAG = "marginal-gains";
+export const BUNKER_CONNECTION_KEY = "nostr_bunker_connection";
+
+// Get relays from server config or use defaults
+export function getRelays() {
+  return window.__NOSTR_RELAYS__ || DEFAULT_RELAYS;
+}

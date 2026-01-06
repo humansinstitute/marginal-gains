@@ -13,6 +13,17 @@ export const APP_TAG = "marginal-gains";
 export const PUBLIC_DIR = join(import.meta.dir, "../public");
 export const PUSH_CONTACT_EMAIL = Bun.env.PUSH_CONTACT_EMAIL || "admin@example.com";
 
+// Nostr relays - comma separated list in env, or defaults
+export const DEFAULT_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://nos.lol",
+  "wss://relay.devvul.com",
+  "wss://purplepag.es",
+];
+export const NOSTR_RELAYS: string[] = Bun.env.NOSTR_RELAYS
+  ? Bun.env.NOSTR_RELAYS.split(",").map((s) => s.trim()).filter(Boolean)
+  : DEFAULT_RELAYS;
+
 // Admin npubs - comma separated list in env (supports both ADMIN_NPUBS and ADMIN_NPUB)
 export const ADMIN_NPUBS: string[] = (Bun.env.ADMIN_NPUBS ?? Bun.env.ADMIN_NPUB ?? "")
   .split(",")
