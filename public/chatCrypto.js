@@ -504,3 +504,116 @@ export async function processMessagesForDisplay(messages, channelId) {
 
   return processed;
 }
+
+/**
+ * Setup encryption for a DM channel
+ * Generates a channel key and distributes to both participants
+ * @param {object} dmChannel - DM channel object with id and participants
+ * @returns {Promise<boolean>} True if setup succeeded
+ */
+export async function setupDmEncryption(dmChannel) {
+  const channelId = dmChannel.id;
+
+  // Check if already encrypted
+  if (dmChannel.encrypted) {
+    console.log(`[ChatCrypto] DM ${channelId} already encrypted`);
+    return true;
+  }
+
+  // Get both participants
+  const myPubkey = state.session?.pubkey;
+  const otherNpub = dmChannel.otherNpub;
+
+  if (!myPubkey || !otherNpub) {
+    console.error("[ChatCrypto] Cannot setup DM encryption: missing participant info");
+    return false;
+  }
+
+  // Convert otherNpub to hex pubkey if needed
+  let otherPubkey = otherNpub;
+  if (otherNpub.startsWith("npub1")) {
+    // Need to decode npub to hex - use nostr-tools if available
+    try {
+      const { nip19 } = await import("https://esm.sh/nostr-tools@2.10.4");
+      const decoded = nip19.decode(otherNpub);
+      otherPubkey = decoded.data;
+    } catch (err) {
+      console.error("[ChatCrypto] Failed to decode npub:", err);
+      return false;
+    }
+  }
+
+  try {
+    console.log(`[ChatCrypto] Setting up encryption for DM ${channelId}`);
+
+    // Generate channel key
+    const channelKey = await generateChannelKey();
+
+    // Wrap key for both participants
+    const myWrappedKey = await wrapKeyForUser(channelKey, myPubkey);
+    const otherWrappedKey = await wrapKeyForUser(channelKey, otherPubkey);
+
+    // Store keys via batch endpoint
+    const res = await fetch(`/chat/channels/${channelId}/keys/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        keys: [
+          { userPubkey: myPubkey, encryptedKey: myWrappedKey },
+          { userPubkey: otherPubkey, encryptedKey: otherWrappedKey },
+        ],
+        setEncrypted: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("[ChatCrypto] Failed to store DM keys:", err);
+      return false;
+    }
+
+    // Cache the key locally
+    cacheChannelKey(channelId, channelKey);
+
+    // Update local state
+    dmChannel.encrypted = true;
+
+    console.log(`[ChatCrypto] DM ${channelId} encryption setup complete`);
+    return true;
+  } catch (err) {
+    console.error("[ChatCrypto] Error setting up DM encryption:", err);
+    return false;
+  }
+}
+
+/**
+ * Setup encryption for all DMs that don't have it yet
+ * Called on chat load when community encryption is active
+ * @returns {Promise<void>}
+ */
+export async function setupAllDmEncryption() {
+  const dmChannels = state.chat?.dmChannels || [];
+
+  if (dmChannels.length === 0) {
+    return;
+  }
+
+  console.log(`[ChatCrypto] Checking ${dmChannels.length} DMs for encryption setup`);
+
+  // Filter to DMs without encryption
+  const unencryptedDms = dmChannels.filter(dm => !dm.encrypted);
+
+  if (unencryptedDms.length === 0) {
+    console.log("[ChatCrypto] All DMs already encrypted");
+    return;
+  }
+
+  console.log(`[ChatCrypto] Setting up encryption for ${unencryptedDms.length} DMs`);
+
+  // Setup encryption for each (sequentially to avoid overwhelming the server)
+  for (const dm of unencryptedDms) {
+    await setupDmEncryption(dm);
+  }
+
+  console.log("[ChatCrypto] DM encryption setup complete");
+}
