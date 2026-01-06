@@ -305,6 +305,57 @@ ALTER TABLE channels ADD COLUMN encryption_enabled_at TEXT DEFAULT NULL;
 - **Not allowed**: Message content preview
 - User clicks notification to open app and decrypt locally
 
+## Metadata for Encrypted Messages
+
+Certain features require the server to understand aspects of a message without decrypting the content. The client extracts this metadata **before encryption** and sends it alongside the ciphertext as unencrypted JSON fields.
+
+### Slash Commands
+
+Slash commands (e.g., `/wingman`, `/image-wingman`) are parsed client-side before encryption:
+
+```javascript
+// Client parses commands from plaintext
+const commands = parseSlashCommands(messageText); // ["wingman"]
+
+// Sent to server alongside encrypted content
+POST /chat/messages
+{
+  "content": "<base64 ciphertext>",
+  "encrypted": true,
+  "commands": ["wingman"]  // Unencrypted metadata
+}
+```
+
+The server uses this metadata to trigger slash command handlers without decrypting the message. The command handler (e.g., Wingman) then decrypts the message using its own key if it has channel access.
+
+### @Mentions
+
+Mentions are parsed client-side to enable notifications for encrypted messages:
+
+```javascript
+// Client parses mentions from plaintext (nostr:npub1... format)
+const mentions = parseMentions(messageText); // ["npub1abc..."]
+
+// Sent to server alongside encrypted content
+POST /chat/messages
+{
+  "content": "<base64 ciphertext>",
+  "encrypted": true,
+  "mentions": ["npub1abc..."]  // Unencrypted metadata
+}
+```
+
+The server sends "You were mentioned" push notifications to the listed npubs without exposing the encrypted message content.
+
+### Privacy Implications
+
+| Metadata | What Server Learns | Message Content Exposed? |
+|----------|-------------------|-------------------------|
+| `commands` | Which slash commands were used | No |
+| `mentions` | Who was @mentioned | No |
+
+This design allows server-side features (notifications, bot invocation) to work with encrypted messages while keeping message content confidential.
+
 ## DMs
 
 DMs are treated as 2-person private channels using the same model:
