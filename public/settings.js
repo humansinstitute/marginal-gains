@@ -1,4 +1,5 @@
 import { initAppSettings } from "./appSettings.js";
+import { clearBunkerConnection, hasBunkerConnection } from "./auth.js";
 import { distributeKeysToAllPendingMembers } from "./chatCrypto.js";
 import {
   getCommunityStatus,
@@ -26,6 +27,9 @@ let groupMembers = [];
 export async function initSettings() {
   if (!window.__SETTINGS_PAGE__) return;
 
+  // Account section is available to all users
+  initAccountSection();
+
   // Notifications are available to all users
   await initNotifications();
 
@@ -45,6 +49,46 @@ export async function initSettings() {
     renderGroups();
     wireEventListeners();
   }
+}
+
+// Initialize account section
+function initAccountSection() {
+  const accountContent = document.querySelector("[data-account-content]");
+  const bunkerSettings = document.querySelector("[data-bunker-settings]");
+  const clearBunkerBtn = document.querySelector("[data-clear-bunker]");
+
+  if (!accountContent) return;
+
+  // Show login method info
+  const session = state.session || window.__NOSTR_SESSION__;
+  if (session) {
+    const methodLabels = {
+      ephemeral: "Ephemeral Key",
+      extension: "Browser Extension",
+      bunker: "Remote Signer (Nostr Connect)",
+      secret: "Secret Key (nsec)",
+    };
+    const methodLabel = methodLabels[session.method] || session.method;
+    accountContent.innerHTML = `<p class="account-method">Login method: <strong>${escapeHtml(methodLabel)}</strong></p>`;
+
+    // Show bunker settings if using bunker
+    if (session.method === "bunker" && hasBunkerConnection()) {
+      show(bunkerSettings);
+    }
+  } else {
+    accountContent.innerHTML = `<p class="settings-empty">Not logged in</p>`;
+  }
+
+  // Wire up clear bunker button
+  clearBunkerBtn?.addEventListener("click", async () => {
+    if (!confirm("Clear bunker connection and log out?")) return;
+
+    clearBunkerConnection();
+
+    // Log out
+    await fetch("/auth/logout", { method: "POST" });
+    window.location.href = "/";
+  });
 }
 
 // Fetch all groups

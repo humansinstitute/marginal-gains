@@ -1,9 +1,10 @@
 import {
   AUTO_LOGIN_METHOD_KEY,
   AUTO_LOGIN_PUBKEY_KEY,
-  DEFAULT_RELAYS,
+  BUNKER_CONNECTION_KEY,
   EPHEMERAL_SECRET_KEY,
   ENCRYPTED_SECRET_KEY,
+  getRelays,
 } from "./constants.js";
 import { closeAvatarMenu, fetchProfile } from "./avatar.js";
 import { elements as el, hide, show } from "./dom.js";
@@ -28,6 +29,7 @@ export const initAuth = () => {
   wireForms();
   wireMenuButtons();
   wireQrModal();
+  wireNostrConnectModal();
   wireSecretToggle();
   initPinModal();
 
@@ -271,6 +273,303 @@ const handleQrEscape = (event) => {
   if (event.key === "Escape") closeQrModal();
 };
 
+// Nostr Connect state
+let nostrConnectAbort = null;
+let nostrConnectTimer = null;
+
+const wireNostrConnectModal = () => {
+  const btn = document.querySelector("[data-nostr-connect]");
+  const modal = document.querySelector("[data-nostr-connect-modal]");
+  const closeBtn = document.querySelector("[data-nostr-connect-close]");
+  const cancelBtn = document.querySelector("[data-nostr-connect-cancel]");
+  const copyBtn = document.querySelector("[data-nostr-connect-copy]");
+
+  btn?.addEventListener("click", () => {
+    void openNostrConnectModal();
+  });
+
+  closeBtn?.addEventListener("click", closeNostrConnectModal);
+  cancelBtn?.addEventListener("click", closeNostrConnectModal);
+
+  modal?.addEventListener("click", (event) => {
+    if (event.target === modal) closeNostrConnectModal();
+  });
+
+  copyBtn?.addEventListener("click", async () => {
+    const uriInput = document.querySelector("[data-nostr-connect-uri]");
+    if (!uriInput?.value) return;
+    try {
+      await navigator.clipboard.writeText(uriInput.value);
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => {
+        copyBtn.textContent = "Copy";
+      }, 2000);
+    } catch (_err) {
+      prompt("Copy this URI:", uriInput.value);
+    }
+  });
+};
+
+const openNostrConnectModal = async () => {
+  const modal = document.querySelector("[data-nostr-connect-modal]");
+  const qrContainer = document.querySelector("[data-nostr-connect-qr]");
+  const uriInput = document.querySelector("[data-nostr-connect-uri]");
+  const statusEl = document.querySelector("[data-nostr-connect-status]");
+  const timerEl = document.querySelector("[data-nostr-connect-timer]");
+
+  if (!modal || !qrContainer || !uriInput) return;
+
+  // Show modal
+  show(modal);
+  document.addEventListener("keydown", handleNostrConnectEscape);
+
+  // Clear previous state
+  qrContainer.innerHTML = "<p>Generating...</p>";
+  uriInput.value = "";
+  if (statusEl) statusEl.textContent = "Generating connection...";
+  if (timerEl) timerEl.textContent = "";
+
+  try {
+    const { pure, nip19 } = await loadNostrLibs();
+    const QRCode = await loadQRCodeLib();
+
+    // Generate ephemeral client keypair
+    const clientSecretKey = pure.generateSecretKey();
+    const clientPubkey = pure.getPublicKey(clientSecretKey);
+
+    // Generate random secret for verification
+    const secretBytes = new Uint8Array(32);
+    crypto.getRandomValues(secretBytes);
+    const secret = bytesToHex(secretBytes);
+
+    // Get app metadata
+    const appName = window.__APP_NAME__ || "Marginal Gains";
+    const appUrl = window.location.origin;
+    const appImage = window.__APP_FAVICON__
+      ? new URL(window.__APP_FAVICON__, appUrl).href
+      : `${appUrl}/favicon.png`;
+
+    // Build nostrconnect:// URI
+    const relays = getRelays();
+    const params = new URLSearchParams();
+    relays.forEach((r) => params.append("relay", r));
+    params.append("secret", secret);
+    params.append("name", appName);
+    params.append("url", appUrl);
+    params.append("image", appImage);
+
+    const nostrConnectUri = `nostrconnect://${clientPubkey}?${params.toString()}`;
+
+    // Display URI
+    uriInput.value = nostrConnectUri;
+
+    // Generate QR code
+    qrContainer.innerHTML = "";
+    const canvas = document.createElement("canvas");
+    await QRCode.toCanvas(canvas, nostrConnectUri, { width: 256, margin: 2 });
+    qrContainer.appendChild(canvas);
+
+    if (statusEl) statusEl.textContent = "Waiting for connection...";
+
+    // Start countdown timer (60 seconds)
+    let timeLeft = 60;
+    if (timerEl) timerEl.textContent = `${timeLeft}s remaining`;
+    nostrConnectTimer = setInterval(() => {
+      timeLeft--;
+      if (timerEl) timerEl.textContent = `${timeLeft}s remaining`;
+      if (timeLeft <= 0) {
+        closeNostrConnectModal();
+        showError("Connection timed out. Please try again.");
+      }
+    }, 1000);
+
+    // Set up abort controller
+    nostrConnectAbort = new AbortController();
+
+    // Wait for connection via NIP-46
+    const result = await waitForNostrConnect(
+      clientSecretKey,
+      clientPubkey,
+      secret,
+      relays,
+      nostrConnectAbort.signal
+    );
+
+    if (result) {
+      // Store bunker connection for persistence
+      const connectionData = {
+        clientSecretKey: bytesToHex(clientSecretKey),
+        remoteSignerPubkey: result.remoteSignerPubkey,
+        relays,
+      };
+      localStorage.setItem(BUNKER_CONNECTION_KEY, JSON.stringify(connectionData));
+      localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "bunker");
+
+      closeNostrConnectModal();
+
+      // Complete login with the signed event
+      await completeLogin("bunker", result.signedEvent);
+    }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      // User cancelled
+      return;
+    }
+    console.error("Nostr Connect failed:", err);
+    closeNostrConnectModal();
+    showError(err?.message || "Failed to establish connection.");
+  }
+};
+
+const waitForNostrConnect = async (clientSecretKey, clientPubkey, secret, relays, signal) => {
+  const { pure, nip19, nip44, SimplePool } = await loadNostrLibs();
+
+  const pool = new SimplePool();
+
+  return new Promise((resolve, reject) => {
+    // Handle abort
+    signal.addEventListener("abort", () => {
+      pool.close(relays);
+      reject(new DOMException("Aborted", "AbortError"));
+    });
+
+    // Subscribe to kind 24133 events addressed to our client pubkey
+    const sub = pool.subscribeMany(
+      relays,
+      [{ kinds: [24133], "#p": [clientPubkey], since: Math.floor(Date.now() / 1000) - 10 }],
+      {
+        onevent: async (event) => {
+          try {
+            // Decrypt the content using NIP-44
+            const conversationKey = nip44.v2.utils.getConversationKey(clientSecretKey, event.pubkey);
+            const decrypted = nip44.v2.decrypt(event.content, conversationKey);
+            const message = JSON.parse(decrypted);
+
+            console.log("[NostrConnect] Received message:", message);
+
+            // Handle "connect" response with our secret
+            if (message.result === secret || message.result === "ack") {
+              const remoteSignerPubkey = event.pubkey;
+
+              // Now request get_public_key to get the user's actual pubkey
+              const userPubkey = await requestFromSigner(
+                pool,
+                relays,
+                clientSecretKey,
+                clientPubkey,
+                remoteSignerPubkey,
+                { method: "get_public_key", params: [] }
+              );
+
+              // Request sign_event for login
+              const unsignedEvent = buildUnsignedEvent("bunker");
+              const signResult = await requestFromSigner(
+                pool,
+                relays,
+                clientSecretKey,
+                clientPubkey,
+                remoteSignerPubkey,
+                { method: "sign_event", params: [JSON.stringify(unsignedEvent)] }
+              );
+
+              const signedEvent = JSON.parse(signResult);
+              sub.close();
+              pool.close(relays);
+
+              resolve({ remoteSignerPubkey, signedEvent });
+            }
+          } catch (err) {
+            console.error("[NostrConnect] Error processing event:", err);
+          }
+        },
+        oneose: () => {
+          console.log("[NostrConnect] End of stored events");
+        },
+      }
+    );
+  });
+};
+
+const requestFromSigner = async (pool, relays, clientSecretKey, clientPubkey, remoteSignerPubkey, request) => {
+  const { pure, nip44 } = await loadNostrLibs();
+
+  return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const fullRequest = { id: requestId, ...request };
+
+    // Encrypt and send request
+    const conversationKey = nip44.v2.utils.getConversationKey(clientSecretKey, remoteSignerPubkey);
+    const encrypted = nip44.v2.encrypt(JSON.stringify(fullRequest), conversationKey);
+
+    const requestEvent = pure.finalizeEvent(
+      {
+        kind: 24133,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [["p", remoteSignerPubkey]],
+        content: encrypted,
+      },
+      clientSecretKey
+    );
+
+    // Publish request
+    pool.publish(relays, requestEvent);
+
+    // Subscribe for response
+    const sub = pool.subscribeMany(
+      relays,
+      [{ kinds: [24133], "#p": [clientPubkey], since: Math.floor(Date.now() / 1000) - 10 }],
+      {
+        onevent: async (event) => {
+          try {
+            const respConversationKey = nip44.v2.utils.getConversationKey(clientSecretKey, event.pubkey);
+            const decrypted = nip44.v2.decrypt(event.content, respConversationKey);
+            const message = JSON.parse(decrypted);
+
+            if (message.id === requestId) {
+              sub.close();
+              if (message.error) {
+                reject(new Error(message.error));
+              } else {
+                resolve(message.result);
+              }
+            }
+          } catch (err) {
+            console.error("[NostrConnect] Error parsing response:", err);
+          }
+        },
+      }
+    );
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      sub.close();
+      reject(new Error("Request timed out"));
+    }, 30000);
+  });
+};
+
+const closeNostrConnectModal = () => {
+  const modal = document.querySelector("[data-nostr-connect-modal]");
+  hide(modal);
+  document.removeEventListener("keydown", handleNostrConnectEscape);
+
+  // Clear timer
+  if (nostrConnectTimer) {
+    clearInterval(nostrConnectTimer);
+    nostrConnectTimer = null;
+  }
+
+  // Abort any pending connection
+  if (nostrConnectAbort) {
+    nostrConnectAbort.abort();
+    nostrConnectAbort = null;
+  }
+};
+
+const handleNostrConnectEscape = (event) => {
+  if (event.key === "Escape") closeNostrConnectModal();
+};
+
 const wireSecretToggle = () => {
   document.querySelectorAll("[data-toggle-secret]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -378,6 +677,60 @@ const maybeAutoLogin = async () => {
     return;
   }
 
+  // Handle bunker auto-login (from Nostr Connect)
+  if (method === "bunker") {
+    const connectionJson = localStorage.getItem(BUNKER_CONNECTION_KEY);
+    if (!connectionJson) {
+      autoLoginAttempted = false;
+      return;
+    }
+
+    try {
+      const connection = JSON.parse(connectionJson);
+      const { clientSecretKey, remoteSignerPubkey, relays } = connection;
+
+      if (!clientSecretKey || !remoteSignerPubkey || !relays?.length) {
+        console.warn("[Auth] Invalid bunker connection data");
+        clearAutoLogin();
+        autoLoginAttempted = false;
+        return;
+      }
+
+      console.log("[Auth] Attempting bunker auto-login...");
+
+      const { pure, nip44, SimplePool } = await loadNostrLibs();
+      const clientSecret = hexToBytes(clientSecretKey);
+      const clientPubkey = pure.getPublicKey(clientSecret);
+      const pool = new SimplePool();
+
+      try {
+        // Request sign_event for login
+        const unsignedEvent = buildUnsignedEvent("bunker");
+        const signResult = await requestFromSigner(
+          pool,
+          relays,
+          clientSecret,
+          clientPubkey,
+          remoteSignerPubkey,
+          { method: "sign_event", params: [JSON.stringify(unsignedEvent)] }
+        );
+
+        const signedEvent = JSON.parse(signResult);
+        pool.close(relays);
+
+        await completeLogin("bunker", signedEvent);
+      } catch (err) {
+        pool.close(relays);
+        throw err;
+      }
+    } catch (err) {
+      console.error("Bunker auto login failed", err);
+      // Don't clear auto-login on failure - user may just need to approve in signer
+      autoLoginAttempted = false;
+    }
+    return;
+  }
+
   autoLoginAttempted = false;
 };
 
@@ -453,6 +806,9 @@ const completeLogin = async (method, event) => {
   } else if (method === "secret") {
     // Keep encrypted secret - it was stored during login
     localStorage.setItem(AUTO_LOGIN_PUBKEY_KEY, session.pubkey);
+  } else if (method === "bunker") {
+    // Bunker connection was already stored - just save the pubkey
+    localStorage.setItem(AUTO_LOGIN_PUBKEY_KEY, session.pubkey);
   } else {
     clearAutoLogin();
   }
@@ -517,4 +873,19 @@ const clearAutoLogin = () => {
   localStorage.removeItem(AUTO_LOGIN_METHOD_KEY);
   localStorage.removeItem(AUTO_LOGIN_PUBKEY_KEY);
   localStorage.removeItem(ENCRYPTED_SECRET_KEY);
+  localStorage.removeItem(BUNKER_CONNECTION_KEY);
+};
+
+// Export for settings page
+export const clearBunkerConnection = () => {
+  localStorage.removeItem(BUNKER_CONNECTION_KEY);
+  const method = localStorage.getItem(AUTO_LOGIN_METHOD_KEY);
+  if (method === "bunker") {
+    localStorage.removeItem(AUTO_LOGIN_METHOD_KEY);
+    localStorage.removeItem(AUTO_LOGIN_PUBKEY_KEY);
+  }
+};
+
+export const hasBunkerConnection = () => {
+  return !!localStorage.getItem(BUNKER_CONNECTION_KEY);
 };

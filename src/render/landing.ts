@@ -1,3 +1,4 @@
+import { NOSTR_RELAYS } from "../config";
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
 import { renderPinModal } from "./components";
@@ -12,6 +13,7 @@ ${renderHead()}
     ${renderWelcome()}
     ${renderAuth()}
     ${renderQrModal()}
+    ${renderNostrConnectModal()}
     ${renderPinModal()}
   </main>
   ${renderSessionSeed()}
@@ -66,6 +68,7 @@ function renderAuth() {
     <details class="auth-advanced">
       <summary>Advanced Options (nsec, bunker://...)</summary>
       <p>Connect to a remote bunker or sign in with your secret key.</p>
+      <button class="auth-option auth-nostr-connect" type="button" data-nostr-connect>Nostr Connect</button>
       <form data-bunker-form>
         <input name="bunker" placeholder="nostrconnect://… or name@example.com" autocomplete="off" />
         <button class="bunker-submit" type="submit">Connect bunker</button>
@@ -93,8 +96,31 @@ function renderQrModal() {
   </div>`;
 }
 
+function renderNostrConnectModal() {
+  return `<div class="nostr-connect-overlay" data-nostr-connect-modal hidden>
+    <div class="nostr-connect-modal">
+      <button class="nostr-connect-close" type="button" data-nostr-connect-close aria-label="Close">&times;</button>
+      <h2>Nostr Connect</h2>
+      <p class="nostr-connect-description">Scan with your mobile signer (Amber, Nostrsigner) or copy the URI</p>
+      <div class="nostr-connect-qr" data-nostr-connect-qr></div>
+      <div class="nostr-connect-uri-wrapper">
+        <input type="text" class="nostr-connect-uri" data-nostr-connect-uri readonly />
+        <button type="button" class="nostr-connect-copy" data-nostr-connect-copy>Copy</button>
+      </div>
+      <p class="nostr-connect-status" data-nostr-connect-status>Waiting for connection...</p>
+      <p class="nostr-connect-timer" data-nostr-connect-timer></p>
+      <button type="button" class="nostr-connect-cancel" data-nostr-connect-cancel>Cancel</button>
+    </div>
+  </div>`;
+}
+
 function renderSessionSeed() {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
   return `<script>
     window.__NOSTR_SESSION__ = null;
+    window.__NOSTR_RELAYS__ = ${JSON.stringify(NOSTR_RELAYS)};
+    window.__APP_NAME__ = ${JSON.stringify(appName)};
+    window.__APP_FAVICON__ = ${JSON.stringify(faviconUrl)};
   </script>`;
 }
