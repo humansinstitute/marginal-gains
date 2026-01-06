@@ -882,8 +882,9 @@ const upsertReadStateStmt = db.query<ChannelReadState>(
 const getUnreadCountsStmt = db.query<UnreadCount>(
   `SELECT
      c.id as channel_id,
-     COALESCE(SUM(CASE WHEN m.id > COALESCE(crs.last_read_message_id, 0) THEN 1 ELSE 0 END), 0) as unread_count,
+     COALESCE(SUM(CASE WHEN m.id > COALESCE(crs.last_read_message_id, 0) AND m.author != ? THEN 1 ELSE 0 END), 0) as unread_count,
      COALESCE(SUM(CASE WHEN m.id > COALESCE(crs.last_read_message_id, 0)
+       AND m.author != ?
        AND EXISTS (SELECT 1 FROM message_mentions mm WHERE mm.message_id = m.id AND mm.mentioned_npub = ?)
        THEN 1 ELSE 0 END), 0) as mention_count
    FROM channels c
@@ -1155,7 +1156,8 @@ export function updateChannelReadState(npub: string, channelId: number, lastMess
 }
 
 export function getUnreadCounts(npub: string): UnreadCount[] {
-  return getUnreadCountsStmt.all(npub, npub, npub);
+  // Parameters: author != npub (unread), author != npub (mention), mentioned_npub, crs.npub, owner_npub
+  return getUnreadCountsStmt.all(npub, npub, npub, npub, npub);
 }
 
 export function getLatestMessageId(channelId: number): number | null {

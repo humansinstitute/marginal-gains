@@ -294,6 +294,7 @@ a {
 }
 .session-controls {
   position: relative;
+  z-index: 1000;
   min-height: 48px;
   min-width: 48px;
   display: flex;
@@ -353,7 +354,7 @@ a {
   padding: 0.25rem;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
   min-width: 140px;
-  z-index: 20;
+  z-index: 1001;
 }
 .avatar-menu button {
   width: 100%;
@@ -1365,6 +1366,44 @@ details summary {
   border-top: 1px solid var(--chat-border);
   padding-top: 1rem;
 }
+.chat-composer-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.chat-composer-row .chat-input,
+.chat-composer-row textarea {
+  flex: 1;
+  min-height: 60px;
+}
+.chat-composer-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  width: 60px;
+}
+.chat-attach-btn,
+.chat-send-btn {
+  width: 100%;
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: center;
+}
+.chat-attach-btn {
+  background: transparent;
+  border: 1px solid var(--chat-border);
+  color: var(--chat-text-subtle);
+  transition: background 150ms ease, border-color 150ms ease;
+  font-size: 1.1rem;
+}
+.chat-attach-btn:hover {
+  background: var(--chat-hover);
+  border-color: var(--chat-accent);
+  color: var(--chat-text);
+}
 .chat-channel-chip {
   background: var(--chat-bg);
   padding: 0.4rem 0.75rem;
@@ -2130,8 +2169,13 @@ body.chat-page {
   background: var(--surface);
   position: relative; /* For mention/slash popups */
 }
+.chat-thread-panel-composer .chat-composer-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
 .chat-thread-panel-composer textarea {
-  width: 100%;
+  flex: 1;
   padding: 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2143,6 +2187,9 @@ body.chat-page {
 .chat-thread-panel-composer textarea:focus {
   outline: none;
   border-color: var(--text);
+}
+.chat-thread-panel-composer .chat-composer-buttons {
+  width: 55px;
 }
 /* Thread header actions (expand/collapse/close buttons) */
 .chat-thread-header-actions {
