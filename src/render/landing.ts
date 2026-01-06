@@ -25,7 +25,7 @@ function renderHead() {
   const faviconUrl = getFaviconUrl() || "/favicon.png";
   return `<head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <title>${appName}</title>
   <meta name="theme-color" content="#6b3a6b" />
   <meta name="application-name" content="${appName}" />

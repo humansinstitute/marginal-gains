@@ -74,6 +74,8 @@ body.tasks-page {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
+  position: relative;
+  z-index: 1000;
 }
 .tasks-content {
   flex: 1;
@@ -1971,6 +1973,8 @@ body.chat-page {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
+  position: relative;
+  z-index: 1000;
 }
 .chat-brand {
   display: flex;

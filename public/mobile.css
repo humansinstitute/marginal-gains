@@ -56,7 +56,35 @@
   .chat-page-header {
     padding: 0.75rem 1rem;
     max-width: 100vw;
-    overflow-x: hidden;
+    overflow: visible !important; /* Allow menu to overflow */
+    -webkit-transform: none !important; /* Prevent transform from creating containing block */
+    transform: none !important;
+  }
+  .chat-page-header .header-right {
+    overflow: visible !important;
+  }
+  /* Fix avatar menu on mobile - use fixed positioning to escape overflow clipping */
+  .session-controls {
+    position: static !important; /* Remove containing block on mobile */
+    overflow: visible !important;
+  }
+  .avatar-menu {
+    position: fixed !important;
+    top: 60px !important;
+    right: 1rem !important;
+    left: auto !important;
+    bottom: auto !important;
+    z-index: 9999 !important;
+    /* iOS Safari fixes */
+    max-height: calc(100vh - 80px) !important;
+    max-height: calc(100dvh - 80px) !important; /* Dynamic viewport height for iOS */
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    -webkit-transform: translate3d(0, 0, 0); /* Force GPU layer on iOS */
+    transform: translate3d(0, 0, 0);
+    /* Ensure menu is fully visible */
+    width: auto !important;
+    min-width: 160px !important;
   }
   .chat-page-header .app-title {
     font-size: 1.2rem;

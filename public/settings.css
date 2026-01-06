@@ -26,7 +26,7 @@
   background: var(--surface);
   flex-shrink: 0;
   position: relative;
-  z-index: 50;
+  z-index: 1000;
 }
 .settings-header .header-left {
   display: flex;
