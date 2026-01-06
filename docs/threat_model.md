@@ -23,6 +23,8 @@ Marginal Gains uses end-to-end encryption (E2EE) for message content. The server
 | Message plaintext | **No** | Never stored or transmitted in clear |
 | Message timestamps | Yes | When messages were sent |
 | Message author (npub) | Yes | Who sent the message |
+| Slash commands used | Yes | Extracted client-side before encryption (e.g., `["wingman"]`) |
+| @Mentions | Yes | Extracted client-side before encryption (npubs only) |
 | Channel membership | Yes | Who is in which channels/groups |
 | Channel names & metadata | Yes | Channel titles, descriptions |
 | User profiles | Yes | Display names, avatars |
@@ -100,6 +102,45 @@ When adding Wingman to a private group, users see a confirmation dialog:
 > "Please be aware adding Wingman to your group has privacy implications and conversation threads may get leaked to 3rd party AI or server logs.
 >
 > Continue?"
+
+### Slash Commands in Encrypted Channels
+
+For `/wingman` and other slash commands to work in encrypted channels, the client extracts command metadata **before encryption** and sends it as unencrypted JSON alongside the ciphertext:
+
+```
+Client: "/wingman help me with X"
+         ↓
+Parse commands: ["wingman"]
+         ↓
+Encrypt message content
+         ↓
+POST { content: <ciphertext>, encrypted: true, commands: ["wingman"] }
+         ↓
+Server: Sees "wingman" command in metadata, triggers handler
+         ↓
+Wingman: Uses its own key to decrypt and respond
+```
+
+This allows the server to route commands without reading the encrypted content.
+
+### @Mentions and Notifications
+
+Similarly, @mentions are extracted client-side before encryption to enable push notifications:
+
+```
+Client: "Hey nostr:npub1abc... check this out"
+         ↓
+Parse mentions: ["npub1abc..."]
+         ↓
+Encrypt message content
+         ↓
+POST { content: <ciphertext>, encrypted: true, mentions: ["npub1abc..."] }
+         ↓
+Server: Sends "Alice mentioned you" notification to npub1abc...
+        (notification body: "in an encrypted message" - no content exposed)
+```
+
+The mentioned user receives a notification without the server ever seeing the decrypted message.
 
 ### What Wingman Sends to AI Providers
 
