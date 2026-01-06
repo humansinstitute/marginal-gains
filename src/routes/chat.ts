@@ -22,6 +22,7 @@ import {
   listDmChannels,
   listUsers,
   listVisibleChannels,
+  setChannelEncrypted,
   storeUserChannelKey,
   updateChannelReadState,
   upsertUser,
@@ -642,7 +643,7 @@ export async function handleStoreChannelKeysBatch(req: Request, session: Session
   }
 
   const body = await req.json();
-  const { keys, keyVersion } = body;
+  const { keys, keyVersion, setEncrypted } = body;
 
   if (!Array.isArray(keys) || keys.length === 0) {
     return jsonResponse({ error: "keys array is required" }, 400);
@@ -662,6 +663,11 @@ export async function handleStoreChannelKeysBatch(req: Request, session: Session
 
     const stored = storeUserChannelKey(userPubkey, channelId, encryptedKey, version);
     results.push({ userPubkey, success: !!stored });
+  }
+
+  // Optionally mark channel as encrypted
+  if (setEncrypted && !channel.encrypted) {
+    setChannelEncrypted(channelId);
   }
 
   return jsonResponse({ results, keyVersion: version }, 201);

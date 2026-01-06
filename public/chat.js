@@ -26,6 +26,7 @@ import {
   isChannelEncrypted,
   channelNeedsEncryption,
   usesCommunityEncryption,
+  setupAllDmEncryption,
 } from "./chatCrypto.js";
 import { checkEncryptionSupport } from "./crypto.js";
 import { fetchCommunityKey, getCommunityStatus } from "./communityCrypto.js";
@@ -756,6 +757,14 @@ async function fetchChannels() {
     // Set unread state from server
     if (data.unreadState) {
       setUnreadState(data.unreadState);
+    }
+
+    // Auto-setup encryption for DMs that don't have it yet
+    // Only do this if community encryption is active (user is onboarded)
+    if (state.session?.onboarded) {
+      setupAllDmEncryption().catch(err => {
+        console.warn("[Chat] Failed to setup DM encryption:", err);
+      });
     }
   } catch (_err) {
     // Ignore fetch errors
