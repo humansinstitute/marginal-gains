@@ -81,6 +81,28 @@ export function insertTextAtCursorIn(inputEl, text) {
   inputEl.focus();
 }
 
+// Wire attach button to file input
+export function wireAttachButton(attachBtn, fileInput, inputEl, sendBtn, placeholder, sessionCheck) {
+  if (!attachBtn || !fileInput || !inputEl) return;
+
+  // Click attach button to trigger file input
+  attachBtn.addEventListener("click", () => {
+    if (sessionCheck?.()) {
+      fileInput.click();
+    }
+  });
+
+  // Handle file selection
+  fileInput.addEventListener("change", async () => {
+    const files = Array.from(fileInput.files || []);
+    if (files.length > 0) {
+      await uploadFilesToInput(files, inputEl, sendBtn, placeholder, sessionCheck);
+    }
+    // Clear the input so the same file can be selected again
+    fileInput.value = "";
+  });
+}
+
 // Wire paste and drop handlers to an input element
 export function wirePasteAndDrop(inputEl, sendBtn, placeholder, sessionCheck) {
   if (!inputEl) return;

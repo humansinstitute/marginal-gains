@@ -340,7 +340,9 @@ async function handleNewMessage(data) {
   addMessageToState(String(channelId), message);
 
   // Track unread state - increment if not viewing channel or not at bottom
-  const shouldIncrementUnread = !isViewingChannel || !wasNearBottom;
+  // But never increment for your own messages
+  const isOwnMessage = state.session && rawMessage.author === state.session.npub;
+  const shouldIncrementUnread = !isOwnMessage && (!isViewingChannel || !wasNearBottom);
   if (shouldIncrementUnread) {
     incrementUnread(String(channelId));
   }

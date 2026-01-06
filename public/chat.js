@@ -5,7 +5,7 @@ import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onE
 import { addDmChannel, addMessage, clearUnread, getActiveChannelMessages, getSessionMentionCount, getUnreadCount, incrementSessionMention, incrementUnread, removeMessageFromChannel, selectChannel, setChatEnabled, setIsAdmin, setReplyTarget, setUnreadState, state, updateAllChannels, upsertChannel, setChannelMessages, refreshUI } from "./state.js";
 import { init as initMentions, handleMentionInput, handleMentionKeydown, closeMentionPopup } from "./mentions.js";
 import { init as initSlashCommands, handleSlashInput, handleSlashKeydown, closePopup as closeSlashPopup } from "./slashCommands.js";
-import { wirePasteAndDrop } from "./uploads.js";
+import { wireAttachButton, wirePasteAndDrop } from "./uploads.js";
 import {
   init as initMessageRenderer,
   formatReplyTimestamp,
@@ -1070,6 +1070,9 @@ function wireComposer() {
   // Wire paste and drop handlers for file uploads
   wirePasteAndDrop(el.chatInput, el.chatSendBtn, "Share an update, @name to mention", () => !!state.session);
 
+  // Wire attach button for file uploads
+  wireAttachButton(el.chatAttachBtn, el.chatFileInput, el.chatInput, el.chatSendBtn, "Share an update, @name to mention", () => !!state.session);
+
   // Close mention popup when clicking outside
   document.addEventListener("click", (event) => {
     if (!el.mentionPopup?.contains(event.target) && event.target !== el.chatInput) {
@@ -1540,6 +1543,9 @@ function wireThreadSidebar() {
 
   // Wire paste and drop handlers for file uploads
   wirePasteAndDrop(el.threadInput, el.threadSendBtn, "Reply to thread...", () => !!state.session);
+
+  // Wire attach button for file uploads
+  wireAttachButton(el.threadAttachBtn, el.threadFileInput, el.threadInput, el.threadSendBtn, "Reply to thread...", () => !!state.session);
 
   // Thread send button
   const sendHandler = () => sendThreadReply();

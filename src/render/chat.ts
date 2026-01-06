@@ -123,8 +123,14 @@ function renderChatContent() {
         </div>
         <div class="chat-composer">
           <div class="mention-popup" data-mention-popup hidden></div>
-          <textarea class="chat-input" placeholder="Share an update, @name to mention" data-chat-input rows="2"></textarea>
-          <button type="button" class="primary" data-send-chat disabled>Send</button>
+          <div class="chat-composer-row">
+            <textarea class="chat-input" placeholder="Share an update, @name to mention" data-chat-input rows="2"></textarea>
+            <div class="chat-composer-buttons">
+              <button type="button" class="chat-attach-btn" data-attach-file title="Attach file">&#128206;</button>
+              <input type="file" data-file-input hidden accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt" />
+              <button type="button" class="chat-send-btn primary" data-send-chat disabled>Send</button>
+            </div>
+          </div>
         </div>
       </section>
       <aside class="chat-thread-panel" data-thread-panel hidden>
@@ -140,8 +146,14 @@ function renderChatContent() {
         </header>
         <div class="chat-thread-panel-messages" data-thread-messages></div>
         <div class="chat-thread-panel-composer">
-          <textarea placeholder="Reply to thread..." data-thread-input rows="2"></textarea>
-          <button type="button" class="primary" data-thread-send disabled>Reply</button>
+          <div class="chat-composer-row">
+            <textarea placeholder="Reply to thread..." data-thread-input rows="2"></textarea>
+            <div class="chat-composer-buttons">
+              <button type="button" class="chat-attach-btn" data-thread-attach-file title="Attach file">&#128206;</button>
+              <input type="file" data-thread-file-input hidden accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt" />
+              <button type="button" class="chat-send-btn primary" data-thread-send disabled>Reply</button>
+            </div>
+          </div>
         </div>
       </aside>
     </div>
