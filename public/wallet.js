@@ -9,6 +9,7 @@ import { encryptWithPin, decryptWithPin, isSecureContext } from './pinCrypto.js'
 import { promptForPin, promptForNewPin, initPinModal } from './pinModal.js';
 import { initAvatarMenu } from './avatar.js';
 import { initAppMenu } from './menu.js';
+import { formatLocalDate } from './dateUtils.js';
 
 console.log('[Wallet] Imports loaded successfully');
 
@@ -229,7 +230,7 @@ async function updateTransactions() {
     const html = txs.map(tx => {
       const isIncoming = tx.type === 'incoming';
       const sats = msatsToSats(tx.amount_msats);
-      const date = new Date(tx.created_at).toLocaleDateString();
+      const date = formatLocalDate(tx.created_at);
       const desc = tx.description || (isIncoming ? 'Received' : 'Sent');
       const stateClass = tx.state === 'settled' ? 'settled' : tx.state === 'pending' ? 'pending' : 'failed';
 

@@ -1,4 +1,5 @@
 import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
+import { formatLocalDateTime } from "./dateUtils.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
 import { loadNostrLibs } from "./nostr.js";
 import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent, getConnectionState } from "./liveUpdates.js";
@@ -1157,7 +1158,7 @@ function wireComposer() {
         const threadText = allMessages
           .map((msg) => {
             const author = getAuthorDisplayName(msg.author);
-            const time = new Date(msg.createdAt).toLocaleString();
+            const time = formatLocalDateTime(msg.createdAt);
             return `[${author} - ${time}]\n${msg.body}`;
           })
           .join("\n\n");
@@ -2394,12 +2395,22 @@ async function openTaskLinkModal() {
   switchTaskLinkTab("create");
   el.taskLinkCreateForm?.reset();
   if (el.taskSearchInput) el.taskSearchInput.value = "";
-  if (el.taskResults) el.taskResults.innerHTML = `<p class="task-search-empty">Start typing to search tasks...</p>`;
+  if (el.taskResults) el.taskResults.innerHTML = `<p class="task-search-empty">Select a board and search for tasks...</p>`;
 
-  // Populate board dropdown
+  // Populate both board dropdowns (create and search)
   await populateBoardDropdown();
+  await populateSearchBoardDropdown();
 
   show(el.taskLinkModal);
+}
+
+// Populate the search board dropdown with user's groups
+async function populateSearchBoardDropdown() {
+  const select = document.querySelector("[data-task-search-board]");
+  if (!select) return;
+  const groups = await fetchUserGroups();
+  select.innerHTML = `<option value="">Personal</option>` +
+    groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
 }
 
 // Switch between create/existing tabs
@@ -2424,8 +2435,10 @@ function switchTaskLinkTab(tab) {
   } else {
     hide(createForm);
     show(existingSection);
-    // Load initial tasks
-    searchTasks("");
+    // Load initial tasks for selected board
+    const boardSelect = document.querySelector("[data-task-search-board]");
+    const groupId = boardSelect?.value || null;
+    searchTasks("", groupId);
   }
 }
 
@@ -2521,7 +2534,17 @@ function wireTaskLinkModal() {
     clearTimeout(taskSearchDebounce);
     taskSearchDebounce = setTimeout(() => {
       const query = el.taskSearchInput.value.trim();
-      searchTasks(query);
+      const boardSelect = document.querySelector("[data-task-search-board]");
+      const groupId = boardSelect?.value || null;
+      searchTasks(query, groupId);
     }, 300);
+  });
+
+  // Board selector change - re-run search with new board
+  const searchBoardSelect = document.querySelector("[data-task-search-board]");
+  searchBoardSelect?.addEventListener("change", () => {
+    const query = el.taskSearchInput?.value.trim() || "";
+    const groupId = searchBoardSelect.value || null;
+    searchTasks(query, groupId);
   });
 }

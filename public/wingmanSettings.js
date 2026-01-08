@@ -4,6 +4,7 @@
  */
 
 import { escapeHtml } from "./dom.js";
+import { formatShortDateTime } from "./dateUtils.js";
 
 // Default model options for dropdown
 const MODEL_OPTIONS = [
@@ -283,16 +284,8 @@ function renderCosts() {
     return `$${cost.toFixed(4)}`;
   };
 
-  // Format date
-  const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
-    return date.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  };
+  // Format date (using shared utility for proper timezone handling)
+  const formatDate = formatShortDateTime;
 
   // Summary by user table
   const summaryRows = summary.length > 0

@@ -5,6 +5,7 @@
 
 import { loadNostrLibs, hexToBytes, bytesToHex } from "./nostr.js";
 import { EPHEMERAL_SECRET_KEY } from "./constants.js";
+import { isBunkerLogin, bunkerNip44Encrypt, bunkerNip44Decrypt, getBunkerUserPubkey, bunkerSignEvent } from "./bunkerCrypto.js";
 
 // Event kind for encrypted message payloads (not published to relays)
 export const ENCRYPTED_MESSAGE_KIND = 9420;
@@ -144,7 +145,12 @@ export async function checkEncryptionSupport() {
     return { available: true };
   }
 
-  // Check for ephemeral key
+  // Check for bunker (NIP-46) connection
+  if (isBunkerLogin()) {
+    return { available: true };
+  }
+
+  // Check for ephemeral key (includes PIN-protected nsec)
   const secretKey = getEphemeralSecretKey();
   if (secretKey) {
     return { available: true };
@@ -184,12 +190,20 @@ export async function wrapKeyForUser(channelKeyBase64, recipientPubkeyHex) {
     console.log("[Crypto] Using NIP-07 extension for encryption");
     ciphertext = await window.nostr.nip44.encrypt(recipientPubkeyHex, channelKeyBase64);
     createdBy = await window.nostr.getPublicKey();
+  } else if (isBunkerLogin()) {
+    // Use bunker (NIP-46) for encryption
+    console.log("[Crypto] Using bunker (NIP-46) for encryption");
+    ciphertext = await bunkerNip44Encrypt(recipientPubkeyHex, channelKeyBase64);
+    createdBy = await getBunkerUserPubkey();
+    if (!createdBy) {
+      throw new Error("Failed to get user pubkey from bunker");
+    }
   } else {
     // Fallback to ephemeral key
     console.log("[Crypto] Using ephemeral key for encryption");
     const secretKey = getEphemeralSecretKey();
     if (!secretKey) {
-      throw new Error("Your browser extension doesn't support NIP-44 encryption. Try using ephemeral login instead.");
+      throw new Error("No encryption method available. Use a NIP-07 extension, bunker, or ephemeral login.");
     }
     const { pure } = await loadNostrLibs();
     // pure.getPublicKey already returns a hex string, don't double-encode!
@@ -254,10 +268,16 @@ export async function unwrapKey(wrappedKeyJson) {
     return await window.nostr.nip44.decrypt(senderPubkey, wrapped.key);
   }
 
+  // Check for bunker (NIP-46) connection
+  if (isBunkerLogin()) {
+    console.log("[Crypto] Using bunker (NIP-46) for decryption");
+    return await bunkerNip44Decrypt(senderPubkey, wrapped.key);
+  }
+
   // Fallback to ephemeral key
   const secretKey = getEphemeralSecretKey();
   if (!secretKey) {
-    throw new Error("No signing key available. Please use a NIP-07 extension or ephemeral login.");
+    throw new Error("No decryption method available. Use a NIP-07 extension, bunker, or ephemeral login.");
   }
 
   // NIP-44 v2: privkeyA as Uint8Array, pubkeyB as hex string
@@ -287,10 +307,17 @@ export async function createSignedPayload(content) {
     return JSON.stringify(signedEvent);
   }
 
+  // Check for bunker (NIP-46) connection
+  if (isBunkerLogin()) {
+    console.log("[Crypto] Using bunker (NIP-46) for signing");
+    const signedEvent = await bunkerSignEvent(unsignedEvent);
+    return JSON.stringify(signedEvent);
+  }
+
   // Fallback to ephemeral key
   const secretKey = getEphemeralSecretKey();
   if (!secretKey) {
-    throw new Error("No signing key available. Please use a NIP-07 extension or ephemeral login.");
+    throw new Error("No signing method available. Use a NIP-07 extension, bunker, or ephemeral login.");
   }
 
   const signedEvent = pure.finalizeEvent(unsignedEvent, secretKey);
