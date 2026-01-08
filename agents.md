@@ -17,3 +17,4 @@
 - For schema and ownership details, consult `docs/data_model.md` before changing queries or migrations.
 - For AI agent interactions (fetching tasks, posting summaries), follow `docs/agent_api_spec.md` for endpoints, payloads, and example curls.
 - For UI changes (structure, refresh flow, styling hooks), see `docs/ui.md` to quickly find component markup, state update patterns, and styling entry points.
+- **Debug Logs**: Client-side logs (NostrConnect, Bunker, Auth) are written to `tmp/logs/session.log`. Logs are cleared on each server start. Inspect with `cat tmp/logs/session.log` or `curl http://localhost:3000/api/debug/log`. Use this to debug Nostr Connect and bunker session issues.

@@ -27,6 +27,7 @@ uploads/
 # runtime/logs
 *.log
 logs/
+tmp/
 
 # build output
 dist/

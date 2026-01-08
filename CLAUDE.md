@@ -81,6 +81,29 @@ The lint script also runs `scripts/check-inline-js.js` which extracts `<script>`
 | `DB_PATH` | `marginal-gains.sqlite` | SQLite database path |
 | `PUSH_CONTACT_EMAIL` | `admin@example.com` | Web push contact |
 
+## Debug Logging
+
+Client-side debug logs are written to `tmp/logs/session.log`. The log file is cleared on each server start.
+
+**Inspecting logs:**
+```bash
+# Read the log file directly
+cat tmp/logs/session.log
+
+# Watch logs in real-time
+tail -f tmp/logs/session.log
+
+# Or fetch via API
+curl http://localhost:3000/api/debug/log
+```
+
+**Log prefixes:**
+- `[NostrConnect]` - QR code / NIP-46 connection flow
+- `[Bunker]` - Bunker URI and auto-login flow
+- `[Auth]` - Session validation and general auth
+
+The debug logger is in `public/debugLog.js`. Server endpoint is `src/routes/debug.ts`.
+
 ## Cryptography
 
 Use `nostr-tools` for all Nostr cryptography (key generation, event signing, verification). The `@noble/*` and `@scure/*` packages are transitive dependencies.

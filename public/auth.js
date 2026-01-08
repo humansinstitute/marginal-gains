@@ -6,6 +6,7 @@ import {
   ENCRYPTED_SECRET_KEY,
   getRelays,
 } from "./constants.js";
+import { nostrConnectLog, bunkerLog, authLog } from "./debugLog.js";
 import { closeAvatarMenu, fetchProfile } from "./avatar.js";
 import { elements as el, hide, show } from "./dom.js";
 import {
@@ -23,6 +24,27 @@ import { encryptWithPin, decryptWithPin, isSecureContext } from "./pinCrypto.js"
 import { initPinModal, promptForPin, promptForNewPin } from "./pinModal.js";
 
 let autoLoginAttempted = false;
+
+/**
+ * Validates the current session with the server.
+ * If session is invalid (401), clears client state and triggers auto-login.
+ * This handles the case where server session expires while tab is hidden.
+ */
+const validateSession = async () => {
+  if (!state.session) return;
+
+  try {
+    const res = await fetch("/chat/me");
+    if (!res.ok) {
+      authLog.info("Session expired on server, triggering re-login");
+      setSession(null);
+      autoLoginAttempted = false;
+      void maybeAutoLogin();
+    }
+  } catch (err) {
+    authLog.error("Session validation failed:", err);
+  }
+};
 
 export const initAuth = () => {
   wireLoginButtons();
@@ -42,8 +64,13 @@ export const initAuth = () => {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && !state.session) {
-      void maybeAutoLogin();
+    if (document.visibilityState === "visible") {
+      if (state.session) {
+        // Validate server session is still valid
+        void validateSession();
+      } else {
+        void maybeAutoLogin();
+      }
     }
   });
 };
@@ -131,14 +158,20 @@ const wireForms = () => {
       showError("Enter a bunker nostrconnect URI or NIP-05 handle.");
       return;
     }
+    const bunkerInput = input.value.trim();
+    const inputType = bunkerInput.startsWith("bunker://") ? "bunker://" : bunkerInput.startsWith("nostrconnect://") ? "nostrconnect://" : "NIP-05";
+    bunkerLog.info("Form submitted", { inputType });
     bunkerForm.classList.add("is-busy");
     clearError();
     try {
-      const signedEvent = await signLoginEvent("bunker", input.value.trim());
+      bunkerLog.info("Calling signLoginEvent...");
+      const signedEvent = await signLoginEvent("bunker", bunkerInput);
+      bunkerLog.info("Got signed event, completing login...");
       await completeLogin("bunker", signedEvent);
+      bunkerLog.info("Login complete!");
       input.value = "";
     } catch (err) {
-      console.error(err);
+      bunkerLog.error("Form submission failed:", err?.message || err);
       showError(err?.message || "Unable to connect to bunker.");
     } finally {
       bunkerForm.classList.remove("is-busy");
@@ -179,6 +212,9 @@ const wireForms = () => {
       const encrypted = await encryptWithPin(secretHex, pin);
       localStorage.setItem(ENCRYPTED_SECRET_KEY, encrypted);
       localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "secret");
+
+      // Store unencrypted for current session (needed for NIP-44 decryption)
+      localStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
 
       // Sign in
       const signedEvent = await signLoginEvent("secret", nsec);
@@ -311,6 +347,7 @@ const wireNostrConnectModal = () => {
 };
 
 const openNostrConnectModal = async () => {
+  nostrConnectLog.info("Opening modal, starting connection flow");
   const modal = document.querySelector("[data-nostr-connect-modal]");
   const qrContainer = document.querySelector("[data-nostr-connect-qr]");
   const uriInput = document.querySelector("[data-nostr-connect-uri]");
@@ -336,6 +373,7 @@ const openNostrConnectModal = async () => {
     // Generate ephemeral client keypair
     const clientSecretKey = pure.generateSecretKey();
     const clientPubkey = pure.getPublicKey(clientSecretKey);
+    nostrConnectLog.info("Generated client pubkey", { pubkey: clientPubkey });
 
     // Generate random secret for verification
     const secretBytes = new Uint8Array(32);
@@ -351,6 +389,7 @@ const openNostrConnectModal = async () => {
 
     // Build nostrconnect:// URI
     const relays = getRelays();
+    nostrConnectLog.info("Using relays", { relays });
     const params = new URLSearchParams();
     relays.forEach((r) => params.append("relay", r));
     params.append("secret", secret);
@@ -359,6 +398,7 @@ const openNostrConnectModal = async () => {
     params.append("image", appImage);
 
     const nostrConnectUri = `nostrconnect://${clientPubkey}?${params.toString()}`;
+    nostrConnectLog.info("Generated URI", { uri: nostrConnectUri.replace(secret, "***") });
 
     // Display URI
     uriInput.value = nostrConnectUri;
@@ -396,6 +436,7 @@ const openNostrConnectModal = async () => {
     );
 
     if (result) {
+      nostrConnectLog.info("Connection successful", { remoteSignerPubkey: result.remoteSignerPubkey, signedEventPubkey: result.signedEvent?.pubkey });
       // Store bunker connection for persistence
       const connectionData = {
         clientSecretKey: bytesToHex(clientSecretKey),
@@ -404,31 +445,39 @@ const openNostrConnectModal = async () => {
       };
       localStorage.setItem(BUNKER_CONNECTION_KEY, JSON.stringify(connectionData));
       localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "bunker");
+      nostrConnectLog.info("Stored connection data for auto-login");
 
       closeNostrConnectModal();
 
       // Complete login with the signed event
+      nostrConnectLog.info("Completing login with signed event");
       await completeLogin("bunker", result.signedEvent);
+    } else {
+      nostrConnectLog.warn("waitForNostrConnect returned null/undefined");
     }
   } catch (err) {
     if (err.name === "AbortError") {
-      // User cancelled
+      nostrConnectLog.info("Connection aborted by user");
       return;
     }
-    console.error("Nostr Connect failed:", err);
+    nostrConnectLog.error("Connection failed", { error: err?.message || err });
     closeNostrConnectModal();
     showError(err?.message || "Failed to establish connection.");
   }
 };
 
 const waitForNostrConnect = async (clientSecretKey, clientPubkey, secret, relays, signal) => {
+  nostrConnectLog.info("Setting up subscription for NIP-46 events");
   const { pure, nip19, nip44, SimplePool } = await loadNostrLibs();
 
   const pool = new SimplePool();
+  const filter = { kinds: [24133], "#p": [clientPubkey], since: Math.floor(Date.now() / 1000) - 10 };
+  nostrConnectLog.info("Subscription filter", { filter });
 
   return new Promise((resolve, reject) => {
     // Handle abort
     signal.addEventListener("abort", () => {
+      nostrConnectLog.info("Subscription aborted");
       pool.close(relays);
       reject(new DOMException("Aborted", "AbortError"));
     });
@@ -436,22 +485,25 @@ const waitForNostrConnect = async (clientSecretKey, clientPubkey, secret, relays
     // Subscribe to kind 24133 events addressed to our client pubkey
     const sub = pool.subscribeMany(
       relays,
-      [{ kinds: [24133], "#p": [clientPubkey], since: Math.floor(Date.now() / 1000) - 10 }],
+      [filter],
       {
         onevent: async (event) => {
+          nostrConnectLog.info("Received event", { from: event.pubkey, kind: event.kind });
           try {
             // Decrypt the content using NIP-44
             const conversationKey = nip44.v2.utils.getConversationKey(clientSecretKey, event.pubkey);
             const decrypted = nip44.v2.decrypt(event.content, conversationKey);
             const message = JSON.parse(decrypted);
 
-            console.log("[NostrConnect] Received message:", message);
+            nostrConnectLog.info("Decrypted message", { message });
 
             // Handle "connect" response with our secret
             if (message.result === secret || message.result === "ack") {
+              nostrConnectLog.info("Received valid connect response");
               const remoteSignerPubkey = event.pubkey;
 
               // Now request get_public_key to get the user's actual pubkey
+              nostrConnectLog.info("Requesting get_public_key from signer");
               const userPubkey = await requestFromSigner(
                 pool,
                 relays,
@@ -460,8 +512,10 @@ const waitForNostrConnect = async (clientSecretKey, clientPubkey, secret, relays
                 remoteSignerPubkey,
                 { method: "get_public_key", params: [] }
               );
+              nostrConnectLog.info("Got user pubkey", { userPubkey });
 
               // Request sign_event for login
+              nostrConnectLog.info("Requesting sign_event for login");
               const unsignedEvent = buildUnsignedEvent("bunker");
               const signResult = await requestFromSigner(
                 pool,
@@ -471,19 +525,25 @@ const waitForNostrConnect = async (clientSecretKey, clientPubkey, secret, relays
                 remoteSignerPubkey,
                 { method: "sign_event", params: [JSON.stringify(unsignedEvent)] }
               );
+              nostrConnectLog.info("Got signed event result");
 
               const signedEvent = JSON.parse(signResult);
+              nostrConnectLog.info("Parsed signed event", { pubkey: signedEvent?.pubkey });
               sub.close();
               pool.close(relays);
 
               resolve({ remoteSignerPubkey, signedEvent });
+            } else if (message.error) {
+              nostrConnectLog.warn("Received error from signer", { error: message.error });
+            } else {
+              nostrConnectLog.info("Message not a connect response", { result: message.result });
             }
           } catch (err) {
-            console.error("[NostrConnect] Error processing event:", err);
+            nostrConnectLog.error("Error processing event", { error: err?.message || err });
           }
         },
         oneose: () => {
-          console.log("[NostrConnect] End of stored events");
+          nostrConnectLog.info("End of stored events, waiting for new events...");
         },
       }
     );
@@ -491,11 +551,13 @@ const waitForNostrConnect = async (clientSecretKey, clientPubkey, secret, relays
 };
 
 const requestFromSigner = async (pool, relays, clientSecretKey, clientPubkey, remoteSignerPubkey, request) => {
+  nostrConnectLog.info("requestFromSigner", { method: request.method });
   const { pure, nip44 } = await loadNostrLibs();
 
   return new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const fullRequest = { id: requestId, ...request };
+    nostrConnectLog.info("Sending request", { id: requestId, method: request.method });
 
     // Encrypt and send request
     const conversationKey = nip44.v2.utils.getConversationKey(clientSecretKey, remoteSignerPubkey);
@@ -512,6 +574,7 @@ const requestFromSigner = async (pool, relays, clientSecretKey, clientPubkey, re
     );
 
     // Publish request
+    nostrConnectLog.info("Publishing request to relays", { relays });
     pool.publish(relays, requestEvent);
 
     // Subscribe for response
@@ -526,15 +589,18 @@ const requestFromSigner = async (pool, relays, clientSecretKey, clientPubkey, re
             const message = JSON.parse(decrypted);
 
             if (message.id === requestId) {
+              nostrConnectLog.info("Received response for request", { id: requestId });
               sub.close();
               if (message.error) {
+                nostrConnectLog.error("Signer returned error", { error: message.error });
                 reject(new Error(message.error));
               } else {
+                nostrConnectLog.info("Request successful", { resultType: typeof message.result });
                 resolve(message.result);
               }
             }
           } catch (err) {
-            console.error("[NostrConnect] Error parsing response:", err);
+            nostrConnectLog.error("Error parsing response", { error: err?.message || err });
           }
         },
       }
@@ -542,6 +608,7 @@ const requestFromSigner = async (pool, relays, clientSecretKey, clientPubkey, re
 
     // Timeout after 30 seconds
     setTimeout(() => {
+      nostrConnectLog.warn("Request timed out after 30s", { method: request.method });
       sub.close();
       reject(new Error("Request timed out"));
     }, 30000);
@@ -665,6 +732,9 @@ const maybeAutoLogin = async () => {
         return;
       }
 
+      // Store unencrypted for current session (needed for NIP-44 decryption)
+      localStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
+
       // Convert hex to bytes for signing
       const secretBytes = hexToBytes(secretHex);
       const { pure } = await loadNostrLibs();
@@ -679,8 +749,10 @@ const maybeAutoLogin = async () => {
 
   // Handle bunker auto-login (from Nostr Connect)
   if (method === "bunker") {
+    bunkerLog.info("Starting auto-login flow");
     const connectionJson = localStorage.getItem(BUNKER_CONNECTION_KEY);
     if (!connectionJson) {
+      bunkerLog.info("No stored connection data found");
       autoLoginAttempted = false;
       return;
     }
@@ -688,23 +760,30 @@ const maybeAutoLogin = async () => {
     try {
       const connection = JSON.parse(connectionJson);
       const { clientSecretKey, remoteSignerPubkey, relays } = connection;
+      bunkerLog.info("Loaded connection", { remoteSignerPubkey: remoteSignerPubkey?.slice(0, 16) + "...", relays });
 
       if (!clientSecretKey || !remoteSignerPubkey || !relays?.length) {
-        console.warn("[Auth] Invalid bunker connection data");
+        bunkerLog.warn("Invalid connection data", {
+          hasClientSecret: !!clientSecretKey,
+          hasRemoteSigner: !!remoteSignerPubkey,
+          hasRelays: !!relays?.length,
+        });
         clearAutoLogin();
         autoLoginAttempted = false;
         return;
       }
 
-      console.log("[Auth] Attempting bunker auto-login...");
+      bunkerLog.info("Attempting auto-login via NIP-46...");
 
       const { pure, nip44, SimplePool } = await loadNostrLibs();
       const clientSecret = hexToBytes(clientSecretKey);
       const clientPubkey = pure.getPublicKey(clientSecret);
+      bunkerLog.info("Client pubkey", { pubkey: clientPubkey });
       const pool = new SimplePool();
 
       try {
         // Request sign_event for login
+        bunkerLog.info("Requesting sign_event from remote signer");
         const unsignedEvent = buildUnsignedEvent("bunker");
         const signResult = await requestFromSigner(
           pool,
@@ -715,16 +794,21 @@ const maybeAutoLogin = async () => {
           { method: "sign_event", params: [JSON.stringify(unsignedEvent)] }
         );
 
+        bunkerLog.info("Received signed event from signer");
         const signedEvent = JSON.parse(signResult);
+        bunkerLog.info("Signed event pubkey", { pubkey: signedEvent?.pubkey });
         pool.close(relays);
 
+        bunkerLog.info("Completing login...");
         await completeLogin("bunker", signedEvent);
+        bunkerLog.info("Auto-login successful!");
       } catch (err) {
+        bunkerLog.error("Sign request failed", { error: err?.message || err });
         pool.close(relays);
         throw err;
       }
     } catch (err) {
-      console.error("Bunker auto login failed", err);
+      bunkerLog.error("Auto-login failed", { error: err?.message || err });
       // Don't clear auto-login on failure - user may just need to approve in signer
       autoLoginAttempted = false;
     }
@@ -756,15 +840,25 @@ const signLoginEvent = async (method, supplemental) => {
   }
 
   if (method === "bunker") {
+    bunkerLog.info("signLoginEvent - parsing bunker input");
     const { pure, nip46 } = await loadNostrLibs();
     const pointer = await nip46.parseBunkerInput(supplemental || "");
-    if (!pointer) throw new Error("Unable to parse bunker details.");
+    if (!pointer) {
+      bunkerLog.error("Failed to parse bunker input", { input: supplemental });
+      throw new Error("Unable to parse bunker details.");
+    }
+    bunkerLog.info("Parsed pointer", { pubkey: pointer.pubkey?.slice(0, 16) + "...", relays: pointer.relays });
     const clientSecret = pure.generateSecretKey();
     const signer = new nip46.BunkerSigner(clientSecret, pointer);
+    bunkerLog.info("Connecting to signer...");
     await signer.connect();
+    bunkerLog.info("Connected! Requesting signature...");
     try {
-      return await signer.signEvent(buildUnsignedEvent(method));
+      const signedEvent = await signer.signEvent(buildUnsignedEvent(method));
+      bunkerLog.info("Got signature", { pubkey: signedEvent?.pubkey });
+      return signedEvent;
     } finally {
+      bunkerLog.info("Closing signer connection");
       await signer.close();
     }
   }
