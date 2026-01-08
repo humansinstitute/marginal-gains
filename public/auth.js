@@ -213,8 +213,9 @@ const wireForms = () => {
       localStorage.setItem(ENCRYPTED_SECRET_KEY, encrypted);
       localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "secret");
 
-      // Store unencrypted for current session (needed for NIP-44 decryption)
-      localStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
+      // Store unencrypted in sessionStorage for current session (needed for NIP-44 decryption)
+      // Cleared when app closes - PIN re-entry required on next open
+      sessionStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
 
       // Sign in
       const signedEvent = await signLoginEvent("secret", nsec);
@@ -732,8 +733,9 @@ const maybeAutoLogin = async () => {
         return;
       }
 
-      // Store unencrypted for current session (needed for NIP-44 decryption)
-      localStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
+      // Store unencrypted in sessionStorage for current session (needed for NIP-44 decryption)
+      // Cleared when app closes - PIN re-entry required on next open
+      sessionStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
 
       // Convert hex to bytes for signing
       const secretBytes = hexToBytes(secretHex);
@@ -968,6 +970,9 @@ const clearAutoLogin = () => {
   localStorage.removeItem(AUTO_LOGIN_PUBKEY_KEY);
   localStorage.removeItem(ENCRYPTED_SECRET_KEY);
   localStorage.removeItem(BUNKER_CONNECTION_KEY);
+  // Clear unencrypted secret from both storage types
+  sessionStorage.removeItem(EPHEMERAL_SECRET_KEY);
+  localStorage.removeItem(EPHEMERAL_SECRET_KEY);
 };
 
 // Export for settings page

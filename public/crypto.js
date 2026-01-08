@@ -103,10 +103,16 @@ export async function decryptMessage(ciphertextBase64, keyBase64) {
 
 /**
  * Get the current user's private key (for ephemeral login) or null (for extension)
+ * Checks sessionStorage first (PIN-protected sessions), then localStorage (legacy ephemeral)
  * @returns {Uint8Array|null}
  */
 function getEphemeralSecretKey() {
-  const stored = localStorage.getItem(EPHEMERAL_SECRET_KEY);
+  // Check sessionStorage first (PIN-protected nsec sessions)
+  let stored = sessionStorage.getItem(EPHEMERAL_SECRET_KEY);
+  // Fall back to localStorage (legacy ephemeral without PIN)
+  if (!stored) {
+    stored = localStorage.getItem(EPHEMERAL_SECRET_KEY);
+  }
   if (!stored) return null;
   console.log("[Crypto] getEphemeralSecretKey - stored hex length:", stored.length);
   const bytes = hexToBytes(stored);
