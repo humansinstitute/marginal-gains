@@ -73,6 +73,7 @@ import {
   handleUpdateContact,
   handleUpdateOpportunity,
 } from "./routes/crm";
+import { handleDebugLog, handleClearDebugLog, handleGetDebugLog } from "./routes/debug";
 import { handleChatEvents } from "./routes/events";
 import {
   handleAddChannelGroups,
@@ -265,6 +266,9 @@ const server = Bun.serve({
         if (pathname === "/api/wallet/status") return handleWalletStatus(req, session);
         if (pathname === "/api/wallet/balance") return handleWalletBalance(req, session);
         if (pathname === "/api/wallet/transactions") return handleWalletTransactions(req, session);
+
+        // Debug log route (for inspecting client-side logs)
+        if (pathname === "/api/debug/log") return handleGetDebugLog();
       }
 
       if (req.method === "POST") {
@@ -338,6 +342,10 @@ const server = Bun.serve({
         if (pathname === "/api/wallet/connect") return handleWalletConnect(req, session);
         if (pathname === "/api/wallet/invoice") return handleWalletInvoice(req, session);
         if (pathname === "/api/wallet/pay") return handleWalletPay(req, session);
+
+        // Debug logging (no auth required for client-side logging)
+        if (pathname === "/api/debug/log") return handleDebugLog(req);
+        if (pathname === "/api/debug/clear") return handleClearDebugLog();
       }
 
       if (req.method === "PATCH") {

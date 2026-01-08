@@ -1,5 +1,5 @@
 // Service Worker for Push Notifications
-const CACHE_NAME = "mg-v1";
+const CACHE_NAME = "mg-v2";
 
 // Push notification handler
 self.addEventListener("push", (event) => {
