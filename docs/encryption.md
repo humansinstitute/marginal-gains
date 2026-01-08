@@ -11,6 +11,132 @@ This document describes the encryption approach for private group messages and D
 3. **Backwards compatible** - Existing plaintext messages remain readable
 4. **Simple key model** - One symmetric key per channel, wrapped per-user
 
+---
+
+## Login Methods & Encryption Support
+
+Different login methods have different mechanisms for NIP-44 encryption/decryption operations.
+
+| Login Method | Key Location | Encrypt | Decrypt | Sign | Notes |
+|--------------|--------------|---------|---------|------|-------|
+| Extension (NIP-07) | Browser extension | Yes | Yes | Yes | Uses `window.nostr.nip44` |
+| nsec + PIN | sessionStorage | Yes | Yes | Yes | Key cleared on app close |
+| New Ephemeral | localStorage | Yes | Yes | Yes | Legacy, persists until logout |
+| Bunker (NIP-46) | Remote signer | Yes | Yes | Yes | Requires signer NIP-44 support |
+
+### Extension Login (NIP-07)
+
+Browser extensions (nos2x, Alby, etc.) handle all cryptographic operations directly:
+
+```javascript
+// Encryption
+ciphertext = await window.nostr.nip44.encrypt(recipientPubkey, plaintext);
+
+// Decryption
+plaintext = await window.nostr.nip44.decrypt(senderPubkey, ciphertext);
+
+// Signing
+signedEvent = await window.nostr.signEvent(unsignedEvent);
+```
+
+**Pros:** Private key never exposed to JavaScript
+**Cons:** Requires extension, not available on mobile PWA
+
+### nsec + PIN Login
+
+User imports their nsec and protects it with a PIN:
+
+1. **Storage:**
+   - PIN-encrypted nsec stored in `localStorage` (persists)
+   - Decrypted nsec stored in `sessionStorage` (current session only)
+
+2. **Flow:**
+   ```
+   App Open → PIN Prompt → Decrypt nsec → Store in sessionStorage → Crypto ops work
+   App Close → sessionStorage cleared → nsec gone from memory
+   App Reopen → PIN Prompt again → Decrypt from localStorage
+   ```
+
+3. **Crypto operations** use the decrypted key from sessionStorage with nostr-tools NIP-44
+
+**Pros:** Works on mobile PWA, PIN provides security layer
+**Cons:** Requires PIN entry each time app is opened
+
+**Key constants:**
+- `ENCRYPTED_SECRET_KEY` - PIN-encrypted nsec in localStorage
+- `EPHEMERAL_SECRET_KEY` - Decrypted nsec in sessionStorage (session-only)
+
+### Bunker Login (NIP-46)
+
+Remote signer (Amber, nsec.app, etc.) handles crypto via relay messages:
+
+1. **Connection:** Client generates ephemeral keypair for NIP-46 communication
+2. **Storage:** Connection data stored in `localStorage`:
+   ```json
+   {
+     "clientSecretKey": "ephemeral key for NIP-46 tunnel",
+     "remoteSignerPubkey": "signer's pubkey",
+     "relays": ["wss://relay.example.com"]
+   }
+   ```
+
+3. **Crypto operations** send NIP-46 requests to remote signer:
+   ```javascript
+   // Encryption
+   { method: "nip44_encrypt", params: [pubkey, plaintext] }
+
+   // Decryption
+   { method: "nip44_decrypt", params: [pubkey, ciphertext] }
+
+   // Signing
+   { method: "sign_event", params: [eventJson] }
+
+   // Get pubkey
+   { method: "get_public_key", params: [] }
+   ```
+
+**Pros:** Private key stays on signer device (phone), works across devices
+**Cons:** Requires network round-trip (~30s timeout), signer must support NIP-44 methods
+
+### Key Files for Login-Based Encryption
+
+| File | Purpose |
+|------|---------|
+| `public/crypto.js` | Core encryption: AES-GCM, NIP-44 wrap/unwrap, routing to correct method |
+| `public/bunkerCrypto.js` | NIP-46 remote signer operations |
+| `public/auth.js` | Login flows, key storage management |
+| `public/pinCrypto.js` | PIN-based encryption for stored secrets |
+
+### Security Considerations
+
+**On Logout** - All sensitive data is cleared:
+- `sessionStorage.EPHEMERAL_SECRET_KEY` (decrypted nsec)
+- `localStorage.EPHEMERAL_SECRET_KEY` (legacy ephemeral)
+- `localStorage.ENCRYPTED_SECRET_KEY` (PIN-encrypted nsec)
+- `localStorage.BUNKER_CONNECTION_KEY` (bunker connection)
+
+**Threat Model:**
+- Server compromise: Cannot read messages (no access to private keys)
+- Client device access: Attacker could extract keys from storage
+- PIN protection: Mitigates casual access, not determined attacker with device
+- Extension/Bunker: Private key never touches browser JavaScript
+
+### Troubleshooting
+
+**"Unable to decrypt - no key available"**
+- nsec login: Log out and back in (PIN prompt restores key to sessionStorage)
+- Extension: Ensure extension is unlocked and page has permission
+- Bunker: Check signer app is running and connected to relays
+
+**"Bunker request timed out"**
+- Check signer app is open and unlocked
+- Verify relay connectivity
+- Some older signers may not support `nip44_encrypt`/`nip44_decrypt`
+
+**Messages show "[Decryption failed]"**
+- Key mismatch (channel key rotated, wrong identity)
+- Data corruption in transit/storage
+
 ## How It Works
 
 ### Channel Key Lifecycle

@@ -122,6 +122,7 @@ export const elements = {
   taskLinkCreateForm: document.querySelector("[data-task-link-create]"),
   taskBoardSelect: document.querySelector("[data-task-board]"),
   taskLinkExisting: document.querySelector("[data-task-link-existing]"),
+  taskSearchBoardSelect: document.querySelector("[data-task-search-board]"),
   taskSearchInput: document.querySelector("[data-task-search]"),
   taskResults: document.querySelector("[data-task-results]"),
 };

@@ -1,3 +1,4 @@
+import { formatLocalDateTime } from "./dateUtils.js";
 import { elements as el, hide, setText, show } from "./dom.js";
 import { state, setSummaries } from "./state.js";
 
@@ -47,7 +48,7 @@ export const updateSummaryUI = () => {
   }
 
   if (el.summaryUpdated) {
-    setText(el.summaryUpdated, latestUpdated ? `Updated ${new Date(latestUpdated).toLocaleString()}` : "");
+    setText(el.summaryUpdated, latestUpdated ? `Updated ${formatLocalDateTime(latestUpdated)}` : "");
   }
 };
 

@@ -1,5 +1,6 @@
 // Message rendering module
 import { escapeHtml } from "./dom.js";
+import { formatReplyTimestamp, formatLocalTime } from "./dateUtils.js";
 
 // Dependencies injected via init
 let getAuthorDisplayName = () => "Unknown";
@@ -15,16 +16,8 @@ export function init(deps) {
   if (deps.userCache) userCache = deps.userCache;
 }
 
-// Format timestamp as dd/mm/yy @ hh:mm
-export function formatReplyTimestamp(dateStr) {
-  const d = new Date(dateStr);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = String(d.getFullYear()).slice(-2);
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  return `${day}/${month}/${year} @ ${hours}:${minutes}`;
-}
+// Re-export formatReplyTimestamp for backwards compatibility
+export { formatReplyTimestamp } from "./dateUtils.js";
 
 // Get icon for file type
 export function getFileIcon(ext) {
@@ -125,7 +118,7 @@ export function renderMessageCompact(message, { showAvatar = false, isThreadRoot
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
-        <time>${new Date(message.createdAt).toLocaleTimeString()}</time>
+        <time>${formatLocalTime(message.createdAt)}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
       ${menuHtml}
@@ -142,7 +135,7 @@ export function renderMessageFull(message, { isThreadRoot = false, threadRootId 
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
-        <time>${new Date(message.createdAt).toLocaleTimeString()}</time>
+        <time>${formatLocalTime(message.createdAt)}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
       ${menuHtml}

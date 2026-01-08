@@ -385,6 +385,7 @@ function renderKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: number
     { state: "new", label: "New", todos: [] },
     { state: "ready", label: "Ready", todos: [] },
     { state: "in_progress", label: "In Progress", todos: [] },
+    { state: "review", label: "Review", todos: [] },
     { state: "done", label: "Done", todos: [] },
   ];
 
@@ -520,6 +521,7 @@ function renderTodoItem(todo: Todo, groupId: number | null, canManage: boolean) 
                 ${renderStateOption("new", todo.state)}
                 ${renderStateOption("ready", todo.state)}
                 ${renderStateOption("in_progress", todo.state)}
+                ${renderStateOption("review", todo.state)}
                 ${renderStateOption("done", todo.state)}
               </select>
             </label>
@@ -636,6 +638,7 @@ function renderTaskEditModal(groupId: number | null) {
               <option value="new">${formatStateLabel("new")}</option>
               <option value="ready">${formatStateLabel("ready")}</option>
               <option value="in_progress">${formatStateLabel("in_progress")}</option>
+              <option value="review">${formatStateLabel("review")}</option>
               <option value="done">${formatStateLabel("done")}</option>
             </select>
           </label>
