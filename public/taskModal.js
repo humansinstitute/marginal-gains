@@ -1,6 +1,7 @@
 import { show, hide } from "./dom.js";
 
 let currentTaskId = null;
+let currentTaskOwner = null;
 
 const el = {
   overlay: null,
@@ -10,6 +11,10 @@ const el = {
   priority: null,
   state: null,
   scheduled: null,
+  board: null,
+  groupId: null,
+  assignee: null,
+  assigneeLabel: null,
   tagsWrapper: null,
   tagsHidden: null,
   closeBtn: null,
@@ -25,6 +30,10 @@ export function initTaskModal() {
   el.priority = document.querySelector("[data-task-modal-priority]");
   el.state = document.querySelector("[data-task-modal-state]");
   el.scheduled = document.querySelector("[data-task-modal-scheduled]");
+  el.board = document.querySelector("[data-task-modal-board]");
+  el.groupId = document.querySelector("[data-task-modal-group-id]");
+  el.assignee = document.querySelector("[data-task-modal-assignee]");
+  el.assigneeLabel = document.querySelector("[data-task-modal-assignee-label]");
   el.tagsWrapper = document.querySelector("[data-task-modal-tags-wrapper]");
   el.tagsHidden = document.querySelector("[data-task-modal-tags-hidden]");
   el.closeBtn = document.querySelector("[data-task-modal-close]");
@@ -45,6 +54,9 @@ export function initTaskModal() {
 
   // Form submit
   el.form?.addEventListener("submit", handleSubmit);
+
+  // Board change handler
+  el.board?.addEventListener("change", handleBoardChange);
 
   // Tag input handling
   initTagInput();
@@ -90,6 +102,8 @@ function openModalForTask(todoId, card) {
   const title = card.querySelector(".kanban-card-title")?.textContent || "";
   const desc = card.querySelector(".kanban-card-desc")?.textContent || "";
   const state = card.dataset.todoState || "ready";
+  const assigned_to = card.dataset.assignedTo || "";
+  const group_id = card.dataset.groupId || "";
 
   // Get priority from badge
   const badge = card.querySelector(".badge");
@@ -99,10 +113,10 @@ function openModalForTask(todoId, card) {
   else if (badge?.classList.contains("priority-sand")) priority = "sand";
 
   // Get tags
-  const tagChips = card.querySelectorAll(".tag-chip");
+  const tagChips = card.querySelectorAll(".kanban-card-meta .tag-chip");
   const tags = Array.from(tagChips).map(chip => chip.textContent.trim()).join(",");
 
-  populateModal({ title, description: desc, priority, state, scheduled_for: "", tags });
+  populateModal({ title, description: desc, priority, state, scheduled_for: "", tags, assigned_to, group_id });
   show(el.overlay);
   el.title?.focus();
 }
@@ -120,19 +134,36 @@ function openModalFromListItem(todoId, details) {
   const state = editForm.querySelector("[name='state']")?.value || "ready";
   const scheduled_for = editForm.querySelector("[name='scheduled_for']")?.value || "";
   const tags = editForm.querySelector("[name='tags']")?.value || "";
+  const assigned_to = editForm.querySelector("[name='assigned_to']")?.value || "";
+  const group_id = editForm.querySelector("[name='group_id']")?.value || "";
 
-  populateModal({ title, description, priority, state, scheduled_for, tags });
+  populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id });
   show(el.overlay);
   el.title?.focus();
 }
 
-function populateModal({ title, description, priority, state, scheduled_for, tags }) {
+function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id }) {
   if (el.title) el.title.value = title;
   if (el.description) el.description.value = description;
   if (el.priority) el.priority.value = priority;
   if (el.state) el.state.value = state;
   if (el.scheduled) el.scheduled.value = scheduled_for || "";
   if (el.tagsHidden) el.tagsHidden.value = tags || "";
+
+  // Set board selector and hidden group_id
+  if (el.board) el.board.value = group_id || "";
+  if (el.groupId) el.groupId.value = group_id || "";
+
+  // Update assignee field visibility and value based on board
+  updateAssigneeVisibility(group_id);
+  if (el.assignee) el.assignee.value = assigned_to || "";
+
+  // If switching to a group board, fetch members for assignee dropdown
+  if (group_id) {
+    fetchGroupMembers(group_id).then(() => {
+      if (el.assignee) el.assignee.value = assigned_to || "";
+    });
+  }
 
   // Update form action
   if (el.form) {
@@ -247,6 +278,63 @@ async function handleDelete() {
   form.action = `/todos/${currentTaskId}/delete`;
   document.body.appendChild(form);
   form.submit();
+}
+
+function handleBoardChange() {
+  const newGroupId = el.board?.value || "";
+
+  // Update hidden group_id field
+  if (el.groupId) el.groupId.value = newGroupId;
+
+  // Update assignee visibility
+  updateAssigneeVisibility(newGroupId);
+
+  // Clear assignee when changing boards (will be handled by backend based on rules)
+  if (el.assignee) el.assignee.value = "";
+
+  // Fetch group members if switching to a group
+  if (newGroupId) {
+    fetchGroupMembers(newGroupId);
+  }
+}
+
+function updateAssigneeVisibility(groupId) {
+  if (!el.assigneeLabel) return;
+
+  if (groupId) {
+    // Show assignee field for group boards
+    el.assigneeLabel.hidden = false;
+  } else {
+    // Hide assignee field for personal board (auto-assigns to owner)
+    el.assigneeLabel.hidden = true;
+  }
+}
+
+async function fetchGroupMembers(groupId) {
+  if (!el.assignee || !groupId) return;
+
+  try {
+    const res = await fetch(`/api/groups/${groupId}/members`);
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const members = data.members || [];
+
+    // Rebuild assignee dropdown options
+    const currentValue = el.assignee.value;
+    el.assignee.innerHTML = `<option value="">Unassigned</option>` +
+      members.map(m => {
+        const displayName = m.display_name || m.npub.slice(0, 12) + "...";
+        return `<option value="${m.npub}">${escapeHtml(displayName)}</option>`;
+      }).join("");
+
+    // Restore previous value if still valid
+    if (currentValue && members.some(m => m.npub === currentValue)) {
+      el.assignee.value = currentValue;
+    }
+  } catch (err) {
+    console.error("Failed to fetch group members:", err);
+  }
 }
 
 function escapeHtml(str) {

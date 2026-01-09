@@ -34,10 +34,15 @@ function initContextSwitcher() {
   if (!switcher) return;
 
   switcher.addEventListener("change", (e) => {
-    const groupId = e.target.value;
-    if (groupId) {
-      window.location.href = `/todo?group=${groupId}`;
+    const value = e.target.value;
+    if (value === "all") {
+      // "All My Tasks" view - aggregates tasks assigned to user across all boards
+      window.location.href = "/todo?view=all";
+    } else if (value) {
+      // Group board
+      window.location.href = `/todo?group=${value}`;
     } else {
+      // Personal board
       window.location.href = "/todo";
     }
   });

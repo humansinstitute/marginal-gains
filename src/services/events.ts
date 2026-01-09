@@ -9,6 +9,7 @@ import { canUserAccessChannel } from "../db";
 // Event types that can be broadcast
 export type EventType =
   | "message:new"
+  | "message:reaction"
   | "channel:new"
   | "channel:update"
   | "channel:delete"

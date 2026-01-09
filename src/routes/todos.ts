@@ -1,6 +1,8 @@
+import { getTodoById } from "../db";
 import { redirect, unauthorized } from "../http";
 import {
   canManageGroupTodo,
+  moveTaskToBoard,
   quickAddTodo,
   removeGroupTodo,
   removeTodo,
@@ -44,18 +46,36 @@ export async function handleTodoCreate(req: Request, session: Session | null) {
 export async function handleTodoUpdate(req: Request, session: Session | null, id: number) {
   if (!session) return unauthorized();
   const form = await req.formData();
-  const groupId = parseGroupId(form.get("group_id"));
+  const newGroupId = parseGroupId(form.get("group_id"));
 
-  if (groupId) {
-    if (!canManageGroupTodo(session.npub, groupId)) {
+  // Check if the board is changing
+  const currentTodo = getTodoById(id);
+  if (!currentTodo) {
+    return new Response("Task not found", { status: 404 });
+  }
+
+  const currentGroupId = currentTodo.group_id;
+  const boardIsChanging = currentGroupId !== newGroupId;
+
+  // If board is changing, move the task first
+  if (boardIsChanging) {
+    const moveResult = moveTaskToBoard(session.npub, id, newGroupId);
+    if (!moveResult.success) {
+      return new Response(moveResult.error || "Failed to move task", { status: 403 });
+    }
+  }
+
+  // Now perform the regular update on the new board
+  if (newGroupId) {
+    if (!canManageGroupTodo(session.npub, newGroupId)) {
       return new Response("Forbidden", { status: 403 });
     }
-    updateGroupTodoFromForm(groupId, id, form);
+    updateGroupTodoFromForm(newGroupId, id, form);
   } else {
     updateTodoFromForm(session.npub, id, form);
   }
 
-  return redirect(getRedirectUrl(groupId));
+  return redirect(getRedirectUrl(newGroupId));
 }
 
 export async function handleTodoState(req: Request, session: Session | null, id: number) {
