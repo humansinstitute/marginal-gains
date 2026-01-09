@@ -3154,6 +3154,76 @@ body.chat-page {
   padding: 0.15rem 0.45rem;
 }
 
+/* Kanban card header - title + assignee */
+.kanban-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.kanban-card-header .kanban-card-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Assignee avatar - small circular indicator */
+.assignee-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--chat-accent, #6b3a6b);
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.assignee-avatar .avatar-initials {
+  text-transform: uppercase;
+}
+/* List view assignee - slightly smaller */
+.badges .assignee-avatar {
+  width: 1.25rem;
+  height: 1.25rem;
+  font-size: 0.55rem;
+}
+
+/* Mine filter toggle button */
+.mine-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.mine-filter-toggle:hover {
+  background: var(--hover-bg, rgba(0,0,0,0.05));
+  color: var(--text);
+}
+.mine-filter-toggle.active {
+  background: var(--chat-accent, #6b3a6b);
+  border-color: var(--chat-accent, #6b3a6b);
+  color: white;
+}
+.mine-filter-icon {
+  font-size: 0.9rem;
+}
+
+/* Board badge - shows which board a task belongs to in All Tasks view */
+.board-badge {
+  background: var(--hover-bg, rgba(0,0,0,0.08));
+  color: var(--muted);
+  font-weight: 500;
+}
+
 /* Kanban column state colors */
 [data-kanban-column="new"] .kanban-column-header {
   border-bottom-color: #94a3b8;
@@ -3689,4 +3759,141 @@ body.onboarding-mode .avatar-chip {
   color: #666;
   font-size: 0.85rem;
   margin: 1.5rem 0 0;
+}
+
+/* ===== Emoji Reactions ===== */
+
+/* Reaction pills under messages */
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-color);
+  border-radius: 12px;
+  background: var(--secondary-bg);
+  color: var(--text-color);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reaction-pill:hover {
+  background: var(--hover-bg);
+  border-color: var(--text-muted);
+}
+
+.reaction-pill.reacted {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.reaction-pill.reacted:hover {
+  background: rgba(59, 130, 246, 0.25);
+}
+
+/* Quick-react bar on hover */
+.chat-message {
+  position: relative;
+}
+
+.quick-react-bar {
+  position: absolute;
+  right: 8px;
+  top: 0;
+  display: none;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--line-color);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 20;
+}
+
+/* Extend hover area above the bar */
+.quick-react-bar::before {
+  content: "";
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+  z-index: -1;
+}
+
+.chat-message:hover .quick-react-bar {
+  display: flex;
+}
+
+.quick-react-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.quick-react-btn:hover {
+  background: var(--hover-bg);
+}
+
+.add-reaction-btn {
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  font-weight: 300;
+}
+
+/* Emoji picker popup */
+.emoji-picker {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  padding: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--line-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.emoji-picker button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.emoji-picker button:hover {
+  background: var(--hover-bg);
 }

@@ -1,6 +1,7 @@
 // Message rendering module
 import { escapeHtml } from "./dom.js";
 import { formatReplyTimestamp, formatLocalTime } from "./dateUtils.js";
+import { renderQuickReactBar, renderReactionPills } from "./reactions.js";
 
 // Dependencies injected via init
 let getAuthorDisplayName = () => "Unknown";
@@ -109,10 +110,14 @@ export function renderMessageMenu(message, { isThreadRoot = false, threadRootId 
 
 // Render compact message (with optional avatar)
 export function renderMessageCompact(message, { showAvatar = false, isThreadRoot = false, threadRootId = null } = {}) {
+  const ctx = getContext();
+  const currentUserNpub = ctx.session?.npub || "";
   const avatarHtml = showAvatar
     ? `<img class="chat-message-avatar" src="${escapeHtml(getAuthorAvatarUrl(message.author))}" alt="" loading="lazy" />`
     : "";
   const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
+  const reactionsHtml = renderReactionPills(message.reactions, message.id, currentUserNpub);
+  const quickReactHtml = renderQuickReactBar(message.id);
   return `<div class="chat-message${showAvatar ? " chat-message-with-avatar" : ""}" data-message-id="${message.id}">
     ${avatarHtml}
     <div class="chat-message-content">
@@ -121,15 +126,21 @@ export function renderMessageCompact(message, { showAvatar = false, isThreadRoot
         <time>${formatLocalTime(message.createdAt)}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
+      ${reactionsHtml}
       ${menuHtml}
     </div>
+    ${quickReactHtml}
   </div>`;
 }
 
 // Render full message with avatar
 export function renderMessageFull(message, { isThreadRoot = false, threadRootId = null } = {}) {
+  const ctx = getContext();
+  const currentUserNpub = ctx.session?.npub || "";
   const avatarUrl = getAuthorAvatarUrl(message.author);
   const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
+  const reactionsHtml = renderReactionPills(message.reactions, message.id, currentUserNpub);
+  const quickReactHtml = renderQuickReactBar(message.id);
   return `<div class="chat-message chat-message-with-avatar" data-message-id="${message.id}">
     <img class="chat-thread-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
     <div class="chat-message-content">
@@ -138,8 +149,10 @@ export function renderMessageFull(message, { isThreadRoot = false, threadRootId 
         <time>${formatLocalTime(message.createdAt)}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
+      ${reactionsHtml}
       ${menuHtml}
     </div>
+    ${quickReactHtml}
   </div>`;
 }
 

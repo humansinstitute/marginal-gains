@@ -18,6 +18,7 @@ import {
   renderMessageMenu,
   groupByParent,
 } from "./messageRenderer.js";
+import { initReactions, updateMessageReactions } from "./reactions.js";
 import {
   setupChannelEncryption,
   distributeKeyToMember,
@@ -37,6 +38,11 @@ const localUserCache = new Map();
 
 // Cache for npub to pubkey conversions
 const npubToPubkeyCache = new Map();
+
+// Cache for rendered channel lists to avoid unnecessary DOM recreation
+// This prevents image flickering on Safari PWA
+let lastRenderedDmSignature = null;
+let lastRenderedChannelSignature = null;
 
 // Track currently open thread
 let openThreadId = null;
@@ -561,6 +567,12 @@ function setupLiveUpdateHandlers() {
     }
   });
 
+  // When a reaction is added/removed
+  onEvent("message:reaction", (data) => {
+    const { messageId, reactions } = data;
+    updateMessageReactions(messageId, reactions);
+  });
+
   // When connection state changes, update avatar outline
   onEvent("connection:change", (data) => {
     updateAvatarConnectionStatus(data.state);
@@ -617,6 +629,9 @@ export const initChat = async () => {
 
   // Initialize slash commands module
   await initSlashCommands();
+
+  // Initialize reactions module
+  initReactions();
 
   // Initialize message renderer with dependencies
   initMessageRenderer({
@@ -1300,62 +1315,82 @@ export const refreshChatUI = () => {
 };
 
 function renderChannels() {
-  // Render regular channels
+  // Render regular channels (with signature-based caching to avoid unnecessary DOM updates)
   if (el.chatChannelList) {
     const channels = state.chat.channels;
-    el.chatChannelList.innerHTML = channels
-      .map((channel) => {
-        const isActive = channel.id === state.chat.selectedChannelId;
-        const unreadCount = getUnreadCount(channel.id);
-        const mentionCount = getSessionMentionCount(channel.id);
-        const hasUnread = unreadCount > 0 && !isActive;
-        // Show shield for encrypted, lock for private non-encrypted
-        let statusIcon = '';
-        if (channel.encrypted) {
-          statusIcon = '<span class="channel-encrypted" title="E2E Encrypted">&#128737;</span>';
-        } else if (!channel.isPublic) {
-          statusIcon = '<span class="channel-lock" title="Private">&#128274;</span>';
-        }
-        // Show wingman icon if Wingman has access
-        const wingmanIcon = channel.hasWingmanAccess
-          ? '<img src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />'
-          : '';
-        // Show unread badge
-        let unreadBadge = '';
-        if (mentionCount > 0 && !isActive) {
-          unreadBadge = `<span class="unread-badge mention">(${mentionCount > 99 ? '99+' : mentionCount})</span>`;
-        }
-        return `<button class="chat-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
-          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}${wingmanIcon}${unreadBadge}</div>
-        </button>`;
-      })
-      .join("");
-  }
+    // Build signature: channel ids, active state, unread counts, mention counts
+    const channelSignature = channels.map(c => {
+      const isActive = c.id === state.chat.selectedChannelId;
+      return `${c.id}:${isActive}:${getUnreadCount(c.id)}:${getSessionMentionCount(c.id)}:${c.encrypted}:${c.isPublic}:${c.hasWingmanAccess}`;
+    }).join('|');
 
-  // Render DM channels
-  if (el.dmList) {
-    const dmChannels = state.chat.dmChannels;
-    if (dmChannels.length === 0) {
-      el.dmList.innerHTML = `<p class="dm-empty">No conversations yet</p>`;
-    } else {
-      el.dmList.innerHTML = dmChannels
-        .map((dm) => {
-          const isActive = dm.id === state.chat.selectedChannelId;
-          const unreadCount = getUnreadCount(dm.id);
+    if (channelSignature !== lastRenderedChannelSignature) {
+      lastRenderedChannelSignature = channelSignature;
+      el.chatChannelList.innerHTML = channels
+        .map((channel) => {
+          const isActive = channel.id === state.chat.selectedChannelId;
+          const unreadCount = getUnreadCount(channel.id);
+          const mentionCount = getSessionMentionCount(channel.id);
           const hasUnread = unreadCount > 0 && !isActive;
-          const displayName = getDmDisplayName(dm);
-          const avatarUrl = getAuthorAvatarUrl(dm.otherNpub);
-          const unreadBadge = hasUnread
-            ? `<span class="unread-badge">(${unreadCount > 99 ? '99+' : unreadCount})</span>`
+          // Show shield for encrypted, lock for private non-encrypted
+          let statusIcon = '';
+          if (channel.encrypted) {
+            statusIcon = '<span class="channel-encrypted" title="E2E Encrypted">&#128737;</span>';
+          } else if (!channel.isPublic) {
+            statusIcon = '<span class="channel-lock" title="Private">&#128274;</span>';
+          }
+          // Show wingman icon if Wingman has access
+          const wingmanIcon = channel.hasWingmanAccess
+            ? '<img src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />'
             : '';
-          return `<button class="chat-channel dm-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${dm.id}">
-            <img class="dm-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
-            <div class="dm-info">
-              <div class="chat-channel-name">${escapeHtml(displayName)}${unreadBadge}</div>
-            </div>
+          // Show unread badge
+          let unreadBadge = '';
+          if (mentionCount > 0 && !isActive) {
+            unreadBadge = `<span class="unread-badge mention">(${mentionCount > 99 ? '99+' : mentionCount})</span>`;
+          }
+          return `<button class="chat-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
+            <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}${wingmanIcon}${unreadBadge}</div>
           </button>`;
         })
         .join("");
+    }
+  }
+
+  // Render DM channels (with signature-based caching to prevent avatar flickering on Safari)
+  if (el.dmList) {
+    const dmChannels = state.chat.dmChannels;
+    // Build signature: dm ids, active state, unread counts, avatar urls
+    const dmSignature = dmChannels.length === 0
+      ? 'empty'
+      : dmChannels.map(dm => {
+          const isActive = dm.id === state.chat.selectedChannelId;
+          return `${dm.id}:${isActive}:${getUnreadCount(dm.id)}:${dm.otherNpub}`;
+        }).join('|');
+
+    if (dmSignature !== lastRenderedDmSignature) {
+      lastRenderedDmSignature = dmSignature;
+      if (dmChannels.length === 0) {
+        el.dmList.innerHTML = `<p class="dm-empty">No conversations yet</p>`;
+      } else {
+        el.dmList.innerHTML = dmChannels
+          .map((dm) => {
+            const isActive = dm.id === state.chat.selectedChannelId;
+            const unreadCount = getUnreadCount(dm.id);
+            const hasUnread = unreadCount > 0 && !isActive;
+            const displayName = getDmDisplayName(dm);
+            const avatarUrl = getAuthorAvatarUrl(dm.otherNpub);
+            const unreadBadge = hasUnread
+              ? `<span class="unread-badge">(${unreadCount > 99 ? '99+' : unreadCount})</span>`
+              : '';
+            return `<button class="chat-channel dm-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${dm.id}">
+              <img class="dm-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
+              <div class="dm-info">
+                <div class="chat-channel-name">${escapeHtml(displayName)}${unreadBadge}</div>
+              </div>
+            </button>`;
+          })
+          .join("");
+      }
     }
   }
 

@@ -15,6 +15,11 @@ export type Todo = {
   scheduled_for: string | null;
   tags: string;
   group_id: number | null;
+  assigned_to: string | null;
+};
+
+export type TodoWithBoard = Todo & {
+  group_name: string | null;
 };
 
 export type Summary = {
@@ -58,6 +63,20 @@ export type Message = {
   key_version: number | null; // Which key version was used for encryption
   created_at: string;
   edited_at: string | null;
+};
+
+export type Reaction = {
+  id: number;
+  message_id: number;
+  reactor: string;
+  emoji: string;
+  created_at: string;
+};
+
+export type ReactionGroup = {
+  emoji: string;
+  count: number;
+  reactors: string[];
 };
 
 export type ChannelReadState = {
@@ -295,10 +314,20 @@ addColumn("ALTER TABLE todos ADD COLUMN owner TEXT NOT NULL DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN scheduled_for TEXT DEFAULT NULL");
 addColumn("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE");
+addColumn("ALTER TABLE todos ADD COLUMN assigned_to TEXT DEFAULT NULL");
 
 // Index for efficient group todo queries
 try {
   db.run("CREATE INDEX idx_todos_group_id ON todos(group_id)");
+} catch (error) {
+  if (!(error instanceof Error) || !error.message.includes("already exists")) {
+    throw error;
+  }
+}
+
+// Index for efficient assigned_to queries (All My Tasks view)
+try {
+  db.run("CREATE INDEX idx_todos_assigned_to ON todos(assigned_to)");
 } catch (error) {
   if (!(error instanceof Error) || !error.message.includes("already exists")) {
     throw error;
@@ -722,6 +751,20 @@ const listByOwnerStmt = db.query<Todo>(
 const listByGroupStmt = db.query<Todo>(
   "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? ORDER BY created_at DESC"
 );
+const listByGroupAssignedStmt = db.query<Todo>(
+  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? AND assigned_to = ? ORDER BY created_at DESC"
+);
+const listAllAssignedStmt = db.query<Todo & { group_name: string | null }>(
+  `SELECT todos.*, groups.name as group_name
+   FROM todos
+   LEFT JOIN groups ON todos.group_id = groups.id
+   WHERE todos.deleted = 0
+     AND (
+       todos.assigned_to = ?1
+       OR (todos.owner = ?1 AND todos.group_id IS NULL)
+     )
+   ORDER BY todos.created_at DESC`
+);
 const listScheduledStmt = db.query<Todo>(
   `SELECT * FROM todos
    WHERE deleted = 0
@@ -739,11 +782,11 @@ const listUnscheduledStmt = db.query<Todo>(
    ORDER BY created_at DESC`
 );
 const insertStmt = db.query<Todo>(
-  "INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id) VALUES (?, '', 'sand', 'new', 0, ?, ?, ?) RETURNING *"
+  "INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id, assigned_to) VALUES (?, '', 'sand', 'new', 0, ?, ?, ?, ?) RETURNING *"
 );
 const insertFullStmt = db.query<Todo>(
-  `INSERT INTO todos (title, description, priority, state, done, owner, scheduled_for, tags, group_id)
-   VALUES (?, ?, ?, ?, CASE WHEN ? = 'done' THEN 1 ELSE 0 END, ?, ?, ?, ?)
+  `INSERT INTO todos (title, description, priority, state, done, owner, scheduled_for, tags, group_id, assigned_to)
+   VALUES (?, ?, ?, ?, CASE WHEN ? = 'done' THEN 1 ELSE 0 END, ?, ?, ?, ?, ?)
    RETURNING *`
 );
 const deleteStmt = db.query("UPDATE todos SET deleted = 1 WHERE id = ? AND owner = ?");
@@ -758,7 +801,8 @@ const updateStmt = db.query<Todo>(
     state = ?,
     done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
     scheduled_for = ?,
-    tags = ?
+    tags = ?,
+    assigned_to = ?
    WHERE id = ? AND owner = ?
    RETURNING *`
 );
@@ -779,7 +823,8 @@ const updateGroupTodoStmt = db.query<Todo>(
     state = ?,
     done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
     scheduled_for = ?,
-    tags = ?
+    tags = ?,
+    assigned_to = ?
    WHERE id = ? AND group_id = ?
    RETURNING *`
 );
@@ -789,6 +834,12 @@ const transitionGroupTodoStmt = db.query<Todo>(
     state = ?,
     done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END
    WHERE id = ? AND group_id = ?
+   RETURNING *`
+);
+const moveTodoBoardStmt = db.query<Todo>(
+  `UPDATE todos
+   SET group_id = ?, assigned_to = ?
+   WHERE id = ? AND owner = ?
    RETURNING *`
 );
 const upsertSummaryStmt = db.query<Summary>(
@@ -867,6 +918,22 @@ const getMessageByIdStmt = db.query<Message>(
 );
 const deleteMessageStmt = db.query("DELETE FROM messages WHERE id = ?");
 
+// Reaction statements
+const getReactionStmt = db.query<Reaction>(
+  "SELECT * FROM message_reactions WHERE message_id = ? AND reactor = ? AND emoji = ?"
+);
+const insertReactionStmt = db.query<Reaction>(
+  `INSERT INTO message_reactions (message_id, reactor, emoji)
+   VALUES (?, ?, ?)
+   RETURNING *`
+);
+const deleteReactionStmt = db.query(
+  "DELETE FROM message_reactions WHERE message_id = ? AND reactor = ? AND emoji = ?"
+);
+const listReactionsForMessageStmt = db.query<Reaction>(
+  "SELECT * FROM message_reactions WHERE message_id = ? ORDER BY created_at ASC"
+);
+
 // Channel read state statements
 const getReadStateStmt = db.query<ChannelReadState>(
   "SELECT * FROM channel_read_state WHERE npub = ? AND channel_id = ?"
@@ -905,8 +972,19 @@ export function listTodos(owner: string | null, filterTags?: string[]) {
   });
 }
 
-export function listGroupTodos(groupId: number, filterTags?: string[]) {
-  const todos = listByGroupStmt.all(groupId);
+export function listGroupTodos(groupId: number, filterTags?: string[], assigneeFilter?: string) {
+  const todos = assigneeFilter
+    ? listByGroupAssignedStmt.all(groupId, assigneeFilter)
+    : listByGroupStmt.all(groupId);
+  if (!filterTags || filterTags.length === 0) return todos;
+  return todos.filter((todo) => {
+    const todoTags = todo.tags ? todo.tags.split(",").map((t) => t.trim().toLowerCase()) : [];
+    return filterTags.some((ft) => todoTags.includes(ft.toLowerCase()));
+  });
+}
+
+export function listAllAssignedTodos(npub: string, filterTags?: string[]): TodoWithBoard[] {
+  const todos = listAllAssignedStmt.all(npub);
   if (!filterTags || filterTags.length === 0) return todos;
   return todos.filter((todo) => {
     const todoTags = todo.tags ? todo.tags.split(",").map((t) => t.trim().toLowerCase()) : [];
@@ -918,6 +996,10 @@ export function getTodoById(id: number) {
   return getTodoByIdStmt.get(id) as Todo | undefined ?? null;
 }
 
+export function moveTodoToBoard(id: number, owner: string, newGroupId: number | null, newAssignee: string | null) {
+  return moveTodoBoardStmt.get(newGroupId, newAssignee, id, owner) ?? null;
+}
+
 export function listScheduledTodos(owner: string, endDate: string) {
   return listScheduledStmt.all(owner, endDate);
 }
@@ -926,9 +1008,9 @@ export function listUnscheduledTodos(owner: string) {
   return listUnscheduledStmt.all(owner);
 }
 
-export function addTodo(title: string, owner: string, tags: string = "", groupId: number | null = null) {
+export function addTodo(title: string, owner: string, tags: string = "", groupId: number | null = null, assignedTo: string | null = null) {
   if (!title.trim()) return null;
-  const todo = insertStmt.get(title.trim(), owner, tags, groupId) as Todo | undefined;
+  const todo = insertStmt.get(title.trim(), owner, tags, groupId, assignedTo) as Todo | undefined;
   return todo ?? null;
 }
 
@@ -941,6 +1023,7 @@ export function addTodoFull(
     state?: TodoState;
     scheduled_for?: string | null;
     tags?: string;
+    assigned_to?: string | null;
   },
   groupId: number | null = null
 ) {
@@ -951,6 +1034,7 @@ export function addTodoFull(
   const state = fields.state ?? "new";
   const scheduled_for = fields.scheduled_for ?? null;
   const tags = fields.tags?.trim() ?? "";
+  const assigned_to = fields.assigned_to ?? null;
   const todo = insertFullStmt.get(
     title,
     description,
@@ -960,7 +1044,8 @@ export function addTodoFull(
     owner,
     scheduled_for,
     tags,
-    groupId
+    groupId,
+    assigned_to
   ) as Todo | undefined;
   return todo ?? null;
 }
@@ -979,6 +1064,7 @@ export function updateTodo(
     state: TodoState;
     scheduled_for: string | null;
     tags: string;
+    assigned_to: string | null;
   }
 ) {
   const todo = updateStmt.get(
@@ -989,6 +1075,7 @@ export function updateTodo(
     fields.state,
     fields.scheduled_for,
     fields.tags,
+    fields.assigned_to,
     id,
     owner
   ) as Todo | undefined;
@@ -1015,6 +1102,7 @@ export function updateGroupTodo(
     state: TodoState;
     scheduled_for: string | null;
     tags: string;
+    assigned_to: string | null;
   }
 ) {
   const todo = updateGroupTodoStmt.get(
@@ -1025,6 +1113,7 @@ export function updateGroupTodo(
     fields.state,
     fields.scheduled_for,
     fields.tags,
+    fields.assigned_to,
     id,
     groupId
   ) as Todo | undefined;
@@ -1144,6 +1233,67 @@ export function createEncryptedMessage(
 export function deleteMessage(id: number): boolean {
   const result = deleteMessageStmt.run(id);
   return result.changes > 0;
+}
+
+// Reaction functions
+export function toggleReaction(
+  messageId: number,
+  reactor: string,
+  emoji: string
+): { action: "add" | "remove"; reaction?: Reaction } {
+  const existing = getReactionStmt.get(messageId, reactor, emoji) as Reaction | undefined;
+  if (existing) {
+    deleteReactionStmt.run(messageId, reactor, emoji);
+    return { action: "remove" };
+  }
+  const reaction = insertReactionStmt.get(messageId, reactor, emoji) as Reaction | undefined;
+  return { action: "add", reaction: reaction ?? undefined };
+}
+
+export function getMessageReactions(messageId: number): ReactionGroup[] {
+  const reactions = listReactionsForMessageStmt.all(messageId);
+  return groupReactions(reactions);
+}
+
+export function getMessagesReactions(messageIds: number[]): Map<number, ReactionGroup[]> {
+  const result = new Map<number, ReactionGroup[]>();
+  if (messageIds.length === 0) return result;
+
+  // Batch query all reactions for these messages
+  const placeholders = messageIds.map(() => "?").join(",");
+  const stmt = db.query<Reaction>(
+    `SELECT * FROM message_reactions WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
+  );
+  const allReactions = stmt.all(...messageIds);
+
+  // Group by message_id first
+  const byMessage = new Map<number, Reaction[]>();
+  for (const r of allReactions) {
+    const list = byMessage.get(r.message_id) || [];
+    list.push(r);
+    byMessage.set(r.message_id, list);
+  }
+
+  // Convert to ReactionGroup arrays
+  for (const [msgId, reactions] of byMessage) {
+    result.set(msgId, groupReactions(reactions));
+  }
+
+  return result;
+}
+
+function groupReactions(reactions: Reaction[]): ReactionGroup[] {
+  const groups = new Map<string, ReactionGroup>();
+  for (const r of reactions) {
+    const existing = groups.get(r.emoji);
+    if (existing) {
+      existing.count++;
+      existing.reactors.push(r.reactor);
+    } else {
+      groups.set(r.emoji, { emoji: r.emoji, count: 1, reactors: [r.reactor] });
+    }
+  }
+  return Array.from(groups.values());
 }
 
 // Channel read state functions

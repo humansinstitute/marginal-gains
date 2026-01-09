@@ -5,17 +5,25 @@ import { escapeHtml } from "../utils/html";
 
 import { renderAppMenu, renderPinModal } from "./components";
 
-import type { Group, Todo } from "../db";
+import type { Group, GroupMember, Todo } from "../db";
 import type { Session, TodoPriority, TodoState } from "../types";
+
+// Extended todo type that may include board info (for All Tasks view)
+type TodoDisplay = Todo & { group_name?: string | null };
+
+type GroupMemberWithProfile = GroupMember & { display_name: string | null; picture: string | null };
 
 type RenderArgs = {
   showArchive: boolean;
   session: Session | null;
   filterTags?: string[];
-  todos?: Todo[];
+  todos?: TodoDisplay[];
   userGroups?: Group[];
   selectedGroup?: Group | null;
   canManage?: boolean;
+  isAllTasksView?: boolean;
+  mineFilter?: boolean;
+  groupMembers?: GroupMemberWithProfile[];
 };
 
 type PageState = {
@@ -23,14 +31,20 @@ type PageState = {
   archiveLabel: string;
   remainingText: string;
   tagFilterBar: string;
-  activeTodos: Todo[];
-  doneTodos: Todo[];
+  activeTodos: TodoDisplay[];
+  doneTodos: TodoDisplay[];
   emptyActiveMessage: string;
   emptyArchiveMessage: string;
   showArchive: boolean;
   groupId: number | null;
   canManage: boolean;
   contextSwitcher: string;
+  isAllTasksView: boolean;
+  mineFilter: boolean;
+  mineFilterToggle: string;
+  groupMembers: GroupMemberWithProfile[];
+  currentUserNpub: string | null;
+  userGroups: Group[];
 };
 
 export function renderHomePage({
@@ -41,9 +55,12 @@ export function renderHomePage({
   userGroups = [],
   selectedGroup = null,
   canManage = true,
+  isAllTasksView = false,
+  mineFilter = false,
+  groupMembers = [],
 }: RenderArgs) {
   const filteredTodos = filterTodos(todos, filterTags);
-  const pageState = buildPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage);
+  const pageState = buildPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage, isAllTasksView, mineFilter, groupMembers);
 
   return `<!doctype html>
 <html lang="en">
@@ -62,7 +79,7 @@ ${renderHead()}
     ${renderQrModal()}
     ${renderProfileModal()}
     ${renderPinModal()}
-    ${renderTaskEditModal(pageState.groupId)}
+    ${renderTaskEditModal(pageState.groupId, pageState.groupMembers, pageState.userGroups)}
   </main>
   ${renderSessionSeed(session, pageState.groupId)}
   <script type="module" src="/app.js?v=3"></script>
@@ -165,6 +182,7 @@ function renderWork(state: PageState) {
       <h2>Work</h2>
       <div class="work-header-actions">
         ${state.contextSwitcher}
+        ${state.mineFilterToggle}
         <div class="view-switcher" data-view-switcher>
           <button type="button" class="view-btn active" data-view-mode="list" title="List view">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4h12v1H2V4zm0 3.5h12v1H2v-1zm0 3.5h12v1H2v-1z"/></svg>
@@ -179,12 +197,12 @@ function renderWork(state: PageState) {
     <p class="remaining-summary">${state.remainingText}</p>
     ${state.tagFilterBar}
     <div class="todo-list-view" data-list-view>
-      ${renderTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage)}
+      ${renderTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
     </div>
     <div class="kanban-view" data-kanban-view hidden>
-      ${renderKanbanBoard(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage)}
+      ${renderKanbanBoard(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
     </div>
-    ${state.showArchive ? renderArchiveSection(state.doneTodos, state.emptyArchiveMessage, state.groupId, state.canManage) : ""}
+    ${state.showArchive ? renderArchiveSection(state.doneTodos, state.emptyArchiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub) : ""}
   </section>`;
 }
 
@@ -271,27 +289,39 @@ function renderSessionSeed(session: Session | null, groupId: number | null) {
 }
 
 function buildPageState(
-  todos: Todo[],
+  todos: TodoDisplay[],
   filterTags: string[],
   showArchive: boolean,
   session: Session | null,
   userGroups: Group[],
   selectedGroup: Group | null,
-  canManage: boolean
+  canManage: boolean,
+  isAllTasksView: boolean,
+  mineFilter: boolean,
+  groupMembers: GroupMemberWithProfile[]
 ): PageState {
   const groupId = selectedGroup?.id ?? null;
   const activeTodos = todos.filter((t) => t.state !== "done");
   const doneTodos = todos.filter((t) => t.state === "done");
 
   // Build URLs with group context preserved
-  const baseUrl = groupId ? `/todo?group=${groupId}` : "/todo";
-  const archiveHref = showArchive ? baseUrl : `${baseUrl}${groupId ? "&" : "?"}archive=1`;
+  let baseUrl: string;
+  if (isAllTasksView) {
+    baseUrl = "/todo?view=all";
+  } else if (groupId) {
+    baseUrl = `/todo?group=${groupId}${mineFilter ? "&mine=1" : ""}`;
+  } else {
+    baseUrl = "/todo";
+  }
+  const archiveHref = showArchive ? baseUrl : `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}archive=1`;
   const archiveLabel = showArchive ? "Hide archive" : `Archive (${doneTodos.length})`;
-  const tagFilterBar = session ? renderTagFilterBar(todos, filterTags, showArchive, groupId) : "";
+  const tagFilterBar = session ? renderTagFilterBar(todos, filterTags, showArchive, groupId, isAllTasksView, mineFilter) : "";
   const emptyActiveMessage = session ? "No active work. Add something new!" : "Sign in to view your todos.";
   const emptyArchiveMessage = session ? "Nothing archived yet." : "Sign in to view your archive.";
   const remainingText = session ? (activeTodos.length === 0 ? "All clear." : `${activeTodos.length} left to go.`) : "";
-  const contextSwitcher = session ? renderContextSwitcher(userGroups, selectedGroup) : "";
+  const contextSwitcher = session ? renderContextSwitcher(userGroups, selectedGroup, isAllTasksView) : "";
+  const mineFilterToggle = session && groupId && !isAllTasksView ? renderMineFilterToggle(groupId, mineFilter, showArchive) : "";
+  const currentUserNpub = session?.npub ?? null;
 
   return {
     archiveHref,
@@ -306,20 +336,38 @@ function buildPageState(
     groupId,
     canManage,
     contextSwitcher,
+    isAllTasksView,
+    mineFilter,
+    mineFilterToggle,
+    groupMembers,
+    currentUserNpub,
+    userGroups,
   };
 }
 
-function renderContextSwitcher(userGroups: Group[], selectedGroup: Group | null): string {
+function renderContextSwitcher(userGroups: Group[], selectedGroup: Group | null, isAllTasksView: boolean): string {
   if (userGroups.length === 0) return "";
 
+  const isPersonal = !selectedGroup && !isAllTasksView;
   const options = [
-    `<option value="">Personal</option>`,
+    `<option value="" ${isPersonal ? "selected" : ""}>Personal</option>`,
+    `<option value="all" ${isAllTasksView ? "selected" : ""}>All My Tasks</option>`,
     ...userGroups.map(
       (g) => `<option value="${g.id}" ${selectedGroup?.id === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`
     ),
   ].join("");
 
   return `<select class="context-switcher" data-context-switcher title="Switch context">${options}</select>`;
+}
+
+function renderMineFilterToggle(groupId: number, mineFilter: boolean, showArchive: boolean): string {
+  const baseUrl = `/todo?group=${groupId}`;
+  const archiveParam = showArchive ? "&archive=1" : "";
+  const href = mineFilter ? `${baseUrl}${archiveParam}` : `${baseUrl}&mine=1${archiveParam}`;
+  return `<a href="${href}" class="mine-filter-toggle${mineFilter ? " active" : ""}" title="${mineFilter ? "Show all tasks" : "Show only my tasks"}">
+    <span class="mine-filter-icon">&#128100;</span>
+    <span class="mine-filter-label">${mineFilter ? "My Tasks" : "All"}</span>
+  </a>`;
 }
 
 function filterTodos(allTodos: Todo[], filterTags: string[]) {
@@ -330,11 +378,13 @@ function filterTodos(allTodos: Todo[], filterTags: string[]) {
   });
 }
 
-function renderTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null) {
-  // Build base URL with group context
-  const groupParam = groupId ? `group=${groupId}` : "";
+function renderTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null, isAllTasksView: boolean, mineFilter: boolean) {
+  // Build base URL with all context preserved
+  const viewParam = isAllTasksView ? "view=all" : "";
+  const groupParam = !isAllTasksView && groupId ? `group=${groupId}` : "";
+  const mineParam = !isAllTasksView && groupId && mineFilter ? "mine=1" : "";
   const archiveParam = showArchive ? "archive=1" : "";
-  const params = [groupParam, archiveParam].filter(Boolean);
+  const params = [viewParam, groupParam, mineParam, archiveParam].filter(Boolean);
   const baseUrl = params.length > 0 ? `/todo?${params.join("&")}` : "/todo";
   const separator = params.length > 0 ? "&" : "?";
 
@@ -373,15 +423,15 @@ function collectTags(todos: Todo[]) {
   return Array.from(allTags);
 }
 
-function renderTodoList(todos: Todo[], emptyMessage: string, groupId: number | null, canManage: boolean) {
+function renderTodoList(todos: TodoDisplay[], emptyMessage: string, groupId: number | null, canManage: boolean, isAllTasksView = false, currentUserNpub: string | null = null) {
   if (todos.length === 0) {
     return `<ul class="todo-list"><li>${emptyMessage}</li></ul>`;
   }
-  return `<ul class="todo-list">${todos.map((todo) => renderTodoItem(todo, groupId, canManage)).join("")}</ul>`;
+  return `<ul class="todo-list">${todos.map((todo) => renderTodoItem(todo, groupId, canManage, isAllTasksView, currentUserNpub)).join("")}</ul>`;
 }
 
-function renderKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: number | null, canManage: boolean) {
-  const columns: { state: string; label: string; todos: Todo[] }[] = [
+function renderKanbanBoard(todos: TodoDisplay[], _emptyMessage: string, groupId: number | null, canManage: boolean, isAllTasksView = false, currentUserNpub: string | null = null) {
+  const columns: { state: string; label: string; todos: TodoDisplay[] }[] = [
     { state: "new", label: "New", todos: [] },
     { state: "ready", label: "Ready", todos: [] },
     { state: "in_progress", label: "In Progress", todos: [] },
@@ -403,7 +453,7 @@ function renderKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: number
           <span class="kanban-count">${col.todos.length}</span>
         </div>
         <div class="kanban-cards" data-kanban-cards="${col.state}" ${canManage ? "" : 'data-readonly="true"'}>
-          ${col.todos.length === 0 ? `<p class="kanban-empty">No tasks</p>` : col.todos.map((todo) => renderKanbanCard(todo, groupId)).join("")}
+          ${col.todos.length === 0 ? `<p class="kanban-empty">No tasks</p>` : col.todos.map((todo) => renderKanbanCard(todo, groupId, isAllTasksView, currentUserNpub)).join("")}
         </div>
       </div>`
     )
@@ -412,7 +462,7 @@ function renderKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: number
   return `<div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""}>${columnHtml}</div>`;
 }
 
-function renderKanbanCard(todo: Todo, groupId: number | null) {
+function renderKanbanCard(todo: TodoDisplay, groupId: number | null, isAllTasksView = false, _currentUserNpub: string | null = null) {
   const priorityClass = `priority-${todo.priority}`;
   const tagsHtml = todo.tags
     ? todo.tags
@@ -427,11 +477,37 @@ function renderKanbanCard(todo: Todo, groupId: number | null) {
     ? `<button type="button" class="thread-link-badge" data-view-threads="${todo.id}" title="View linked threads">&#128172; ${threadCount}</button>`
     : "";
 
+  // Determine effective assignee - for personal tasks, show owner as assignee
+  const isPersonalTask = todo.group_id === null;
+  const effectiveAssignee = todo.assigned_to || (isPersonalTask ? todo.owner : null);
+
+  // Assignee avatar - show initials from npub
+  const assigneeHtml = effectiveAssignee
+    ? `<span class="assignee-avatar" data-assignee-npub="${effectiveAssignee}" title="Assigned">
+        <span class="avatar-initials">${formatAvatarFallback(effectiveAssignee)}</span>
+      </span>`
+    : "";
+
+  // Board name badge for All Tasks view
+  const boardName = isAllTasksView
+    ? (todo.group_name ? escapeHtml(todo.group_name) : "Personal")
+    : "";
+  const boardBadge = boardName
+    ? `<span class="badge board-badge" title="Board">${boardName}</span>`
+    : "";
+
+  // Use todo's actual group_id for data attribute (for proper API routing)
+  const cardGroupId = todo.group_id ?? groupId;
+
   return `
-    <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}" ${groupId ? `data-group-id="${groupId}"` : ""}>
-      <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
+    <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}" ${cardGroupId ? `data-group-id="${cardGroupId}"` : ""} ${effectiveAssignee ? `data-assigned-to="${effectiveAssignee}"` : ""}>
+      <div class="kanban-card-header">
+        <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
+        ${assigneeHtml}
+      </div>
       ${todo.description ? `<p class="kanban-card-desc">${escapeHtml(todo.description.slice(0, 100))}${todo.description.length > 100 ? "..." : ""}</p>` : ""}
       <div class="kanban-card-meta">
+        ${boardBadge}
         <span class="badge ${priorityClass}">${formatPriorityLabel(todo.priority)}</span>
         ${tagsHtml}
         ${threadBadge}
@@ -439,11 +515,11 @@ function renderKanbanCard(todo: Todo, groupId: number | null) {
     </div>`;
 }
 
-function renderArchiveSection(todos: Todo[], emptyMessage: string, groupId: number | null, canManage: boolean) {
+function renderArchiveSection(todos: TodoDisplay[], emptyMessage: string, groupId: number | null, canManage: boolean, isAllTasksView = false, currentUserNpub: string | null = null) {
   return `
     <section class="archive-section">
       <div class="section-heading"><h2>Archive</h2></div>
-      ${renderTodoList(todos, emptyMessage, groupId, canManage)}
+      ${renderTodoList(todos, emptyMessage, groupId, canManage, isAllTasksView, currentUserNpub)}
     </section>`;
 }
 
@@ -452,16 +528,39 @@ function formatAvatarFallback(npub: string) {
   return npub.replace(/^npub1/, "").slice(0, 2).toUpperCase();
 }
 
-function renderTodoItem(todo: Todo, groupId: number | null, canManage: boolean) {
+function renderTodoItem(todo: TodoDisplay, groupId: number | null, canManage: boolean, isAllTasksView = false, _currentUserNpub: string | null = null) {
   const description = todo.description ? `<p class="todo-description">${escapeHtml(todo.description)}</p>` : "";
   const scheduled = todo.scheduled_for
     ? `<p class="todo-description"><strong>Scheduled for:</strong> ${escapeHtml(todo.scheduled_for)}</p>`
     : "";
   const tagsDisplay = renderTagsDisplay(todo.tags);
-  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
+
+  // Use todo's actual group_id for proper API routing
+  const effectiveGroupId = todo.group_id ?? groupId;
+  const groupIdField = effectiveGroupId ? `<input type="hidden" name="group_id" value="${effectiveGroupId}" />` : "";
+
   const threadCount = getThreadLinkCount(todo.id);
   const threadBadge = threadCount > 0
     ? `<button type="button" class="thread-link-badge" data-view-threads="${todo.id}" title="View linked threads">&#128172; ${threadCount}</button>`
+    : "";
+
+  // Determine effective assignee - for personal tasks, show owner as assignee
+  const isPersonalTask = todo.group_id === null;
+  const effectiveAssignee = todo.assigned_to || (isPersonalTask ? todo.owner : null);
+
+  // Assignee avatar for list view
+  const assigneeHtml = effectiveAssignee
+    ? `<span class="assignee-avatar" data-assignee-npub="${effectiveAssignee}" title="Assigned">
+        <span class="avatar-initials">${formatAvatarFallback(effectiveAssignee)}</span>
+      </span>`
+    : "";
+
+  // Board name badge for All Tasks view
+  const boardName = isAllTasksView
+    ? (todo.group_name ? escapeHtml(todo.group_name) : "Personal")
+    : "";
+  const boardBadge = boardName
+    ? `<span class="badge board-badge" title="Board">${boardName}</span>`
     : "";
 
   if (!canManage) {
@@ -472,10 +571,12 @@ function renderTodoItem(todo: Todo, groupId: number | null, canManage: boolean) 
         <summary>
           <span class="todo-title">${escapeHtml(todo.title)}</span>
           <span class="badges">
+            ${boardBadge}
             <span class="badge priority-${todo.priority}">${formatPriorityLabel(todo.priority)}</span>
             <span class="badge state-${todo.state}">${formatStateLabel(todo.state)}</span>
             ${tagsDisplay}
             ${threadBadge}
+            ${assigneeHtml}
           </span>
         </summary>
         <div class="todo-body">
@@ -492,10 +593,12 @@ function renderTodoItem(todo: Todo, groupId: number | null, canManage: boolean) 
         <summary>
           <span class="todo-title">${escapeHtml(todo.title)}</span>
           <span class="badges">
+            ${boardBadge}
             <span class="badge priority-${todo.priority}">${formatPriorityLabel(todo.priority)}</span>
             <span class="badge state-${todo.state}">${formatStateLabel(todo.state)}</span>
             ${tagsDisplay}
             ${threadBadge}
+            ${assigneeHtml}
           </span>
         </summary>
         <div class="todo-body">
@@ -531,7 +634,7 @@ function renderTodoItem(todo: Todo, groupId: number | null, canManage: boolean) 
             ${renderTagsInput(todo.tags)}
             <button type="submit">Update</button>
           </form>
-          ${renderLifecycleActions(todo, groupId)}
+          ${renderLifecycleActions(todo, effectiveGroupId)}
         </div>
       </details>
     </li>`;
@@ -609,8 +712,22 @@ function renderTagsInput(tags: string) {
     </label>`;
 }
 
-function renderTaskEditModal(groupId: number | null) {
-  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
+function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWithProfile[] = [], userGroups: Group[] = []) {
+  // Board selector options - Personal + all user's groups
+  const boardOptions = [
+    `<option value="">Personal</option>`,
+    ...userGroups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`),
+  ].join("");
+
+  // Assignee dropdown - populated dynamically by JS based on selected board
+  const assigneeOptions = [
+    `<option value="">Unassigned</option>`,
+    ...groupMembers.map((m) => {
+      const displayName = m.display_name || m.npub.slice(0, 12) + "...";
+      return `<option value="${m.npub}">${escapeHtml(displayName)}</option>`;
+    }),
+  ].join("");
+
   return `<div class="task-modal-overlay" data-task-modal hidden>
     <div class="task-modal">
       <div class="task-modal-header">
@@ -618,7 +735,12 @@ function renderTaskEditModal(groupId: number | null) {
         <button class="task-modal-close" type="button" data-task-modal-close aria-label="Close">&times;</button>
       </div>
       <form class="task-modal-form" method="post" data-task-modal-form>
-        ${groupIdField}
+        <input type="hidden" name="group_id" data-task-modal-group-id value="" />
+        <label>Board
+          <select name="board" data-task-modal-board>
+            ${boardOptions}
+          </select>
+        </label>
         <label>Title
           <input name="title" data-task-modal-title required />
         </label>
@@ -643,6 +765,11 @@ function renderTaskEditModal(groupId: number | null) {
             </select>
           </label>
         </div>
+        <label data-task-modal-assignee-label ${userGroups.length === 0 ? 'hidden' : ''}>Assignee
+          <select name="assigned_to" data-task-modal-assignee>
+            ${assigneeOptions}
+          </select>
+        </label>
         <label>Scheduled For
           <input type="date" name="scheduled_for" data-task-modal-scheduled />
         </label>

@@ -33,6 +33,7 @@ import {
   handleSendMessage,
   handleStoreChannelKey,
   handleStoreChannelKeysBatch,
+  handleToggleReaction,
   handleUpdateChannel,
   handleUpdateUser,
 } from "./routes/chat";
@@ -298,6 +299,8 @@ const server = Bun.serve({
         if (pathname === "/chat/users") return handleUpdateUser(req, session);
         const sendMessageMatch = pathname.match(/^\/chat\/channels\/(\d+)\/messages$/);
         if (sendMessageMatch) return handleSendMessage(req, session, Number(sendMessageMatch[1]));
+        const reactionMatch = pathname.match(/^\/api\/messages\/(\d+)\/reactions$/);
+        if (reactionMatch) return handleToggleReaction(req, session, Number(reactionMatch[1]));
         const markReadMatch = pathname.match(/^\/chat\/channels\/(\d+)\/read$/);
         if (markReadMatch) return handleMarkChannelRead(session, Number(markReadMatch[1]));
         const addChannelGroupsMatch = pathname.match(/^\/chat\/channels\/(\d+)\/groups$/);
