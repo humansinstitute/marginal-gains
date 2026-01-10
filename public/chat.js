@@ -2328,8 +2328,8 @@ function renderTaskSearchResults(tasks, container = null) {
     .map((task) => `<button type="button" class="task-result-item" data-link-task-id="${task.id}">
       <span class="task-result-title">${escapeHtml(task.title)}</span>
       <span class="task-result-meta">
-        <span class="badge priority-${task.priority}">${task.priority}</span>
-        <span class="badge state-${task.state}">${task.state.replace("_", " ")}</span>
+        ${task.group_name ? `<span class="task-result-board">${escapeHtml(task.group_name)}</span>` : '<span class="task-result-board">Personal</span>'}
+        <span class="badge badge-state-${task.state}">${task.state.replace("_", " ")}</span>
       </span>
     </button>`)
     .join("");
@@ -2444,7 +2444,7 @@ async function populateSearchBoardDropdown() {
   const select = document.querySelector("[data-task-search-board]");
   if (!select) return;
   const groups = await fetchUserGroups();
-  select.innerHTML = `<option value="">Personal</option>` +
+  select.innerHTML = `<option value="all">All Boards</option><option value="">Personal</option>` +
     groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
 }
 
@@ -2470,10 +2470,37 @@ function switchTaskLinkTab(tab) {
   } else {
     hide(createForm);
     show(existingSection);
-    // Load initial tasks for selected board
+    // Load initial tasks for selected board (default to "all")
     const boardSelect = document.querySelector("[data-task-search-board]");
-    const groupId = boardSelect?.value || null;
+    const groupId = boardSelect?.value || "all";
     searchTasks("", groupId);
+  }
+}
+
+// Unlink a thread from a task
+async function unlinkThreadFromTask(taskId, messageId) {
+  if (!confirm("Unlink this task from the thread?")) return;
+
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/threads/${messageId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to unlink");
+
+    // Remove from cache and refresh dropdown
+    threadLinkedTasks = threadLinkedTasks.filter((t) => t.id !== taskId);
+    const dropdown = document.querySelector(".thread-tasks-dropdown");
+    if (dropdown) dropdown.remove();
+
+    // Update button visibility
+    if (threadLinkedTasks.length === 0) {
+      hide(el.viewThreadTasksBtn);
+    } else {
+      showLinkedTasksDropdown();
+    }
+  } catch (err) {
+    console.error("Failed to unlink thread from task:", err);
+    alert("Failed to unlink task");
   }
 }
 
@@ -2491,13 +2518,16 @@ function showLinkedTasksDropdown() {
   const dropdown = document.createElement("div");
   dropdown.className = "thread-tasks-dropdown";
   dropdown.innerHTML = threadLinkedTasks
-    .map((task) => `<a href="/todo" class="thread-task-item" data-task-id="${task.id}">
-      <span class="thread-task-title">${escapeHtml(task.title)}</span>
-      <span class="thread-task-meta">
-        <span class="badge priority-${task.priority}">${task.priority}</span>
-        <span class="badge state-${task.state}">${task.state.replace("_", " ")}</span>
-      </span>
-    </a>`)
+    .map((task) => `<div class="thread-task-item">
+      <a href="/todo" class="thread-task-link" data-task-id="${task.id}">
+        <span class="thread-task-title">${escapeHtml(task.title)}</span>
+        <span class="thread-task-meta">
+          <span class="badge priority-${task.priority}">${task.priority}</span>
+          <span class="badge state-${task.state}">${task.state.replace("_", " ")}</span>
+        </span>
+      </a>
+      <button type="button" class="thread-task-unlink" data-unlink-task="${task.id}" title="Unlink">&times;</button>
+    </div>`)
     .join("");
 
   // Position below the button
@@ -2510,6 +2540,19 @@ function showLinkedTasksDropdown() {
   }
 
   document.body.appendChild(dropdown);
+
+  // Handle unlink button clicks
+  dropdown.addEventListener("click", (e) => {
+    const unlinkBtn = e.target.closest("[data-unlink-task]");
+    if (unlinkBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const taskId = Number(unlinkBtn.dataset.unlinkTask);
+      if (openThreadId) {
+        unlinkThreadFromTask(taskId, openThreadId);
+      }
+    }
+  });
 
   // Close on click outside
   const closeHandler = (e) => {

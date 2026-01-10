@@ -234,6 +234,50 @@
   margin: 0;
 }
 
+/* Task items */
+.crm-task-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+.crm-task-item:hover {
+  background: var(--bg);
+}
+
+.crm-task-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.crm-task-link:hover .crm-task-title {
+  text-decoration: underline;
+}
+
+.crm-task-title {
+  font-weight: 500;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crm-task-linked-to {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
 /* Pipeline */
 .crm-pipeline {
   height: 100%;

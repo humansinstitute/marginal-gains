@@ -3364,6 +3364,71 @@ body.chat-page {
   font-size: 0.9rem;
 }
 
+/* Task modal links section */
+.task-modal-links {
+  border-top: 1px solid var(--border);
+  padding: 1rem 1.25rem;
+}
+.task-modal-links-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+.task-modal-links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.task-modal-link-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+.task-modal-link-type {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  background: var(--surface);
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.task-modal-link-name {
+  flex: 1;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-modal-link-name:hover {
+  color: var(--muted);
+  text-decoration: underline;
+}
+.task-modal-link-unlink {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+}
+.task-modal-link-unlink:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
 /* ========== Task-Thread Linking Styles ========== */
 
 /* View linked tasks button in thread panel header */
@@ -3390,19 +3455,6 @@ body.chat-page {
   max-width: 320px;
   max-height: 200px;
   overflow-y: auto;
-}
-.thread-task-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  text-decoration: none;
-  color: inherit;
-  cursor: pointer;
-}
-.thread-task-item:hover {
-  background: var(--bg);
 }
 .thread-task-title {
   font-size: 0.85rem;
@@ -3809,7 +3861,7 @@ body.onboarding-mode .avatar-chip {
 .quick-react-bar {
   position: absolute;
   right: 8px;
-  top: 0;
+  bottom: 0;
   display: none;
   gap: 2px;
   padding: 4px 6px;
@@ -3896,4 +3948,407 @@ body.onboarding-mode .avatar-chip {
 
 .emoji-picker button:hover {
   background: var(--hover-bg);
+}
+
+/* ========== CRM Task Linking ========== */
+
+/* Task link modal for CRM */
+[data-task-link-modal] .chat-modal-body {
+  width: min(400px, 95vw);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+[data-task-link-modal] .chat-modal-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+[data-task-link-modal] .chat-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+/* Task search section */
+.crm-task-search {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.crm-task-search-input {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.crm-task-search-input:focus {
+  outline: none;
+  border-color: var(--text);
+}
+
+.crm-task-search-results {
+  margin-top: 0.75rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.crm-task-search-results[hidden] {
+  display: none;
+}
+
+.crm-task-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: none;
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.25rem;
+}
+
+.crm-task-result:hover {
+  background: var(--bg);
+}
+
+.crm-task-result-title {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.crm-task-result-meta {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.crm-task-search-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 0.75rem;
+  margin: 0;
+}
+
+/* Create task divider */
+.crm-task-create {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.crm-divider-text {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Linked tasks section in CRM views */
+.crm-tasks-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.crm-tasks-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.crm-tasks-header h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.crm-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.crm-tasks-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+  padding: 0.5rem 0;
+  margin: 0;
+}
+
+.crm-task-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+}
+
+.crm-task-item-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crm-task-item-state {
+  flex-shrink: 0;
+}
+
+.crm-task-item-unlink {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.25rem;
+  font-size: 0.85rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.crm-task-item-unlink:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+/* Task state badges (shared) */
+.badge-state-new {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.badge-state-ready {
+  background: #fce7f3;
+  color: #9d174d;
+}
+
+.badge-state-in_progress {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.badge-state-review {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge-state-done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+/* Link Task button in CRM tables */
+.crm-link-task-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.25rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.crm-link-task-btn:hover {
+  opacity: 1;
+}
+
+/* Linked tasks section in CRM modals */
+.crm-linked-tasks-section {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.crm-linked-tasks-section[hidden] {
+  display: none;
+}
+
+.crm-linked-tasks-header {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+.crm-linked-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.crm-linked-task-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+.crm-linked-task-link {
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: var(--text);
+}
+.crm-linked-task-link:hover {
+  color: var(--muted);
+}
+.crm-linked-task-link:hover .crm-linked-task-title {
+  text-decoration: underline;
+}
+
+.crm-linked-task-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crm-linked-task-unlink {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.crm-linked-task-unlink:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+/* Thread tasks dropdown unlink button */
+.thread-task-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.thread-task-item:hover {
+  background: var(--bg);
+}
+
+.thread-task-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.thread-task-unlink {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.thread-task-unlink:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+/* CRM Task Link Modal - Board Selectors */
+.crm-task-search-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.crm-task-board-select {
+  flex-shrink: 0;
+  min-width: 120px;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.crm-task-board-select:focus {
+  outline: none;
+  border-color: var(--text);
+}
+
+.crm-task-search-row .crm-task-search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.crm-task-create-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.crm-task-create-row .crm-task-board-select {
+  flex: 1;
+}
+
+/* Task search result items with board label */
+.crm-task-search-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.crm-task-search-item:hover {
+  background: var(--bg);
+}
+
+.crm-task-title {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.crm-task-meta {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.75rem;
+}
+
+.crm-task-board {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Chat task search result board label */
+.task-result-board {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
 }

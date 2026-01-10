@@ -20,6 +20,8 @@ const el = {
   closeBtn: null,
   cancelBtn: null,
   deleteBtn: null,
+  linksSection: null,
+  linksList: null,
 };
 
 export function initTaskModal() {
@@ -39,6 +41,8 @@ export function initTaskModal() {
   el.closeBtn = document.querySelector("[data-task-modal-close]");
   el.cancelBtn = document.querySelector("[data-task-modal-cancel]");
   el.deleteBtn = document.querySelector("[data-task-modal-delete]");
+  el.linksSection = document.querySelector("[data-task-modal-links]");
+  el.linksList = document.querySelector("[data-task-modal-links-list]");
 
   if (!el.overlay) return;
 
@@ -95,7 +99,7 @@ export function initTaskModal() {
   });
 }
 
-function openModalForTask(todoId, card) {
+async function openModalForTask(todoId, card) {
   currentTaskId = todoId;
 
   // Extract data from the card
@@ -119,9 +123,12 @@ function openModalForTask(todoId, card) {
   populateModal({ title, description: desc, priority, state, scheduled_for: "", tags, assigned_to, group_id });
   show(el.overlay);
   el.title?.focus();
+
+  // Fetch and display task links
+  await fetchAndDisplayLinks(todoId);
 }
 
-function openModalFromListItem(todoId, details) {
+async function openModalFromListItem(todoId, details) {
   currentTaskId = todoId;
 
   // Extract data from the details element
@@ -140,6 +147,9 @@ function openModalFromListItem(todoId, details) {
   populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id });
   show(el.overlay);
   el.title?.focus();
+
+  // Fetch and display task links
+  await fetchAndDisplayLinks(todoId);
 }
 
 function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id }) {
@@ -334,6 +344,151 @@ async function fetchGroupMembers(groupId) {
     }
   } catch (err) {
     console.error("Failed to fetch group members:", err);
+  }
+}
+
+async function fetchAndDisplayLinks(todoId) {
+  if (!el.linksSection || !el.linksList) return;
+
+  // Clear previous links
+  el.linksList.innerHTML = "";
+
+  try {
+    const res = await fetch(`/api/tasks/${todoId}/all-links`);
+    if (!res.ok) {
+      el.linksSection.hidden = true;
+      return;
+    }
+
+    const data = await res.json();
+    const crmLinks = data.crm_links || [];
+    const threadLinks = data.thread_links || [];
+
+    if (crmLinks.length === 0 && threadLinks.length === 0) {
+      el.linksSection.hidden = true;
+      return;
+    }
+
+    el.linksSection.hidden = false;
+
+    // Render CRM links
+    crmLinks.forEach(link => {
+      const linkItem = createCrmLinkItem(link);
+      el.linksList.appendChild(linkItem);
+    });
+
+    // Render thread links
+    threadLinks.forEach(link => {
+      const linkItem = createThreadLinkItem(link);
+      el.linksList.appendChild(linkItem);
+    });
+  } catch (err) {
+    console.error("Failed to fetch task links:", err);
+    el.linksSection.hidden = true;
+  }
+}
+
+function createCrmLinkItem(link) {
+  const item = document.createElement("div");
+  item.className = "task-modal-link-item";
+
+  // Determine entity type and name
+  let entityType = "";
+  let entityName = "";
+  let entityUrl = "";
+
+  if (link.contact_id && link.contact_name) {
+    entityType = "Contact";
+    entityName = link.contact_name;
+    entityUrl = `/crm?view=contact&id=${link.contact_id}`;
+  } else if (link.company_id && link.company_name) {
+    entityType = "Company";
+    entityName = link.company_name;
+    entityUrl = `/crm?view=company&id=${link.company_id}`;
+  } else if (link.activity_id) {
+    entityType = "Activity";
+    entityName = link.activity_subject || link.activity_type || "Activity";
+    entityUrl = `/crm?view=activities`;
+  } else if (link.opportunity_id && link.opportunity_title) {
+    entityType = "Opportunity";
+    entityName = link.opportunity_title;
+    entityUrl = `/crm?view=opportunity&id=${link.opportunity_id}`;
+  }
+
+  item.innerHTML = `
+    <span class="task-modal-link-type">${escapeHtml(entityType)}</span>
+    <a href="${entityUrl}" target="_blank" class="task-modal-link-name">${escapeHtml(entityName)}</a>
+    <button type="button" class="task-modal-link-unlink" data-crm-link-id="${link.id}" title="Remove link">&times;</button>
+  `;
+
+  // Add unlink handler
+  item.querySelector(".task-modal-link-unlink")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await unlinkCrmFromTask(link.id);
+  });
+
+  return item;
+}
+
+function createThreadLinkItem(link) {
+  const item = document.createElement("div");
+  item.className = "task-modal-link-item";
+
+  // Get channel info for the link
+  const channelName = link.channel_name || "";
+  const messagePreview = link.body ? link.body.slice(0, 50) + (link.body.length > 50 ? "..." : "") : "Chat thread";
+  const channelUrl = channelName ? `/chat/channel/${channelName}#message-${link.message_id}` : `/chat`;
+
+  item.innerHTML = `
+    <span class="task-modal-link-type">Thread</span>
+    <a href="${channelUrl}" target="_blank" class="task-modal-link-name">${escapeHtml(messagePreview)}</a>
+    <button type="button" class="task-modal-link-unlink" data-thread-message-id="${link.message_id}" title="Remove link">&times;</button>
+  `;
+
+  // Add unlink handler
+  item.querySelector(".task-modal-link-unlink")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await unlinkThreadFromTask(link.message_id);
+  });
+
+  return item;
+}
+
+async function unlinkCrmFromTask(linkId) {
+  if (!currentTaskId) return;
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}/crm-links/${linkId}`, {
+      method: "DELETE",
+    });
+
+    if (res.ok) {
+      // Refresh links display
+      await fetchAndDisplayLinks(currentTaskId);
+    } else {
+      console.error("Failed to unlink CRM entity");
+    }
+  } catch (err) {
+    console.error("Error unlinking CRM entity:", err);
+  }
+}
+
+async function unlinkThreadFromTask(messageId) {
+  if (!currentTaskId) return;
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}/threads/${messageId}`, {
+      method: "DELETE",
+    });
+
+    if (res.ok) {
+      // Refresh links display
+      await fetchAndDisplayLinks(currentTaskId);
+    } else {
+      console.error("Failed to unlink thread");
+    }
+  } catch (err) {
+    console.error("Error unlinking thread:", err);
   }
 }
 

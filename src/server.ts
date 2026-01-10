@@ -101,10 +101,18 @@ import {
 import { handleSettings } from "./routes/settings";
 import {
   handleCreateTask,
+  handleGetActivityTasks,
+  handleGetCompanyTasks,
+  handleGetContactTasks,
+  handleGetOpportunityTasks,
+  handleGetTaskAllLinks,
+  handleGetTaskCrmLinks,
   handleGetTaskThreads,
   handleGetThreadTasks,
+  handleLinkTaskToCrm,
   handleLinkThreadToTask,
   handleSearchTasks,
+  handleUnlinkTaskFromCrm,
   handleUnlinkThreadFromTask,
 } from "./routes/tasks";
 import { handleApiTodoState, handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
@@ -169,12 +177,19 @@ const server = Bun.serve({
         if (aiTasksMatch) return handleAiTasks(url, aiTasksMatch);
         if (pathname === "/ai/summary/latest") return handleLatestSummary(url);
 
+        // Helper to redirect unauthenticated users to root with return path
+        const requireAuth = () => {
+          if (session) return null;
+          const returnPath = encodeURIComponent(pathname + url.search);
+          return new Response(null, { status: 302, headers: { Location: `/?return=${returnPath}` } });
+        };
+
         // Chat routes - support deep linking to channels/DMs
-        if (pathname === "/chat") return handleChatPage(session);
+        if (pathname === "/chat") return requireAuth() || handleChatPage(session);
         const chatChannelMatch = pathname.match(/^\/chat\/channel\/([^/]+)$/);
-        if (chatChannelMatch) return handleChatPage(session, { type: "channel", slug: chatChannelMatch[1] });
+        if (chatChannelMatch) return requireAuth() || handleChatPage(session, { type: "channel", slug: chatChannelMatch[1] });
         const chatDmMatch = pathname.match(/^\/chat\/dm\/(\d+)$/);
-        if (chatDmMatch) return handleChatPage(session, { type: "dm", id: Number(chatDmMatch[1]) });
+        if (chatDmMatch) return requireAuth() || handleChatPage(session, { type: "dm", id: Number(chatDmMatch[1]) });
         if (pathname === "/chat/events") return handleChatEvents(req, session);
         if (pathname === "/chat/channels") return handleListChannels(session);
         if (pathname === "/chat/users") return handleListUsers(session);
@@ -202,9 +217,9 @@ const server = Bun.serve({
         if (groupMembersMatch) return handleListGroupMembers(session, Number(groupMembersMatch[1]));
 
         if (pathname === "/") return handleHome(session);
-        if (pathname === "/todo") return handleTodos(url, session);
-        if (pathname === "/settings") return handleSettings(session);
-        if (pathname === "/wallet") return handleWalletPage(session);
+        if (pathname === "/todo") return requireAuth() || handleTodos(url, session);
+        if (pathname === "/settings") return requireAuth() || handleSettings(session);
+        if (pathname === "/wallet") return requireAuth() || handleWalletPage(session);
 
         // Push notification routes
         if (pathname === "/api/push/vapid-public-key") return handleGetVapidPublicKey();
@@ -216,6 +231,20 @@ const server = Bun.serve({
         if (taskThreadsMatch) return handleGetTaskThreads(session, Number(taskThreadsMatch[1]));
         const threadTasksMatch = pathname.match(/^\/api\/threads\/(\d+)\/tasks$/);
         if (threadTasksMatch) return handleGetThreadTasks(session, Number(threadTasksMatch[1]));
+
+        // Task-CRM linking routes
+        const taskCrmLinksMatch = pathname.match(/^\/api\/tasks\/(\d+)\/crm-links$/);
+        if (taskCrmLinksMatch) return handleGetTaskCrmLinks(session, Number(taskCrmLinksMatch[1]));
+        const taskAllLinksMatch = pathname.match(/^\/api\/tasks\/(\d+)\/all-links$/);
+        if (taskAllLinksMatch) return handleGetTaskAllLinks(session, Number(taskAllLinksMatch[1]));
+        const contactTasksMatch = pathname.match(/^\/api\/crm\/contacts\/(\d+)\/tasks$/);
+        if (contactTasksMatch) return handleGetContactTasks(session, Number(contactTasksMatch[1]));
+        const companyTasksMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)\/tasks$/);
+        if (companyTasksMatch) return handleGetCompanyTasks(session, Number(companyTasksMatch[1]));
+        const activityTasksMatch = pathname.match(/^\/api\/crm\/activities\/(\d+)\/tasks$/);
+        if (activityTasksMatch) return handleGetActivityTasks(session, Number(activityTasksMatch[1]));
+        const opportunityTasksMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)\/tasks$/);
+        if (opportunityTasksMatch) return handleGetOpportunityTasks(session, Number(opportunityTasksMatch[1]));
 
         // Wingman routes
         if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
@@ -233,7 +262,7 @@ const server = Bun.serve({
         if (pathname === "/api/community/migration/messages") return handleGetMigrationMessages(session, url);
 
         // CRM routes (admin only)
-        if (pathname === "/crm") return handleCrmPage(session);
+        if (pathname === "/crm") return requireAuth() || handleCrmPage(session);
         if (pathname === "/api/crm/companies") return handleListCompanies(session);
         const crmCompanyMatch = pathname.match(/^\/api\/crm\/companies\/(\d+)$/);
         if (crmCompanyMatch) return handleGetCompany(session, Number(crmCompanyMatch[1]));
@@ -327,6 +356,10 @@ const server = Bun.serve({
         const linkThreadMatch = pathname.match(/^\/api\/tasks\/(\d+)\/threads$/);
         if (linkThreadMatch) return handleLinkThreadToTask(req, session, Number(linkThreadMatch[1]));
 
+        // Task-CRM linking routes
+        const linkCrmMatch = pathname.match(/^\/api\/tasks\/(\d+)\/crm-links$/);
+        if (linkCrmMatch) return handleLinkTaskToCrm(req, session, Number(linkCrmMatch[1]));
+
         // Community encryption routes
         if (pathname === "/api/community/bootstrap") return handleBootstrapCommunity(req, session);
         if (pathname === "/api/community/key") return handleStoreCommunityKey(req, session);
@@ -411,6 +444,16 @@ const server = Bun.serve({
             session,
             Number(unlinkThreadMatch[1]),
             Number(unlinkThreadMatch[2])
+          );
+        }
+
+        // Task-CRM linking routes
+        const unlinkCrmMatch = pathname.match(/^\/api\/tasks\/(\d+)\/crm-links\/(\d+)$/);
+        if (unlinkCrmMatch) {
+          return handleUnlinkTaskFromCrm(
+            session,
+            Number(unlinkCrmMatch[1]),
+            Number(unlinkCrmMatch[2])
           );
         }
 

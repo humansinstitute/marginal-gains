@@ -779,6 +779,10 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
             <input type="hidden" name="tags" data-task-modal-tags-hidden value="" />
           </div>
         </label>
+        <div class="task-modal-links" data-task-modal-links hidden>
+          <div class="task-modal-links-header">Links</div>
+          <div class="task-modal-links-list" data-task-modal-links-list></div>
+        </div>
         <div class="task-modal-actions">
           <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
           <div class="task-modal-actions-right">

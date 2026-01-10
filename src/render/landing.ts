@@ -122,5 +122,6 @@ function renderSessionSeed() {
     window.__NOSTR_RELAYS__ = ${JSON.stringify(NOSTR_RELAYS)};
     window.__APP_NAME__ = ${JSON.stringify(appName)};
     window.__APP_FAVICON__ = ${JSON.stringify(faviconUrl)};
+    window.__RETURN_PATH__ = new URLSearchParams(window.location.search).get("return") || null;
   </script>`;
 }
