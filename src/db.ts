@@ -151,6 +151,17 @@ export type TaskThread = {
   linked_at: string;
 };
 
+export type TaskCrmLink = {
+  id: number;
+  todo_id: number;
+  contact_id: number | null;
+  company_id: number | null;
+  activity_id: number | null;
+  opportunity_id: number | null;
+  linked_by: string;
+  linked_at: string;
+};
+
 export type AppSetting = {
   key: string;
   value: string;
@@ -539,6 +550,25 @@ db.run(`
 `);
 db.run("CREATE INDEX IF NOT EXISTS idx_task_threads_todo ON task_threads(todo_id)");
 db.run("CREATE INDEX IF NOT EXISTS idx_task_threads_message ON task_threads(message_id)");
+
+// Task-CRM links (link tasks to CRM entities)
+db.run(`
+  CREATE TABLE IF NOT EXISTS task_crm_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+    contact_id INTEGER REFERENCES crm_contacts(id) ON DELETE CASCADE,
+    company_id INTEGER REFERENCES crm_companies(id) ON DELETE CASCADE,
+    activity_id INTEGER REFERENCES crm_activities(id) ON DELETE CASCADE,
+    opportunity_id INTEGER REFERENCES crm_opportunities(id) ON DELETE CASCADE,
+    linked_by TEXT NOT NULL,
+    linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_todo ON task_crm_links(todo_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_contact ON task_crm_links(contact_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_company ON task_crm_links(company_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_activity ON task_crm_links(activity_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_opportunity ON task_crm_links(opportunity_id)");
 
 // App-wide settings table (key-value store)
 db.run(`
@@ -1879,6 +1909,163 @@ export function getThreadLinkCount(todoId: number): number {
 
 export function getTaskThreadLink(todoId: number, messageId: number) {
   return getTaskThreadLinkStmt.get(todoId, messageId) as TaskThread | undefined ?? null;
+}
+
+// Task-CRM linking statements
+type TaskWithCrmLink = Todo & { link_id: number; linked_at: string };
+
+const linkTaskToCrmStmt = db.query<TaskCrmLink>(
+  `INSERT INTO task_crm_links (todo_id, contact_id, company_id, activity_id, opportunity_id, linked_by)
+   VALUES (?, ?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const unlinkTaskFromCrmStmt = db.query(
+  "DELETE FROM task_crm_links WHERE id = ?"
+);
+const getCrmLinksForTaskStmt = db.query<TaskCrmLink>(
+  "SELECT * FROM task_crm_links WHERE todo_id = ? ORDER BY linked_at DESC"
+);
+const getTasksForContactStmt = db.query<TaskWithCrmLink>(
+  `SELECT t.*, tcl.id as link_id, tcl.linked_at
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   WHERE tcl.contact_id = ?
+     AND t.deleted = 0
+     AND (t.state != 'done' OR datetime(t.created_at) > datetime('now', '-21 days'))
+   ORDER BY t.state = 'done', t.created_at DESC`
+);
+const getTasksForCompanyStmt = db.query<TaskWithCrmLink>(
+  `SELECT t.*, tcl.id as link_id, tcl.linked_at
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   WHERE tcl.company_id = ?
+     AND t.deleted = 0
+     AND (t.state != 'done' OR datetime(t.created_at) > datetime('now', '-21 days'))
+   ORDER BY t.state = 'done', t.created_at DESC`
+);
+const getTasksForActivityStmt = db.query<TaskWithCrmLink>(
+  `SELECT t.*, tcl.id as link_id, tcl.linked_at
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   WHERE tcl.activity_id = ?
+     AND t.deleted = 0
+     AND (t.state != 'done' OR datetime(t.created_at) > datetime('now', '-21 days'))
+   ORDER BY t.state = 'done', t.created_at DESC`
+);
+const getTasksForOpportunityStmt = db.query<TaskWithCrmLink>(
+  `SELECT t.*, tcl.id as link_id, tcl.linked_at
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   WHERE tcl.opportunity_id = ?
+     AND t.deleted = 0
+     AND (t.state != 'done' OR datetime(t.created_at) > datetime('now', '-21 days'))
+   ORDER BY t.state = 'done', t.created_at DESC`
+);
+
+// Task-CRM linking functions
+export function linkTaskToCrm(
+  todoId: number,
+  entities: { contactId?: number; companyId?: number; activityId?: number; opportunityId?: number },
+  linkedBy: string
+) {
+  return linkTaskToCrmStmt.get(
+    todoId,
+    entities.contactId ?? null,
+    entities.companyId ?? null,
+    entities.activityId ?? null,
+    entities.opportunityId ?? null,
+    linkedBy
+  ) as TaskCrmLink | undefined ?? null;
+}
+
+export function unlinkTaskFromCrm(linkId: number) {
+  unlinkTaskFromCrmStmt.run(linkId);
+}
+
+export function getCrmLinksForTask(todoId: number) {
+  return getCrmLinksForTaskStmt.all(todoId);
+}
+
+// Get CRM links with entity details
+const getCrmLinksWithDetailsStmt = db.query<TaskCrmLink & {
+  contact_name: string | null;
+  company_name: string | null;
+  activity_subject: string | null;
+  activity_type: string | null;
+  opportunity_title: string | null;
+}>(
+  `SELECT tcl.*,
+    con.name as contact_name,
+    com.name as company_name,
+    act.subject as activity_subject,
+    act.type as activity_type,
+    opp.title as opportunity_title
+   FROM task_crm_links tcl
+   LEFT JOIN crm_contacts con ON tcl.contact_id = con.id
+   LEFT JOIN crm_companies com ON tcl.company_id = com.id
+   LEFT JOIN crm_activities act ON tcl.activity_id = act.id
+   LEFT JOIN crm_opportunities opp ON tcl.opportunity_id = opp.id
+   WHERE tcl.todo_id = ?
+   ORDER BY tcl.linked_at DESC`
+);
+
+export function getCrmLinksWithDetails(todoId: number) {
+  return getCrmLinksWithDetailsStmt.all(todoId);
+}
+
+export function getTasksForContact(contactId: number) {
+  return getTasksForContactStmt.all(contactId);
+}
+
+export function getTasksForCompany(companyId: number) {
+  return getTasksForCompanyStmt.all(companyId);
+}
+
+export function getTasksForActivity(activityId: number) {
+  return getTasksForActivityStmt.all(activityId);
+}
+
+export function getTasksForOpportunity(opportunityId: number) {
+  return getTasksForOpportunityStmt.all(opportunityId);
+}
+
+// Get all outstanding tasks linked to CRM entities
+type CrmLinkedTask = Todo & {
+  link_id: number;
+  contact_id: number | null;
+  company_id: number | null;
+  activity_id: number | null;
+  opportunity_id: number | null;
+  contact_name: string | null;
+  company_name: string | null;
+  opportunity_title: string | null;
+};
+
+const getOutstandingCrmTasksStmt = db.query<CrmLinkedTask>(
+  `SELECT DISTINCT t.*, tcl.id as link_id,
+    tcl.contact_id, tcl.company_id, tcl.activity_id, tcl.opportunity_id,
+    con.name as contact_name,
+    com.name as company_name,
+    opp.title as opportunity_title
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   LEFT JOIN crm_contacts con ON tcl.contact_id = con.id
+   LEFT JOIN crm_companies com ON tcl.company_id = com.id
+   LEFT JOIN crm_opportunities opp ON tcl.opportunity_id = opp.id
+   WHERE t.deleted = 0
+     AND t.state != 'done'
+   ORDER BY
+     CASE t.priority
+       WHEN 'rock' THEN 1
+       WHEN 'pebble' THEN 2
+       WHEN 'sand' THEN 3
+     END,
+     t.created_at DESC
+   LIMIT 20`
+);
+
+export function getOutstandingCrmTasks() {
+  return getOutstandingCrmTasksStmt.all();
 }
 
 // App settings statements

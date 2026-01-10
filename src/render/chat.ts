@@ -375,12 +375,13 @@ function renderTaskLinkModal() {
       <div class="task-link-existing" data-task-link-existing hidden>
         <div class="task-search-container">
           <select data-task-search-board class="task-search-board">
+            <option value="all">All Boards</option>
             <option value="">Personal</option>
           </select>
           <input type="search" placeholder="Search tasks..." data-task-search autocomplete="off" />
         </div>
         <div class="task-search-results" data-task-results>
-          <p class="task-search-empty">Select a board and search for tasks...</p>
+          <p class="task-search-empty">Search for tasks to link...</p>
         </div>
       </div>
     </div>

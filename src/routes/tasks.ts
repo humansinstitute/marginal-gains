@@ -1,14 +1,28 @@
 import {
   addTodoFull,
+  getCrmLinksForTask,
+  getCrmLinksWithDetails,
+  getGroup,
+  getGroupsForUser,
+  getTasksForActivity,
+  getTasksForCompany,
+  getTasksForContact,
+  getTasksForOpportunity,
   getTasksForThread,
   getTaskThreadLink,
   getMessage,
   getThreadsForTask,
   getTodoById,
+  linkTaskToCrm,
   linkThreadToTask,
   listGroupTodos,
   listTodos,
+  unlinkTaskFromCrm,
   unlinkThreadFromTask,
+  getCrmContact,
+  getCrmCompany,
+  getCrmActivity,
+  getCrmOpportunity,
 } from "../db";
 import { canManageGroupTodo } from "../services/todos";
 import { validateTaskInput } from "../validation";
@@ -133,7 +147,7 @@ export function handleGetThreadTasks(session: Session | null, messageId: number)
 }
 
 /**
- * POST /api/tasks - Create a new task with optional thread link
+ * POST /api/tasks - Create a new task with optional thread or CRM entity link
  */
 export async function handleCreateTask(req: Request, session: Session | null) {
   if (!session) return jsonError("Unauthorized", 401);
@@ -142,6 +156,12 @@ export async function handleCreateTask(req: Request, session: Session | null) {
     const body = await req.json();
     const groupId = body.group_id ? Number(body.group_id) : null;
     const threadId = body.thread_id ? Number(body.thread_id) : null;
+
+    // CRM entity IDs (optional)
+    const contactId = body.contact_id ? Number(body.contact_id) : null;
+    const companyId = body.company_id ? Number(body.company_id) : null;
+    const activityId = body.activity_id ? Number(body.activity_id) : null;
+    const opportunityId = body.opportunity_id ? Number(body.opportunity_id) : null;
 
     // Check group permission
     if (groupId && !canManageGroupTodo(session.npub, groupId)) {
@@ -169,15 +189,25 @@ export async function handleCreateTask(req: Request, session: Session | null) {
     }
 
     // If a thread_id was provided, link it
-    let link = null;
+    let threadLink = null;
     if (threadId) {
       const message = getMessage(threadId);
       if (message) {
-        link = linkThreadToTask(todo.id, threadId, session.npub);
+        threadLink = linkThreadToTask(todo.id, threadId, session.npub);
       }
     }
 
-    return jsonSuccess({ success: true, task: todo, link }, 201);
+    // If CRM entity IDs were provided, link them
+    let crmLink = null;
+    if (contactId || companyId || activityId || opportunityId) {
+      crmLink = linkTaskToCrm(
+        todo.id,
+        { contactId: contactId ?? undefined, companyId: companyId ?? undefined, activityId: activityId ?? undefined, opportunityId: opportunityId ?? undefined },
+        session.npub
+      );
+    }
+
+    return jsonSuccess({ success: true, task: todo, threadLink, crmLink }, 201);
   } catch (_err) {
     return jsonError("Invalid request body", 400);
   }
@@ -185,6 +215,7 @@ export async function handleCreateTask(req: Request, session: Session | null) {
 
 /**
  * GET /api/tasks/search?q=... - Search tasks by title
+ * Supports group_id=all to search across all user's groups + personal tasks
  */
 export function handleSearchTasks(url: URL, session: Session | null) {
   if (!session) return jsonError("Unauthorized", 401);
@@ -193,16 +224,34 @@ export function handleSearchTasks(url: URL, session: Session | null) {
   const groupId = url.searchParams.get("group_id");
   const limit = Math.min(Number(url.searchParams.get("limit")) || 20, 50);
 
-  let tasks: ReturnType<typeof listTodos> = [];
+  let tasks: (ReturnType<typeof listTodos>[0] & { group_name?: string | null })[] = [];
 
-  if (groupId) {
+  if (groupId === "all") {
+    // Search across all user's groups + personal tasks
+    const userGroups = getGroupsForUser(session.npub);
+    const groupMap = new Map<number, string>();
+
+    // Add personal tasks
+    const personalTasks = listTodos(session.npub);
+    tasks.push(...personalTasks.map((t) => ({ ...t, group_name: null })));
+
+    // Add tasks from each group the user belongs to
+    for (const group of userGroups) {
+      groupMap.set(group.id, group.name);
+      const groupTasks = listGroupTodos(group.id);
+      tasks.push(...groupTasks.map((t) => ({ ...t, group_name: group.name })));
+    }
+  } else if (groupId) {
     const gid = Number(groupId);
     if (Number.isInteger(gid) && gid > 0) {
-      tasks = listGroupTodos(gid);
+      const group = getGroup(gid);
+      const groupTasks = listGroupTodos(gid);
+      tasks = groupTasks.map((t) => ({ ...t, group_name: group?.name ?? null }));
     }
   } else {
     // Search user's personal tasks
-    tasks = listTodos(session.npub);
+    const personalTasks = listTodos(session.npub);
+    tasks = personalTasks.map((t) => ({ ...t, group_name: null }));
   }
 
   // Filter by query if provided
@@ -222,6 +271,156 @@ export function handleSearchTasks(url: URL, session: Session | null) {
       state: t.state,
       priority: t.priority,
       group_id: t.group_id,
+      group_name: t.group_name,
     })),
   });
+}
+
+/**
+ * POST /api/tasks/:todoId/crm-links - Link an existing task to a CRM entity
+ */
+export async function handleLinkTaskToCrm(req: Request, session: Session | null, todoId: number) {
+  if (!session) return jsonError("Unauthorized", 401);
+
+  try {
+    const body = await req.json();
+    const contactId = body.contact_id ? Number(body.contact_id) : undefined;
+    const companyId = body.company_id ? Number(body.company_id) : undefined;
+    const activityId = body.activity_id ? Number(body.activity_id) : undefined;
+    const opportunityId = body.opportunity_id ? Number(body.opportunity_id) : undefined;
+
+    if (!contactId && !companyId && !activityId && !opportunityId) {
+      return jsonError("At least one CRM entity ID is required", 400);
+    }
+
+    // Verify the task exists
+    const todo = getTodoById(todoId);
+    if (!todo) return jsonError("Task not found", 404);
+
+    // Check permission to link to this task
+    if (todo.group_id) {
+      if (!canManageGroupTodo(session.npub, todo.group_id)) {
+        return jsonError("Forbidden", 403);
+      }
+    } else if (todo.owner !== session.npub) {
+      return jsonError("Forbidden", 403);
+    }
+
+    // Create the link
+    const link = linkTaskToCrm(todoId, { contactId, companyId, activityId, opportunityId }, session.npub);
+    if (!link) {
+      return jsonError("Failed to create link", 500);
+    }
+
+    return jsonSuccess({ success: true, link });
+  } catch (_err) {
+    return jsonError("Invalid request body", 400);
+  }
+}
+
+/**
+ * DELETE /api/tasks/:todoId/crm-links/:linkId - Unlink a task from a CRM entity
+ */
+export function handleUnlinkTaskFromCrm(session: Session | null, todoId: number, linkId: number) {
+  if (!session) return jsonError("Unauthorized", 401);
+
+  // Verify the task exists
+  const todo = getTodoById(todoId);
+  if (!todo) return jsonError("Task not found", 404);
+
+  // Check permission
+  const canUnlink =
+    todo.owner === session.npub ||
+    (todo.group_id && canManageGroupTodo(session.npub, todo.group_id));
+
+  if (!canUnlink) return jsonError("Forbidden", 403);
+
+  unlinkTaskFromCrm(linkId);
+  return jsonSuccess({ success: true });
+}
+
+/**
+ * GET /api/tasks/:todoId/crm-links - Get CRM links for a task
+ */
+export function handleGetTaskCrmLinks(session: Session | null, todoId: number) {
+  if (!session) return jsonError("Unauthorized", 401);
+
+  const todo = getTodoById(todoId);
+  if (!todo) return jsonError("Task not found", 404);
+
+  const links = getCrmLinksForTask(todoId);
+  return jsonSuccess({ links });
+}
+
+/**
+ * GET /api/tasks/:todoId/all-links - Get all links (CRM + threads) for a task
+ */
+export function handleGetTaskAllLinks(session: Session | null, todoId: number) {
+  if (!session) return jsonError("Unauthorized", 401);
+
+  const todo = getTodoById(todoId);
+  if (!todo) return jsonError("Task not found", 404);
+
+  // Get CRM links with entity details
+  const crmLinks = getCrmLinksWithDetails(todoId);
+
+  // Get thread links
+  const threadLinks = getThreadsForTask(todoId);
+
+  return jsonSuccess({
+    crm_links: crmLinks,
+    thread_links: threadLinks,
+  });
+}
+
+/**
+ * GET /api/crm/contacts/:id/tasks - Get tasks linked to a contact
+ */
+export function handleGetContactTasks(session: Session | null, contactId: number) {
+  if (!session) return jsonError("Unauthorized", 401);
+
+  const contact = getCrmContact(contactId);
+  if (!contact) return jsonError("Contact not found", 404);
+
+  const tasks = getTasksForContact(contactId);
+  return jsonSuccess({ tasks });
+}
+
+/**
+ * GET /api/crm/companies/:id/tasks - Get tasks linked to a company
+ */
+export function handleGetCompanyTasks(session: Session | null, companyId: number) {
+  if (!session) return jsonError("Unauthorized", 401);
+
+  const company = getCrmCompany(companyId);
+  if (!company) return jsonError("Company not found", 404);
+
+  const tasks = getTasksForCompany(companyId);
+  return jsonSuccess({ tasks });
+}
+
+/**
+ * GET /api/crm/activities/:id/tasks - Get tasks linked to an activity
+ */
+export function handleGetActivityTasks(session: Session | null, activityId: number) {
+  if (!session) return jsonError("Unauthorized", 401);
+
+  const activity = getCrmActivity(activityId);
+  if (!activity) return jsonError("Activity not found", 404);
+
+  const tasks = getTasksForActivity(activityId);
+  return jsonSuccess({ tasks });
+}
+
+/**
+ * GET /api/crm/opportunities/:id/tasks - Get tasks linked to an opportunity
+ */
+export function handleGetOpportunityTasks(session: Session | null, opportunityId: number) {
+  if (!session) return jsonError("Unauthorized", 401);
+
+  const opportunity = getCrmOpportunity(opportunityId);
+  if (!opportunity) return jsonError("Opportunity not found", 404);
+
+  const tasks = getTasksForOpportunity(opportunityId);
+  return jsonSuccess({ tasks });
 }

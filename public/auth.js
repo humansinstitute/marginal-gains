@@ -935,7 +935,14 @@ const completeLogin = async (method, event) => {
   }
 
   await fetchSummaries();
-  window.location.href = "/chat";
+  // Redirect to return path if set, otherwise default to /chat
+  const returnPath = window.__RETURN_PATH__;
+  // Only allow relative paths starting with / to prevent open redirects
+  if (returnPath && returnPath.startsWith("/") && !returnPath.startsWith("//")) {
+    window.location.href = returnPath;
+  } else {
+    window.location.href = "/chat";
+  }
 };
 
 const handleExportSecret = async () => {
