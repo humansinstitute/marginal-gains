@@ -70,6 +70,41 @@ function parseSlashCommands(text) {
 }
 
 /**
+ * Generate a 63-character random alphanumeric string for hang.live rooms
+ * @returns {string} 63-character random ID
+ */
+function generateHangId() {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const bytes = new Uint8Array(63);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
+/**
+ * Transform /hang commands into hang.live room links (client-side)
+ * This runs before encryption so the server never sees hang room IDs in encrypted channels
+ * @param {string} text - Message text
+ * @returns {string} Transformed text with /hang replaced by room link
+ */
+function transformHangCommand(text) {
+  // Match /hang at word boundary (not /hangout or similar)
+  const hangPattern = /\/hang\b/gi;
+
+  if (!hangPattern.test(text)) {
+    return text;
+  }
+
+  // Reset regex state after test
+  hangPattern.lastIndex = 0;
+
+  // Replace each /hang with a unique room link
+  return text.replace(hangPattern, () => {
+    const hangId = generateHangId();
+    return `https://hang.live/@${hangId}`;
+  });
+}
+
+/**
  * Parse @mentions from message text (client-side, before encryption)
  * Extracts npubs from nostr:npub... format used by the mention system
  * @param {string} text - Message text
@@ -1253,17 +1288,20 @@ async function sendMessage() {
   setReplyTarget(null);
 
   try {
-    let content = body;
+    // Transform client-side commands (like /hang) before anything else
+    // This ensures the server never sees hang room IDs in encrypted channels
+    let content = transformHangCommand(body);
     let encrypted = false;
 
     // Parse slash commands and mentions from plaintext BEFORE encryption
     // This allows the server to handle these without decrypting
-    const commands = parseSlashCommands(body);
-    const mentions = parseMentions(body);
+    // Note: /hang is already transformed, so it won't be in the commands list
+    const commands = parseSlashCommands(content);
+    const mentions = parseMentions(content);
 
     // Encrypt message if channel needs encryption (private or community)
     if (channelNeedsEncryption(channelId)) {
-      const encResult = await encryptMessageForChannel(body, channelId);
+      const encResult = await encryptMessageForChannel(content, channelId);
       if (encResult) {
         content = encResult.encrypted;
         encrypted = true;
