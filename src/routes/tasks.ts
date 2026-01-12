@@ -148,6 +148,11 @@ export function handleGetThreadTasks(session: Session | null, messageId: number)
 
 /**
  * POST /api/tasks - Create a new task with optional thread or CRM entity link
+ *
+ * When include_related is true, automatically links to parent entities:
+ * - Contact: also links to company
+ * - Opportunity: also links to company and contact
+ * - Activity: also links to company, contact, and opportunity
  */
 export async function handleCreateTask(req: Request, session: Session | null) {
   if (!session) return jsonError("Unauthorized", 401);
@@ -156,12 +161,13 @@ export async function handleCreateTask(req: Request, session: Session | null) {
     const body = await req.json();
     const groupId = body.group_id ? Number(body.group_id) : null;
     const threadId = body.thread_id ? Number(body.thread_id) : null;
+    const includeRelated = body.include_related === true;
 
     // CRM entity IDs (optional)
-    const contactId = body.contact_id ? Number(body.contact_id) : null;
-    const companyId = body.company_id ? Number(body.company_id) : null;
-    const activityId = body.activity_id ? Number(body.activity_id) : null;
-    const opportunityId = body.opportunity_id ? Number(body.opportunity_id) : null;
+    let contactId = body.contact_id ? Number(body.contact_id) : null;
+    let companyId = body.company_id ? Number(body.company_id) : null;
+    let activityId = body.activity_id ? Number(body.activity_id) : null;
+    let opportunityId = body.opportunity_id ? Number(body.opportunity_id) : null;
 
     // Check group permission
     if (groupId && !canManageGroupTodo(session.npub, groupId)) {
@@ -197,17 +203,59 @@ export async function handleCreateTask(req: Request, session: Session | null) {
       }
     }
 
-    // If CRM entity IDs were provided, link them
-    let crmLink = null;
+    // If CRM entity IDs were provided, link them (with optional related entities)
+    const crmLinks = [];
     if (contactId || companyId || activityId || opportunityId) {
-      crmLink = linkTaskToCrm(
-        todo.id,
-        { contactId: contactId ?? undefined, companyId: companyId ?? undefined, activityId: activityId ?? undefined, opportunityId: opportunityId ?? undefined },
-        session.npub
-      );
+      // Gather related entity IDs if include_related is true
+      if (includeRelated) {
+        // Activity -> company, contact, opportunity
+        if (activityId) {
+          const activity = getCrmActivity(activityId);
+          if (activity) {
+            if (activity.company_id && !companyId) companyId = activity.company_id;
+            if (activity.contact_id && !contactId) contactId = activity.contact_id;
+            if (activity.opportunity_id && !opportunityId) opportunityId = activity.opportunity_id;
+          }
+        }
+
+        // Opportunity -> company, contact
+        if (opportunityId) {
+          const opportunity = getCrmOpportunity(opportunityId);
+          if (opportunity) {
+            if (opportunity.company_id && !companyId) companyId = opportunity.company_id;
+            if (opportunity.contact_id && !contactId) contactId = opportunity.contact_id;
+          }
+        }
+
+        // Contact -> company
+        if (contactId) {
+          const contact = getCrmContact(contactId);
+          if (contact && contact.company_id && !companyId) {
+            companyId = contact.company_id;
+          }
+        }
+      }
+
+      // Create individual links for each entity
+      if (activityId) {
+        const link = linkTaskToCrm(todo.id, { activityId }, session.npub);
+        if (link) crmLinks.push(link);
+      }
+      if (opportunityId) {
+        const link = linkTaskToCrm(todo.id, { opportunityId }, session.npub);
+        if (link) crmLinks.push(link);
+      }
+      if (contactId) {
+        const link = linkTaskToCrm(todo.id, { contactId }, session.npub);
+        if (link) crmLinks.push(link);
+      }
+      if (companyId) {
+        const link = linkTaskToCrm(todo.id, { companyId }, session.npub);
+        if (link) crmLinks.push(link);
+      }
     }
 
-    return jsonSuccess({ success: true, task: todo, threadLink, crmLink }, 201);
+    return jsonSuccess({ success: true, task: todo, threadLink, crmLinks }, 201);
   } catch (_err) {
     return jsonError("Invalid request body", 400);
   }
@@ -278,6 +326,11 @@ export function handleSearchTasks(url: URL, session: Session | null) {
 
 /**
  * POST /api/tasks/:todoId/crm-links - Link an existing task to a CRM entity
+ *
+ * When include_related is true, automatically links to parent entities:
+ * - Contact: also links to company
+ * - Opportunity: also links to company and contact
+ * - Activity: also links to company, contact, and opportunity
  */
 export async function handleLinkTaskToCrm(req: Request, session: Session | null, todoId: number) {
   if (!session) return jsonError("Unauthorized", 401);
@@ -288,6 +341,7 @@ export async function handleLinkTaskToCrm(req: Request, session: Session | null,
     const companyId = body.company_id ? Number(body.company_id) : undefined;
     const activityId = body.activity_id ? Number(body.activity_id) : undefined;
     const opportunityId = body.opportunity_id ? Number(body.opportunity_id) : undefined;
+    const includeRelated = body.include_related === true;
 
     if (!contactId && !companyId && !activityId && !opportunityId) {
       return jsonError("At least one CRM entity ID is required", 400);
@@ -306,13 +360,74 @@ export async function handleLinkTaskToCrm(req: Request, session: Session | null,
       return jsonError("Forbidden", 403);
     }
 
-    // Create the link
-    const link = linkTaskToCrm(todoId, { contactId, companyId, activityId, opportunityId }, session.npub);
-    if (!link) {
+    const links = [];
+
+    // If include_related, gather all related entity IDs
+    let relatedCompanyId = companyId;
+    let relatedContactId = contactId;
+    let relatedOpportunityId = opportunityId;
+
+    if (includeRelated) {
+      // Activity -> company, contact, opportunity
+      if (activityId) {
+        const activity = getCrmActivity(activityId);
+        if (activity) {
+          if (activity.company_id && !relatedCompanyId) relatedCompanyId = activity.company_id;
+          if (activity.contact_id && !relatedContactId) relatedContactId = activity.contact_id;
+          if (activity.opportunity_id && !relatedOpportunityId) relatedOpportunityId = activity.opportunity_id;
+        }
+      }
+
+      // Opportunity -> company, contact
+      if (relatedOpportunityId) {
+        const opportunity = getCrmOpportunity(relatedOpportunityId);
+        if (opportunity) {
+          if (opportunity.company_id && !relatedCompanyId) relatedCompanyId = opportunity.company_id;
+          if (opportunity.contact_id && !relatedContactId) relatedContactId = opportunity.contact_id;
+        }
+      }
+
+      // Contact -> company
+      if (relatedContactId) {
+        const contact = getCrmContact(relatedContactId);
+        if (contact && contact.company_id && !relatedCompanyId) {
+          relatedCompanyId = contact.company_id;
+        }
+      }
+    }
+
+    // Create links for all entities
+    if (activityId) {
+      const link = linkTaskToCrm(todoId, { activityId }, session.npub);
+      if (link) links.push(link);
+    }
+    if (relatedOpportunityId && relatedOpportunityId !== opportunityId) {
+      const link = linkTaskToCrm(todoId, { opportunityId: relatedOpportunityId }, session.npub);
+      if (link) links.push(link);
+    } else if (opportunityId) {
+      const link = linkTaskToCrm(todoId, { opportunityId }, session.npub);
+      if (link) links.push(link);
+    }
+    if (relatedContactId && relatedContactId !== contactId) {
+      const link = linkTaskToCrm(todoId, { contactId: relatedContactId }, session.npub);
+      if (link) links.push(link);
+    } else if (contactId) {
+      const link = linkTaskToCrm(todoId, { contactId }, session.npub);
+      if (link) links.push(link);
+    }
+    if (relatedCompanyId && relatedCompanyId !== companyId) {
+      const link = linkTaskToCrm(todoId, { companyId: relatedCompanyId }, session.npub);
+      if (link) links.push(link);
+    } else if (companyId) {
+      const link = linkTaskToCrm(todoId, { companyId }, session.npub);
+      if (link) links.push(link);
+    }
+
+    if (links.length === 0) {
       return jsonError("Failed to create link", 500);
     }
 
-    return jsonSuccess({ success: true, link });
+    return jsonSuccess({ success: true, links });
   } catch (_err) {
     return jsonError("Invalid request body", 400);
   }
