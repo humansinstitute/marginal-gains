@@ -19,6 +19,7 @@ class CrmApp {
     this.setupHamburgerMenu();
     this.setupIndustryTagInput();
     this.collectExistingTags();
+    this.restoreViewFromHash();
   }
 
   // Collect existing industry tags from the page for suggestions
@@ -164,9 +165,26 @@ class CrmApp {
         this.switchView(viewId);
       });
     });
+
+    // Handle browser back/forward
+    window.addEventListener("hashchange", () => {
+      this.restoreViewFromHash();
+    });
   }
 
-  switchView(viewId) {
+  // Restore view from URL hash on page load
+  restoreViewFromHash() {
+    const hash = window.location.hash.slice(1); // Remove #
+    if (hash) {
+      // Verify the view exists
+      const viewPanel = document.querySelector(`.crm-view[data-view="${hash}"]`);
+      if (viewPanel) {
+        this.switchView(hash, false); // Don't update hash again
+      }
+    }
+  }
+
+  switchView(viewId, updateHash = true) {
     // Update nav items
     document.querySelectorAll(".crm-nav-item").forEach((item) => {
       item.classList.toggle("active", item.dataset.crmView === viewId);
@@ -176,6 +194,11 @@ class CrmApp {
     document.querySelectorAll(".crm-view").forEach((view) => {
       view.hidden = view.dataset.view !== viewId;
     });
+
+    // Update URL hash to persist view across reloads
+    if (updateHash && viewId) {
+      window.location.hash = viewId;
+    }
   }
 
   // Floating Action Button - context-aware
@@ -927,7 +950,9 @@ class CrmApp {
     if (!entityType || !entityId) return;
 
     try {
-      const body = {};
+      const body = {
+        include_related: true, // Automatically link to parent entities
+      };
       body[`${entityType}_id`] = Number(entityId);
 
       const res = await fetch(`/api/tasks/${todoId}/crm-links`, {
@@ -963,6 +988,7 @@ class CrmApp {
         title: title.trim(),
         state: "ready",
         priority: "pebble",
+        include_related: true, // Automatically link to parent entities
       };
       body[`${entityType}_id`] = Number(entityId);
 
@@ -1010,6 +1036,7 @@ class CrmApp {
 
     const section = modal.querySelector("[data-linked-tasks-section]");
     const list = modal.querySelector("[data-linked-tasks-list]");
+    const linkTaskBtn = section?.querySelector("[data-link-task]");
     if (!section || !list) return;
 
     // Hide section if no entity ID (new entity)
@@ -1018,10 +1045,20 @@ class CrmApp {
       return;
     }
 
+    // Set entity ID on link task button (convert plural to singular)
+    if (linkTaskBtn) {
+      const singularType = entityType.replace(/ies$/, "y").replace(/s$/, "");
+      linkTaskBtn.dataset.linkTask = singularType;
+      linkTaskBtn.dataset.entityId = entityId;
+    }
+
+    // Always show section when editing (so user can link tasks even if none exist)
+    section.hidden = false;
+
     try {
       const res = await fetch(`/api/crm/${entityType}/${entityId}/tasks`);
       if (!res.ok) {
-        section.hidden = true;
+        list.innerHTML = '<div class="crm-linked-tasks-empty">No linked tasks</div>';
         return;
       }
 
@@ -1029,7 +1066,7 @@ class CrmApp {
       const tasks = data.tasks || [];
 
       if (tasks.length === 0) {
-        section.hidden = true;
+        list.innerHTML = '<div class="crm-linked-tasks-empty">No linked tasks</div>';
         return;
       }
 
@@ -1048,11 +1085,9 @@ class CrmApp {
           `;
         })
         .join("");
-
-      section.hidden = false;
     } catch (err) {
       console.error("Failed to load linked tasks:", err);
-      section.hidden = true;
+      list.innerHTML = '<div class="crm-linked-tasks-empty">Failed to load tasks</div>';
     }
   }
 

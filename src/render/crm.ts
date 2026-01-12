@@ -489,6 +489,7 @@ function renderCompanyModal() {
         <div class="crm-linked-tasks-section" data-linked-tasks-section hidden>
           <div class="crm-linked-tasks-header">
             <span>Linked Tasks</span>
+            <button type="button" class="crm-link-task-btn" data-link-task="companies" data-entity-id="">+ Link Task</button>
           </div>
           <div class="crm-linked-tasks-list" data-linked-tasks-list></div>
         </div>
@@ -547,6 +548,7 @@ function renderContactModal() {
         <div class="crm-linked-tasks-section" data-linked-tasks-section hidden>
           <div class="crm-linked-tasks-header">
             <span>Linked Tasks</span>
+            <button type="button" class="crm-link-task-btn" data-link-task="contacts" data-entity-id="">+ Link Task</button>
           </div>
           <div class="crm-linked-tasks-list" data-linked-tasks-list></div>
         </div>
@@ -583,7 +585,8 @@ function renderOpportunityModal() {
               <option value="USD">USD</option>
               <option value="EUR">EUR</option>
               <option value="GBP">GBP</option>
-              <option value="BTC">BTC</option>
+              <option value="AUD">AUD</option>
+              <option value="SATS">Sats</option>
             </select>
           </label>
         </div>
@@ -625,6 +628,7 @@ function renderOpportunityModal() {
         <div class="crm-linked-tasks-section" data-linked-tasks-section hidden>
           <div class="crm-linked-tasks-header">
             <span>Linked Tasks</span>
+            <button type="button" class="crm-link-task-btn" data-link-task="opportunities" data-entity-id="">+ Link Task</button>
           </div>
           <div class="crm-linked-tasks-list" data-linked-tasks-list></div>
         </div>
@@ -685,6 +689,14 @@ function renderActivityModal() {
             <option value="">– No opportunity –</option>
           </select>
         </label>
+        <input type="hidden" name="id" data-activity-id />
+        <div class="crm-linked-tasks-section" data-linked-tasks-section hidden>
+          <div class="crm-linked-tasks-header">
+            <span>Linked Tasks</span>
+            <button type="button" class="crm-link-task-btn" data-link-task="activities" data-entity-id="">+ Link Task</button>
+          </div>
+          <div class="crm-linked-tasks-list" data-linked-tasks-list></div>
+        </div>
         <div class="chat-form-actions">
           <button type="button" class="ghost" data-modal-cancel>Cancel</button>
           <button type="submit" class="primary">Save</button>
