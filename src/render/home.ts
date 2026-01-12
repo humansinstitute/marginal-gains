@@ -481,9 +481,10 @@ function renderKanbanCard(todo: TodoDisplay, groupId: number | null, isAllTasksV
   const isPersonalTask = todo.group_id === null;
   const effectiveAssignee = todo.assigned_to || (isPersonalTask ? todo.owner : null);
 
-  // Assignee avatar - show initials from npub
+  // Assignee avatar - show initials from npub, image loaded client-side
   const assigneeHtml = effectiveAssignee
     ? `<span class="assignee-avatar" data-assignee-npub="${effectiveAssignee}" title="Assigned">
+        <img class="avatar-img" data-avatar-img hidden alt="" loading="lazy" />
         <span class="avatar-initials">${formatAvatarFallback(effectiveAssignee)}</span>
       </span>`
     : "";
@@ -548,9 +549,10 @@ function renderTodoItem(todo: TodoDisplay, groupId: number | null, canManage: bo
   const isPersonalTask = todo.group_id === null;
   const effectiveAssignee = todo.assigned_to || (isPersonalTask ? todo.owner : null);
 
-  // Assignee avatar for list view
+  // Assignee avatar for list view - image loaded client-side
   const assigneeHtml = effectiveAssignee
     ? `<span class="assignee-avatar" data-assignee-npub="${effectiveAssignee}" title="Assigned">
+        <img class="avatar-img" data-avatar-img hidden alt="" loading="lazy" />
         <span class="avatar-initials">${formatAvatarFallback(effectiveAssignee)}</span>
       </span>`
     : "";

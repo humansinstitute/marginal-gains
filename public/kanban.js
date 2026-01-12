@@ -2,6 +2,7 @@ import { state, setViewMode, refreshUI } from "./state.js";
 import { show, hide } from "./dom.js";
 
 let draggedCard = null;
+let userCache = null; // Cache users for avatar lookups
 
 export function initKanban() {
   // Initialize view based on saved preference
@@ -27,6 +28,9 @@ export function initKanban() {
 
   // Initialize thread link handlers
   initThreadLinks();
+
+  // Load avatars for assignees
+  loadAssigneeAvatars();
 }
 
 function initContextSwitcher() {
@@ -287,6 +291,51 @@ function escapeHtml(str) {
   if (!str) return "";
   const escapes = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   return str.replace(/[&<>"']/g, (c) => escapes[c]);
+}
+
+// Load avatars for all assignee elements from local user cache
+async function loadAssigneeAvatars() {
+  const assigneeElements = document.querySelectorAll("[data-assignee-npub]");
+  if (assigneeElements.length === 0) return;
+
+  // Fetch users from server cache (same source as chat app)
+  if (!userCache) {
+    try {
+      const res = await fetch("/chat/users");
+      if (res.ok) {
+        const users = await res.json();
+        userCache = new Map(users.map((u) => [u.npub, u]));
+      }
+    } catch (err) {
+      console.error("Failed to load user cache:", err);
+      return;
+    }
+  }
+
+  // Update each assignee avatar
+  assigneeElements.forEach((el) => {
+    const npub = el.dataset.assigneeNpub;
+    if (!npub) return;
+
+    const user = userCache?.get(npub);
+    const img = el.querySelector("[data-avatar-img]");
+    const initials = el.querySelector(".avatar-initials");
+
+    if (!img) return;
+
+    // Get avatar URL from user cache or fall back to RoboHash
+    const avatarUrl = user?.picture || `https://robohash.org/${user?.pubkey || npub}.png?set=set3`;
+
+    img.src = avatarUrl;
+    img.hidden = false;
+    if (initials) initials.hidden = true;
+
+    // Update title with display name if available
+    const displayName = user?.display_name || user?.name;
+    if (displayName) {
+      el.title = displayName;
+    }
+  });
 }
 
 // Re-export for use in app.js
