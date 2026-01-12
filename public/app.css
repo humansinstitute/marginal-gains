@@ -1939,13 +1939,23 @@ details summary {
   border-radius: var(--radius-md);
   padding: 1rem;
   width: min(540px, 90vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   color: var(--chat-text);
+}
+.chat-modal-body .chat-form {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 0.5rem;
 }
 .chat-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.5rem;
+  flex-shrink: 0;
 }
 .chat-form {
   display: flex;
@@ -1975,6 +1985,12 @@ details summary {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+  position: sticky;
+  bottom: 0;
+  background: inherit;
+  padding-top: 0.75rem;
+  margin-top: auto;
+  flex-shrink: 0;
 }
 
 /* Channel creation wizard (two-step flow) */
