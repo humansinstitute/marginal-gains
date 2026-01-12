@@ -23,6 +23,7 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
+  --header-height: 60px;
 
   /* Chat dark theme tokens */
   --chat-bg: #0f172a;
@@ -70,7 +71,8 @@ body.tasks-page {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  padding: 1rem 2rem;
+  height: var(--header-height);
+  padding: 0 2rem;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
@@ -1924,10 +1926,16 @@ details summary {
 }
 .chat-modal {
   position: fixed;
-  inset: 0;
+  top: var(--header-height, 0);
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: rgba(0, 0, 0, 0.5);
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1rem;
+  overflow-y: auto;
   z-index: 10;
 }
 .chat-modal[hidden] {
@@ -1939,10 +1947,11 @@ details summary {
   border-radius: var(--radius-md);
   padding: 1rem;
   width: min(540px, 90vw);
-  max-height: 90vh;
+  max-height: calc(100vh - var(--header-height, 0) - 4rem);
   display: flex;
   flex-direction: column;
   color: var(--chat-text);
+  margin: auto 0;
 }
 .chat-modal-body .chat-form {
   flex: 1;
@@ -3266,13 +3275,17 @@ body.chat-page {
 /* ========== Task Edit Modal ========== */
 .task-modal-overlay {
   position: fixed;
-  inset: 0;
+  top: var(--header-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   z-index: 100;
-  padding: 1rem;
+  padding: 2rem 1rem;
+  overflow-y: auto;
 }
 .task-modal-overlay[hidden] {
   display: none;
@@ -3282,9 +3295,11 @@ body.chat-page {
   border-radius: var(--radius-lg);
   width: 100%;
   max-width: 480px;
-  max-height: 90vh;
-  overflow-y: auto;
+  max-height: calc(100vh - var(--header-height) - 4rem);
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--shadow-heavy, 0 10px 40px rgba(0,0,0,0.2));
+  margin: auto 0;
 }
 .task-modal-header {
   display: flex;
@@ -3292,6 +3307,7 @@ body.chat-page {
   align-items: center;
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .task-modal-header h2 {
   margin: 0;
@@ -3314,6 +3330,9 @@ body.chat-page {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 .task-modal-form label {
   display: flex;
