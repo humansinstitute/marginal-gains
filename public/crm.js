@@ -1118,6 +1118,41 @@ class CrmApp {
       await fetch("/auth/logout", { method: "POST" });
       location.href = "/";
     });
+
+    // Load avatar from server database
+    this.loadCurrentUserAvatar();
+  }
+
+  async loadCurrentUserAvatar() {
+    const session = window.__NOSTR_SESSION__;
+    if (!session?.npub) return;
+
+    const avatarImg = document.querySelector("[data-avatar-img]");
+    const avatarFallback = document.querySelector("[data-avatar-fallback]");
+    if (!avatarImg) return;
+
+    try {
+      // Fetch user from local database cache
+      const res = await fetch("/chat/users");
+      if (!res.ok) return;
+
+      const users = await res.json();
+      const currentUser = users.find((u) => u.npub === session.npub);
+
+      if (currentUser?.picture) {
+        avatarImg.src = currentUser.picture;
+        avatarImg.hidden = false;
+        if (avatarFallback) avatarFallback.hidden = true;
+      } else {
+        // Fall back to RoboHash
+        const identifier = currentUser?.pubkey || session.pubkey || session.npub;
+        avatarImg.src = `https://robohash.org/${identifier}.png?set=set3`;
+        avatarImg.hidden = false;
+        if (avatarFallback) avatarFallback.hidden = true;
+      }
+    } catch (err) {
+      console.error("Failed to load avatar:", err);
+    }
   }
 
   // Hamburger menu
