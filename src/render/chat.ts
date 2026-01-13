@@ -116,6 +116,7 @@ function renderChatContent() {
         <header class="chat-messages-header">
           <button type="button" class="chat-back-btn" data-back-to-channels>Channels</button>
           <div class="chat-channel-chip" data-active-channel>Pick a channel</div>
+          <button type="button" class="channel-hang-btn" data-channel-hang hidden title="Start a hang">&#128222;</button>
           <button type="button" class="channel-settings-btn" data-channel-settings hidden title="Channel settings">&#9881;</button>
         </header>
         <div class="chat-threads" data-thread-list>
@@ -139,6 +140,7 @@ function renderChatContent() {
           <h3>Thread</h3>
           <div class="chat-thread-header-actions">
             <button type="button" class="chat-thread-tasks-btn" data-view-thread-tasks hidden title="View linked tasks">&#9745;</button>
+            <button type="button" class="chat-thread-hang-btn" data-thread-hang title="Start a hang">&#128222;</button>
             <button type="button" class="chat-thread-expand" data-expand-thread title="Expand thread">|&larr;</button>
             <button type="button" class="chat-thread-expand" data-collapse-thread hidden title="Collapse thread">&rarr;|</button>
             <button type="button" class="chat-thread-close" data-close-thread>&times;</button>

@@ -761,6 +761,7 @@ export const initChat = async () => {
   wireComposer();
   wireThreadSidebar();
   wireChannelSettingsModal();
+  wireHangButtons();
   wireDmModal();
   wireTaskLinkModal();
   updateChannelSettingsCog();
@@ -1733,16 +1734,17 @@ async function sendThreadReply() {
   el.threadSendBtn?.setAttribute("disabled", "disabled");
 
   try {
-    let content = body;
+    // Transform client-side commands (like /hang) before anything else
+    let content = transformHangCommand(body);
     let encrypted = false;
 
     // Parse slash commands and mentions from plaintext BEFORE encryption
-    const commands = parseSlashCommands(body);
-    const mentions = parseMentions(body);
+    const commands = parseSlashCommands(content);
+    const mentions = parseMentions(content);
 
     // Encrypt message if channel needs encryption (private or community)
     if (channelNeedsEncryption(channelId)) {
-      const encResult = await encryptMessageForChannel(body, channelId);
+      const encResult = await encryptMessageForChannel(content, channelId);
       if (encResult) {
         content = encResult.encrypted;
         encrypted = true;
@@ -1781,15 +1783,24 @@ async function sendThreadReply() {
 let channelSettingsGroups = [];
 let allGroups = [];
 
-// Update cog button visibility based on admin status and selected channel
+// Update cog button and hang button visibility based on admin status and selected channel
 export function updateChannelSettingsCog() {
-  if (!el.channelSettingsBtn) return;
-
   // Show cog only for admins when a channel is selected
-  if (state.isAdmin && state.chat.selectedChannelId) {
-    show(el.channelSettingsBtn);
-  } else {
-    hide(el.channelSettingsBtn);
+  if (el.channelSettingsBtn) {
+    if (state.isAdmin && state.chat.selectedChannelId) {
+      show(el.channelSettingsBtn);
+    } else {
+      hide(el.channelSettingsBtn);
+    }
+  }
+
+  // Show hang button for all users when a channel is selected
+  if (el.channelHangBtn) {
+    if (state.chat.selectedChannelId) {
+      show(el.channelHangBtn);
+    } else {
+      hide(el.channelHangBtn);
+    }
   }
 }
 
@@ -2166,6 +2177,75 @@ function wireChannelSettingsModal() {
       el.distributeKeysBtn.disabled = false;
       el.distributeKeysBtn.textContent = "Distribute Keys to Pending Members";
     }
+  });
+}
+
+// ========== Hang Buttons ==========
+
+/**
+ * Send a hang message to a channel or thread
+ * @param {string|number} channelId - The channel ID
+ * @param {number|null} parentId - Thread parent ID (null for channel message)
+ */
+async function sendHangMessage(channelId, parentId = null) {
+  if (!state.session) return;
+
+  const hangId = generateHangId();
+  const hangUrl = `https://hang.live/@${hangId}`;
+  const body = `Join the hang: ${hangUrl}`;
+
+  try {
+    let content = body;
+    let encrypted = false;
+
+    // Encrypt if channel needs it
+    if (channelNeedsEncryption(channelId)) {
+      const encResult = await encryptMessageForChannel(body, channelId);
+      if (encResult) {
+        content = encResult.encrypted;
+        encrypted = true;
+      } else {
+        console.error("[Hang] Failed to encrypt hang message");
+        return;
+      }
+    }
+
+    const res = await fetch(`/chat/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content,
+        parentId: parentId ? Number(parentId) : null,
+        encrypted,
+      }),
+    });
+
+    if (res.ok) {
+      await fetchMessages(channelId);
+      // If this was a thread reply, refresh the thread view
+      if (parentId && openThreadId) {
+        const messages = getActiveChannelMessages();
+        const byParent = groupByParent(messages);
+        openThread(parentId, messages, byParent);
+      }
+    }
+  } catch (err) {
+    console.error("[Hang] Failed to send hang message:", err);
+  }
+}
+
+// Wire hang buttons
+function wireHangButtons() {
+  // Channel hang button - sends to current channel
+  el.channelHangBtn?.addEventListener("click", () => {
+    if (!state.chat.selectedChannelId) return;
+    sendHangMessage(state.chat.selectedChannelId, null);
+  });
+
+  // Thread hang button - sends to current thread
+  el.threadHangBtn?.addEventListener("click", () => {
+    if (!state.chat.selectedChannelId || !openThreadId) return;
+    sendHangMessage(state.chat.selectedChannelId, openThreadId);
   });
 }
 
