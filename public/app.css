@@ -2871,6 +2871,41 @@ body.chat-page {
   display: none;
 }
 
+/* ========== Hang Buttons ========== */
+.channel-hang-btn {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.25rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  line-height: 1;
+  transform: scale(0.8);
+  margin-left: auto;
+}
+.chat-thread-hang-btn {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0.25rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  line-height: 1;
+  transform: scale(0.8);
+}
+.channel-hang-btn:hover,
+.chat-thread-hang-btn:hover {
+  opacity: 1;
+}
+.channel-hang-btn[hidden],
+.chat-thread-hang-btn[hidden] {
+  display: none;
+}
+
 /* Channel settings modal groups section */
 .channel-settings-body {
   max-width: 480px;

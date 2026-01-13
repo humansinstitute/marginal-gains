@@ -88,6 +88,9 @@ export const elements = {
   kanbanView: document.querySelector("[data-kanban-view]"),
   viewSwitcher: document.querySelector("[data-view-switcher]"),
   kanbanBoard: document.querySelector("[data-kanban-board]"),
+  // Hang buttons
+  channelHangBtn: document.querySelector("[data-channel-hang]"),
+  threadHangBtn: document.querySelector("[data-thread-hang]"),
   // Channel settings elements
   channelSettingsBtn: document.querySelector("[data-channel-settings]"),
   channelSettingsModal: document.querySelector("[data-channel-settings-modal]"),
