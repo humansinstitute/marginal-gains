@@ -661,3 +661,458 @@ function renderTaskEditModal(groupId: number | null) {
   </div>`;
 }
 
+// ==================== Team-scoped Todo Page ====================
+
+type TeamRenderArgs = RenderArgs & {
+  teamSlug: string;
+};
+
+type TeamPageState = PageState & {
+  teamSlug: string;
+};
+
+/**
+ * Render the todos page in a team context
+ * Uses team-scoped URLs for all actions
+ */
+export function renderTeamTodosPage({
+  showArchive,
+  session,
+  filterTags = [],
+  todos = [],
+  userGroups = [],
+  selectedGroup = null,
+  canManage = true,
+  teamSlug,
+}: TeamRenderArgs) {
+  const filteredTodos = filterTodos(todos, filterTags);
+  const pageState = buildTeamPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage, teamSlug);
+
+  return `<!doctype html>
+<html lang="en">
+${renderHead()}
+<body class="tasks-page">
+  <main class="tasks-app-shell">
+    ${renderTeamHeader(session, teamSlug)}
+    <div class="tasks-content" data-tasks-content>
+      <div class="tasks-content-inner">
+        ${renderTeamHero(session, pageState.groupId, pageState.canManage, teamSlug)}
+        ${renderTeamWork(pageState)}
+        ${renderSummaries()}
+      </div>
+    </div>
+    ${renderQrModal()}
+    ${renderProfileModal()}
+    ${renderPinModal()}
+    ${renderTeamTaskEditModal(pageState.groupId, teamSlug)}
+  </main>
+  ${renderTeamSessionSeed(session, pageState.groupId, teamSlug)}
+  <script type="module" src="/app.js?v=3"></script>
+</body>
+</html>`;
+}
+
+function renderTeamHeader(session: Session | null, teamSlug: string) {
+  const appName = getAppName();
+  const faviconUrl = getFaviconUrl() || "/favicon.png";
+  return `<header class="tasks-page-header">
+    <div class="header-left">
+      <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
+        <span class="hamburger-icon"></span>
+      </button>
+      <a href="/t/${teamSlug}/chat" class="app-logo-link">
+        <img src="${faviconUrl}" alt="" class="app-logo" />
+      </a>
+      <h1 class="app-title">${appName}</h1>
+      <span class="team-badge">${escapeHtml(teamSlug)}</span>
+    </div>
+    <div class="header-right">
+      <div class="session-controls" data-session-controls ${session ? "" : "hidden"}>
+        <button class="avatar-chip" type="button" data-avatar ${session ? "" : "hidden"} title="Account menu">
+          <span class="avatar-fallback" data-avatar-fallback>${session ? formatAvatarFallback(session.npub) : "MG"}</span>
+          <img data-avatar-img alt="Profile photo" loading="lazy" ${session ? "" : "hidden"} />
+        </button>
+        <div class="avatar-menu" data-avatar-menu hidden>
+          <button type="button" data-view-profile>View Profile</button>
+          <button type="button" data-export-secret ${session?.method === "ephemeral" ? "" : "hidden"}>Export Secret</button>
+          <button type="button" data-show-login-qr ${session?.method === "ephemeral" ? "" : "hidden"}>Show Login QR</button>
+          <button type="button" data-copy-id ${session ? "" : "hidden"}>Copy ID</button>
+          <a href="/wallet" class="avatar-menu-link" ${session ? "" : "hidden"}>Wallet</a>
+          <button type="button" data-logout>Log out</button>
+        </div>
+      </div>
+    </div>
+    ${renderAppMenu(session, "tasks")}
+  </header>`;
+}
+
+function renderTeamHero(session: Session | null, groupId: number | null, canManage: boolean, teamSlug: string) {
+  const isDisabled = !session || !canManage;
+  const placeholder = !session ? "Add a task" : !canManage ? "View only" : "Add something else...";
+  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
+
+  return `<section class="hero-entry" data-hero-section ${canManage ? "" : "hidden"}>
+    <form class="todo-form" method="post" action="/t/${teamSlug}/todos">
+      ${groupIdField}
+      <label for="title" class="sr-only">Add a task</label>
+      <div class="hero-input-wrapper">
+        <input class="hero-input" data-hero-input id="title" name="title" placeholder="${placeholder}" autocomplete="off" autofocus required ${isDisabled ? "disabled" : ""} />
+      </div>
+      <p class="hero-hint" data-hero-hint hidden>Sign in above to add tasks.</p>
+    </form>
+  </section>`;
+}
+
+function buildTeamPageState(
+  todos: Todo[],
+  filterTags: string[],
+  showArchive: boolean,
+  session: Session | null,
+  userGroups: Group[],
+  selectedGroup: Group | null,
+  canManage: boolean,
+  teamSlug: string
+): TeamPageState {
+  const groupId = selectedGroup?.id ?? null;
+  const activeTodos = todos.filter((t) => t.state !== "done");
+  const doneTodos = todos.filter((t) => t.state === "done");
+
+  // Build URLs with team and group context preserved
+  const baseUrl = groupId ? `/t/${teamSlug}/todo?group=${groupId}` : `/t/${teamSlug}/todo`;
+  const archiveHref = showArchive ? baseUrl : `${baseUrl}${groupId ? "&" : "?"}archive=1`;
+  const archiveLabel = showArchive ? "Hide archive" : `Archive (${doneTodos.length})`;
+  const tagFilterBar = session ? renderTeamTagFilterBar(todos, filterTags, showArchive, groupId, teamSlug) : "";
+  const emptyActiveMessage = session ? "No active work. Add something new!" : "Sign in to view your todos.";
+  const emptyArchiveMessage = session ? "Nothing archived yet." : "Sign in to view your archive.";
+  const remainingText = session ? (activeTodos.length === 0 ? "All clear." : `${activeTodos.length} left to go.`) : "";
+  const contextSwitcher = session ? renderTeamContextSwitcher(userGroups, selectedGroup, teamSlug) : "";
+
+  return {
+    archiveHref,
+    archiveLabel,
+    remainingText,
+    tagFilterBar,
+    activeTodos,
+    doneTodos,
+    emptyActiveMessage,
+    emptyArchiveMessage,
+    showArchive,
+    groupId,
+    canManage,
+    contextSwitcher,
+    teamSlug,
+  };
+}
+
+function renderTeamContextSwitcher(userGroups: Group[], selectedGroup: Group | null, teamSlug: string): string {
+  if (userGroups.length === 0) return "";
+
+  const options = [
+    `<option value="">Personal</option>`,
+    ...userGroups.map(
+      (g) => `<option value="${g.id}" ${selectedGroup?.id === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`
+    ),
+  ].join("");
+
+  return `<select class="context-switcher" data-context-switcher data-team-slug="${teamSlug}" title="Switch context">${options}</select>`;
+}
+
+function renderTeamTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null, teamSlug: string) {
+  // Build base URL with team and group context
+  const groupParam = groupId ? `group=${groupId}` : "";
+  const archiveParam = showArchive ? "archive=1" : "";
+  const params = [groupParam, archiveParam].filter(Boolean);
+  const baseUrl = params.length > 0 ? `/t/${teamSlug}/todo?${params.join("&")}` : `/t/${teamSlug}/todo`;
+  const separator = params.length > 0 ? "&" : "?";
+
+  const tags = collectTags(allTodos);
+  if (tags.length === 0) return "";
+
+  const chips = tags
+    .sort()
+    .map((tag) => {
+      const isActive = activeTags.some((t) => t.toLowerCase() === tag.toLowerCase());
+      const nextTags = toggleTag(activeTags, tag, isActive);
+      const href = nextTags.length > 0 ? `${baseUrl}${separator}tags=${nextTags.join(",")}` : baseUrl;
+      return `<a href="${href}" class="tag-chip${isActive ? " active" : ""}">${escapeHtml(tag)}</a>`;
+    })
+    .join("");
+
+  const clearLink = activeTags.length > 0 ? `<a href="${baseUrl}" class="clear-filters">Clear filters</a>` : "";
+  return `<div class="tag-filter-bar"><span class="label">Filter by tag:</span>${chips}${clearLink}</div>`;
+}
+
+function renderTeamWork(state: TeamPageState) {
+  return `<section class="work" data-work-section>
+    <div class="work-header">
+      <h2>Work</h2>
+      <div class="work-header-actions">
+        ${state.contextSwitcher}
+        <div class="view-switcher" data-view-switcher>
+          <button type="button" class="view-btn active" data-view-mode="list" title="List view">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4h12v1H2V4zm0 3.5h12v1H2v-1zm0 3.5h12v1H2v-1z"/></svg>
+          </button>
+          <button type="button" class="view-btn" data-view-mode="kanban" title="Kanban view">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2h4v12H1V2zm5 0h4v8H6V2zm5 0h4v10h-4V2z"/></svg>
+          </button>
+        </div>
+        <a class="archive-toggle" href="${state.archiveHref}">${state.archiveLabel}</a>
+      </div>
+    </div>
+    <p class="remaining-summary">${state.remainingText}</p>
+    ${state.tagFilterBar}
+    <div class="todo-list-view" data-list-view>
+      ${renderTeamTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.teamSlug)}
+    </div>
+    <div class="kanban-view" data-kanban-view hidden>
+      ${renderTeamKanbanBoard(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.teamSlug)}
+    </div>
+    ${state.showArchive ? renderTeamArchiveSection(state.doneTodos, state.emptyArchiveMessage, state.groupId, state.canManage, state.teamSlug) : ""}
+  </section>`;
+}
+
+function renderTeamTodoList(todos: Todo[], emptyMessage: string, groupId: number | null, canManage: boolean, teamSlug: string) {
+  if (todos.length === 0) {
+    return `<ul class="todo-list"><li>${emptyMessage}</li></ul>`;
+  }
+  return `<ul class="todo-list">${todos.map((todo) => renderTeamTodoItem(todo, groupId, canManage, teamSlug)).join("")}</ul>`;
+}
+
+function renderTeamKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: number | null, canManage: boolean, teamSlug: string) {
+  const columns: { state: string; label: string; todos: Todo[] }[] = [
+    { state: "new", label: "New", todos: [] },
+    { state: "ready", label: "Ready", todos: [] },
+    { state: "in_progress", label: "In Progress", todos: [] },
+    { state: "done", label: "Done", todos: [] },
+  ];
+
+  for (const todo of todos) {
+    const col = columns.find((c) => c.state === todo.state);
+    if (col) col.todos.push(todo);
+  }
+
+  const columnHtml = columns
+    .map(
+      (col) => `
+      <div class="kanban-column" data-kanban-column="${col.state}">
+        <div class="kanban-column-header">
+          <h3>${col.label}</h3>
+          <span class="kanban-count">${col.todos.length}</span>
+        </div>
+        <div class="kanban-cards" data-kanban-cards="${col.state}" ${canManage ? "" : 'data-readonly="true"'}>
+          ${col.todos.length === 0 ? `<p class="kanban-empty">No tasks</p>` : col.todos.map((todo) => renderTeamKanbanCard(todo, groupId, teamSlug)).join("")}
+        </div>
+      </div>`
+    )
+    .join("");
+
+  return `<div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""} data-team-slug="${teamSlug}">${columnHtml}</div>`;
+}
+
+function renderTeamKanbanCard(todo: Todo, groupId: number | null, teamSlug: string) {
+  const priorityClass = `priority-${todo.priority}`;
+  const tagsHtml = todo.tags
+    ? todo.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .map((t) => `<span class="tag-chip">${escapeHtml(t)}</span>`)
+        .join("")
+    : "";
+  // Note: Thread links are team-scoped, so we'd need team DB access
+  // For now, skip the thread badge in team context
+  const threadBadge = "";
+
+  return `
+    <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}" ${groupId ? `data-group-id="${groupId}"` : ""} data-team-slug="${teamSlug}">
+      <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
+      ${todo.description ? `<p class="kanban-card-desc">${escapeHtml(todo.description.slice(0, 100))}${todo.description.length > 100 ? "..." : ""}</p>` : ""}
+      <div class="kanban-card-meta">
+        <span class="badge ${priorityClass}">${formatPriorityLabel(todo.priority)}</span>
+        ${tagsHtml}
+        ${threadBadge}
+      </div>
+    </div>`;
+}
+
+function renderTeamArchiveSection(todos: Todo[], emptyMessage: string, groupId: number | null, canManage: boolean, teamSlug: string) {
+  return `
+    <section class="archive-section">
+      <div class="section-heading"><h2>Archive</h2></div>
+      ${renderTeamTodoList(todos, emptyMessage, groupId, canManage, teamSlug)}
+    </section>`;
+}
+
+function renderTeamTodoItem(todo: Todo, groupId: number | null, canManage: boolean, teamSlug: string) {
+  const description = todo.description ? `<p class="todo-description">${escapeHtml(todo.description)}</p>` : "";
+  const scheduled = todo.scheduled_for
+    ? `<p class="todo-description"><strong>Scheduled for:</strong> ${escapeHtml(todo.scheduled_for)}</p>`
+    : "";
+  const tagsDisplay = renderTagsDisplay(todo.tags);
+  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
+  // Thread badges skipped for team context
+
+  if (!canManage) {
+    // Read-only view for non-managers
+    return `
+    <li>
+      <details>
+        <summary>
+          <span class="todo-title">${escapeHtml(todo.title)}</span>
+          <span class="badges">
+            <span class="badge priority-${todo.priority}">${formatPriorityLabel(todo.priority)}</span>
+            <span class="badge state-${todo.state}">${formatStateLabel(todo.state)}</span>
+            ${tagsDisplay}
+          </span>
+        </summary>
+        <div class="todo-body">
+          ${description}
+          ${scheduled}
+        </div>
+      </details>
+    </li>`;
+  }
+
+  return `
+    <li>
+      <details>
+        <summary>
+          <span class="todo-title">${escapeHtml(todo.title)}</span>
+          <span class="badges">
+            <span class="badge priority-${todo.priority}">${formatPriorityLabel(todo.priority)}</span>
+            <span class="badge state-${todo.state}">${formatStateLabel(todo.state)}</span>
+            ${tagsDisplay}
+          </span>
+        </summary>
+        <div class="todo-body">
+          ${description}
+          ${scheduled}
+          <form class="edit-form" method="post" action="/t/${teamSlug}/todos/${todo.id}/update">
+            ${groupIdField}
+            <label>Title
+              <input name="title" value="${escapeHtml(todo.title)}" required />
+            </label>
+            <label>Description
+              <textarea name="description" rows="3">${escapeHtml(todo.description ?? "")}</textarea>
+            </label>
+            <label>Priority
+              <select name="priority">
+                ${renderPriorityOption("rock", todo.priority)}
+                ${renderPriorityOption("pebble", todo.priority)}
+                ${renderPriorityOption("sand", todo.priority)}
+              </select>
+            </label>
+            <label>State
+              <select name="state">
+                ${renderStateOption("new", todo.state)}
+                ${renderStateOption("ready", todo.state)}
+                ${renderStateOption("in_progress", todo.state)}
+                ${renderStateOption("done", todo.state)}
+              </select>
+            </label>
+            <label>Scheduled For
+              <input type="date" name="scheduled_for" value="${todo.scheduled_for ? escapeHtml(todo.scheduled_for) : ""}" />
+            </label>
+            ${renderTagsInput(todo.tags)}
+            <button type="submit">Update</button>
+          </form>
+          ${renderTeamLifecycleActions(todo, groupId, teamSlug)}
+        </div>
+      </details>
+    </li>`;
+}
+
+function renderTeamLifecycleActions(todo: Todo, groupId: number | null, teamSlug: string) {
+  const transitions = ALLOWED_STATE_TRANSITIONS[todo.state] ?? [];
+  const transitionForms = transitions.map((next) =>
+    renderTeamStateActionForm(todo.id, next, formatTransitionLabel(todo.state, next), groupId, teamSlug)
+  );
+
+  return `
+    <div class="todo-actions">
+      ${transitionForms.join("")}
+      ${renderTeamDeleteForm(todo.id, groupId, teamSlug)}
+    </div>`;
+}
+
+function renderTeamStateActionForm(id: number, nextState: TodoState, label: string, groupId: number | null, teamSlug: string) {
+  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
+  return `
+    <form method="post" action="/t/${teamSlug}/todos/${id}/state">
+      ${groupIdField}
+      <input type="hidden" name="state" value="${nextState}" />
+      <button type="submit">${label}</button>
+    </form>`;
+}
+
+function renderTeamDeleteForm(id: number, groupId: number | null, teamSlug: string) {
+  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
+  return `
+    <form method="post" action="/t/${teamSlug}/todos/${id}/delete">
+      ${groupIdField}
+      <button type="submit">Delete</button>
+    </form>`;
+}
+
+function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
+  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
+  return `<div class="task-modal-overlay" data-task-modal hidden>
+    <div class="task-modal">
+      <div class="task-modal-header">
+        <h2>Edit Task</h2>
+        <button class="task-modal-close" type="button" data-task-modal-close aria-label="Close">&times;</button>
+      </div>
+      <form class="task-modal-form" method="post" data-task-modal-form data-team-slug="${teamSlug}">
+        ${groupIdField}
+        <label>Title
+          <input name="title" data-task-modal-title required />
+        </label>
+        <label>Description
+          <textarea name="description" data-task-modal-description rows="3"></textarea>
+        </label>
+        <div class="task-modal-row">
+          <label>Priority
+            <select name="priority" data-task-modal-priority>
+              <option value="rock">${formatPriorityLabel("rock")}</option>
+              <option value="pebble">${formatPriorityLabel("pebble")}</option>
+              <option value="sand">${formatPriorityLabel("sand")}</option>
+            </select>
+          </label>
+          <label>State
+            <select name="state" data-task-modal-state>
+              <option value="new">${formatStateLabel("new")}</option>
+              <option value="ready">${formatStateLabel("ready")}</option>
+              <option value="in_progress">${formatStateLabel("in_progress")}</option>
+              <option value="done">${formatStateLabel("done")}</option>
+            </select>
+          </label>
+        </div>
+        <label>Scheduled For
+          <input type="date" name="scheduled_for" data-task-modal-scheduled />
+        </label>
+        <label>Tags
+          <div class="tag-input-wrapper" data-task-modal-tags-wrapper>
+            <input type="text" placeholder="Type and press comma..." />
+            <input type="hidden" name="tags" data-task-modal-tags-hidden value="" />
+          </div>
+        </label>
+        <div class="task-modal-actions">
+          <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
+          <div class="task-modal-actions-right">
+            <button type="button" data-task-modal-cancel>Cancel</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+function renderTeamSessionSeed(session: Session | null, groupId: number | null, teamSlug: string) {
+  return `<script>
+    window.__NOSTR_SESSION__ = ${JSON.stringify(session ?? null)};
+    window.__GROUP_ID__ = ${groupId ?? "null"};
+    window.__TEAM_SLUG__ = ${JSON.stringify(teamSlug)};
+  </script>`;
+}
+

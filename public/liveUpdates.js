@@ -3,6 +3,7 @@
  * Connects to server event stream and updates local state/UI
  */
 
+import { eventsUrl } from "./api.js";
 import {
   initLocalDb,
   saveChannel,
@@ -104,7 +105,7 @@ export async function connect() {
 
   console.log("[LiveUpdates] Connecting to event stream...");
 
-  eventSource = new EventSource("/chat/events");
+  eventSource = new EventSource(eventsUrl());
 
   eventSource.onopen = () => {
     console.log("[LiveUpdates] Connected to event stream");

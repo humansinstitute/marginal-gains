@@ -1,4 +1,5 @@
 // CRM Client-Side Module
+import { crmUrl } from "./api.js";
 
 class CrmApp {
   constructor() {
@@ -312,7 +313,7 @@ class CrmApp {
 
   async editCompany(id) {
     try {
-      const res = await fetch(`/api/crm/companies/${id}`);
+      const res = await fetch(crmUrl(`/companies/${id}`));
       if (!res.ok) throw new Error("Failed to fetch company");
       const company = await res.json();
       this.openCompanyModal(company);
@@ -334,7 +335,7 @@ class CrmApp {
 
     try {
       const method = id ? "PATCH" : "POST";
-      const url = id ? `/api/crm/companies/${id}` : "/api/crm/companies";
+      const url = id ? crmUrl(`/companies/${id}`) : crmUrl("/companies");
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -357,7 +358,7 @@ class CrmApp {
     if (!confirm("Are you sure you want to delete this company?")) return;
 
     try {
-      const res = await fetch(`/api/crm/companies/${id}`, { method: "DELETE" });
+      const res = await fetch(crmUrl(`/companies/${id}`), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete company");
       location.reload();
     } catch (err) {
@@ -419,7 +420,7 @@ class CrmApp {
   async editContact(id) {
     try {
       await this.loadCompanyOptions("[data-contact-modal]");
-      const res = await fetch(`/api/crm/contacts/${id}`);
+      const res = await fetch(crmUrl(`/contacts/${id}`));
       if (!res.ok) throw new Error("Failed to fetch contact");
       const contact = await res.json();
       this.openContactModal(contact);
@@ -445,7 +446,7 @@ class CrmApp {
 
     try {
       const method = id ? "PATCH" : "POST";
-      const url = id ? `/api/crm/contacts/${id}` : "/api/crm/contacts";
+      const url = id ? crmUrl(`/contacts/${id}`) : crmUrl("/contacts");
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -468,7 +469,7 @@ class CrmApp {
     if (!confirm("Are you sure you want to delete this contact?")) return;
 
     try {
-      const res = await fetch(`/api/crm/contacts/${id}`, { method: "DELETE" });
+      const res = await fetch(crmUrl(`/contacts/${id}`), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete contact");
       location.reload();
     } catch (err) {
@@ -529,7 +530,7 @@ class CrmApp {
     try {
       await this.loadCompanyOptions("[data-opportunity-modal]");
       await this.loadContactOptions("[data-opportunity-modal]");
-      const res = await fetch(`/api/crm/opportunities/${id}`);
+      const res = await fetch(crmUrl(`/opportunities/${id}`));
       if (!res.ok) throw new Error("Failed to fetch opportunity");
       const opportunity = await res.json();
       this.openOpportunityModal(opportunity);
@@ -556,7 +557,7 @@ class CrmApp {
 
     try {
       const method = id ? "PATCH" : "POST";
-      const url = id ? `/api/crm/opportunities/${id}` : "/api/crm/opportunities";
+      const url = id ? crmUrl(`/opportunities/${id}`) : crmUrl("/opportunities");
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -622,7 +623,7 @@ class CrmApp {
     };
 
     try {
-      const res = await fetch("/api/crm/activities", {
+      const res = await fetch(crmUrl("/activities"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -644,7 +645,7 @@ class CrmApp {
     if (!confirm("Are you sure you want to delete this activity?")) return;
 
     try {
-      const res = await fetch(`/api/crm/activities/${id}`, { method: "DELETE" });
+      const res = await fetch(crmUrl(`/activities/${id}`), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete activity");
       location.reload();
     } catch (err) {
@@ -656,7 +657,7 @@ class CrmApp {
   // Helper: Load company options into select
   async loadCompanyOptions(modalSelector) {
     try {
-      const res = await fetch("/api/crm/companies");
+      const res = await fetch(crmUrl("/companies"));
       if (!res.ok) return;
       const companies = await res.json();
 
@@ -682,7 +683,7 @@ class CrmApp {
   // Helper: Load contact options into select
   async loadContactOptions(modalSelector) {
     try {
-      const res = await fetch("/api/crm/contacts");
+      const res = await fetch(crmUrl("/contacts"));
       if (!res.ok) return;
       const contacts = await res.json();
 
@@ -707,7 +708,7 @@ class CrmApp {
   // Helper: Load opportunity options into select
   async loadOpportunityOptions(modalSelector) {
     try {
-      const res = await fetch("/api/crm/opportunities");
+      const res = await fetch(crmUrl("/opportunities"));
       if (!res.ok) return;
       const opportunities = await res.json();
 

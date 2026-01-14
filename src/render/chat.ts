@@ -4,7 +4,12 @@ import { renderAppMenu, renderPinModal } from "./components";
 
 import type { DeepLink, Session } from "../types";
 
-export function renderChatPage(session: Session | null, deepLink?: DeepLink, needsOnboarding = false) {
+export function renderChatPage(
+  session: Session | null,
+  deepLink?: DeepLink,
+  needsOnboarding = false,
+  teamSlug?: string
+) {
   const bodyClass = needsOnboarding ? "chat-page onboarding-mode" : "chat-page";
   return `<!doctype html>
 <html lang="en">
@@ -14,7 +19,7 @@ ${renderHead()}
     ${renderChatHeader(session, needsOnboarding)}
     ${!session ? renderAuthRequired() : needsOnboarding ? renderOnboardingLobby() : renderChatContent()}
   </main>
-  ${renderSessionSeed(session, deepLink, needsOnboarding)}
+  ${renderSessionSeed(session, deepLink, needsOnboarding, teamSlug)}
   <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>`;
@@ -431,12 +436,18 @@ function renderAuthRequired() {
   </section>`;
 }
 
-function renderSessionSeed(session: Session | null, deepLink?: DeepLink, needsOnboarding = false) {
+function renderSessionSeed(
+  session: Session | null,
+  deepLink?: DeepLink,
+  needsOnboarding = false,
+  teamSlug?: string
+) {
   return `<script>
     window.__NOSTR_SESSION__ = ${JSON.stringify(session ?? null)};
     window.__CHAT_PAGE__ = true;
     window.__DEEP_LINK__ = ${JSON.stringify(deepLink ?? null)};
     window.__NEEDS_ONBOARDING__ = ${needsOnboarding};
+    window.__TEAM_SLUG__ = ${JSON.stringify(teamSlug ?? null)};
   </script>`;
 }
 

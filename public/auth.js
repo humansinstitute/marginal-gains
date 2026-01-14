@@ -1,3 +1,4 @@
+import { chatUrl } from "./api.js";
 import {
   AUTO_LOGIN_METHOD_KEY,
   AUTO_LOGIN_PUBKEY_KEY,
@@ -828,7 +829,7 @@ const completeLogin = async (method, event) => {
       nip05: profile?.nip05 || null,
     };
     console.log("[Login] Saving user data:", userData);
-    const res = await fetch("/chat/users", {
+    const res = await fetch(chatUrl("/users"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(userData),
@@ -839,7 +840,15 @@ const completeLogin = async (method, event) => {
   }
 
   await fetchSummaries();
-  window.location.href = "/chat";
+
+  // Redirect based on team context
+  if (session.currentTeamSlug) {
+    // User has a team context - go directly to team chat
+    window.location.href = `/t/${session.currentTeamSlug}/chat`;
+  } else {
+    // No team context - go to teams page to select one
+    window.location.href = "/teams";
+  }
 };
 
 const handleExportSecret = async () => {

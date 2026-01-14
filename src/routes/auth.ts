@@ -1,4 +1,5 @@
 import { jsonResponse, safeJson } from "../http";
+import { getUserTeams } from "../master-db";
 import { parseSessionCookie } from "../services/auth";
 import { validateLoginMethod } from "../validation";
 
@@ -18,13 +19,27 @@ type LoginRequestBody = {
   };
 };
 
+/**
+ * Enriches a session with team membership data
+ */
+function enrichSessionWithTeams(session: Session): void {
+  const teams = getUserTeams(session.npub);
+  session.teamMemberships = teams;
+
+  // Auto-select team if user has exactly one
+  if (teams.length === 1) {
+    session.currentTeamId = teams[0].teamId;
+    session.currentTeamSlug = teams[0].teamSlug;
+  }
+}
+
 export function createAuthHandlers(authService: AuthService, cookieName: string) {
   const login = async (req: Request) => {
     const body = (await safeJson(req)) as LoginRequestBody | null;
     if (!body?.method || !body.event || !validateLoginMethod(body.method)) {
       return jsonResponse({ message: "Invalid payload." }, 400);
     }
-    return authService.login(body.method, body.event);
+    return authService.login(body.method, body.event, enrichSessionWithTeams);
   };
 
   const logout = (req: Request) => {

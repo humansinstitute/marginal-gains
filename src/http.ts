@@ -11,6 +11,13 @@ export function unauthorized() {
   });
 }
 
+export function forbidden(message = "Forbidden") {
+  return new Response(JSON.stringify({ error: message }), {
+    status: 403,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export function jsonResponse(body: unknown, status = 200, cookie?: string) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (cookie) headers["Set-Cookie"] = cookie;

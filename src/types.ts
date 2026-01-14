@@ -1,12 +1,32 @@
 export type TodoState = "new" | "ready" | "in_progress" | "done";
 export type TodoPriority = "rock" | "pebble" | "sand";
 
+/**
+ * Team membership info attached to session
+ */
+export type SessionTeamMembership = {
+  teamId: number;
+  teamSlug: string;
+  displayName: string;
+  role: "owner" | "manager" | "member";
+};
+
+/**
+ * User session with optional team context
+ *
+ * Team fields are optional for backwards compatibility during migration.
+ * Once multi-tenancy is fully deployed, these become required.
+ */
 export type Session = {
   token: string;
   pubkey: string;
   npub: string;
   method: LoginMethod;
   createdAt: number;
+  // Team context (optional during migration)
+  currentTeamId?: number | null;
+  currentTeamSlug?: string | null;
+  teamMemberships?: SessionTeamMembership[];
 };
 
 export type LoginMethod = "ephemeral" | "extension" | "bunker" | "secret";
