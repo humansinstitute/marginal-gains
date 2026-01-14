@@ -17,7 +17,9 @@ export function handleHome(session: Session | null) {
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-export function handleTodos(url: URL, session: Session | null) {
+export type ViewMode = "kanban" | "list";
+
+export function handleTodos(url: URL, session: Session | null, viewMode: ViewMode = "kanban") {
   const tagsParam = url.searchParams.get("tags");
   const filterTags = tagsParam ? tagsParam.split(",").map((t) => t.trim()).filter(Boolean) : [];
   const showArchive = url.searchParams.get("archive") === "1";
@@ -75,6 +77,17 @@ export function handleTodos(url: URL, session: Session | null) {
     isAllTasksView,
     mineFilter,
     groupMembers,
+    viewMode,
   });
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+
+export function handleTodosRedirect(url: URL) {
+  // Redirect /todo to /todo/kanban, preserving query params
+  const newUrl = new URL(url);
+  newUrl.pathname = "/todo/kanban";
+  return new Response(null, {
+    status: 302,
+    headers: { Location: newUrl.pathname + newUrl.search },
+  });
 }

@@ -1,26 +1,16 @@
-import { state, setViewMode, refreshUI } from "./state.js";
-import { show, hide } from "./dom.js";
+import { refreshUI } from "./state.js";
 
 let draggedCard = null;
 let userCache = null; // Cache users for avatar lookups
 
 export function initKanban() {
-  // Initialize view based on saved preference
-  applyViewMode();
-
-  // View switcher click handlers
-  const viewSwitcher = document.querySelector("[data-view-switcher]");
-  if (viewSwitcher) {
-    viewSwitcher.addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-view-mode]");
-      if (!btn) return;
-      const mode = btn.dataset.viewMode;
-      setViewMode(mode);
-      applyViewMode();
-    });
+  // Add kanban-active class if on kanban view (detected by presence of kanban-view element)
+  const kanbanView = document.querySelector("[data-kanban-view]");
+  if (kanbanView) {
+    document.body.classList.add("kanban-active");
   }
 
-  // Context switcher (Personal / Group dropdown)
+  // Context switcher (Personal / Group dropdown) - navigates to selected URL
   initContextSwitcher();
 
   // Initialize drag-drop for kanban cards
@@ -37,42 +27,11 @@ function initContextSwitcher() {
   const switcher = document.querySelector("[data-context-switcher]");
   if (!switcher) return;
 
+  // Options now contain full URLs, so just navigate directly
   switcher.addEventListener("change", (e) => {
-    const value = e.target.value;
-    if (value === "all") {
-      // "All My Tasks" view - aggregates tasks assigned to user across all boards
-      window.location.href = "/todo?view=all";
-    } else if (value) {
-      // Group board
-      window.location.href = `/todo?group=${value}`;
-    } else {
-      // Personal board
-      window.location.href = "/todo";
-    }
-  });
-}
-
-function applyViewMode() {
-  const listView = document.querySelector("[data-list-view]");
-  const kanbanView = document.querySelector("[data-kanban-view]");
-  const viewBtns = document.querySelectorAll("[data-view-mode]");
-
-  if (state.viewMode === "kanban") {
-    hide(listView);
-    show(kanbanView);
-    document.body.classList.add("kanban-active");
-  } else {
-    show(listView);
-    hide(kanbanView);
-    document.body.classList.remove("kanban-active");
-  }
-
-  // Update active button state
-  viewBtns.forEach((btn) => {
-    if (btn.dataset.viewMode === state.viewMode) {
-      btn.classList.add("active");
-    } else {
-      btn.classList.remove("active");
+    const url = e.target.value;
+    if (url) {
+      window.location.href = url;
     }
   });
 }
@@ -338,5 +297,3 @@ async function loadAssigneeAvatars() {
   });
 }
 
-// Re-export for use in app.js
-export { applyViewMode };
