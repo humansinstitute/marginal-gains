@@ -89,7 +89,7 @@ import {
   handleRemoveGroupMember,
   handleUpdateGroup,
 } from "./routes/groups";
-import { handleHome, handleTodos } from "./routes/home";
+import { handleHome, handleTodos, handleTodosRedirect } from "./routes/home";
 import {
   handleGetPushStatus,
   handleGetVapidPublicKey,
@@ -217,7 +217,9 @@ const server = Bun.serve({
         if (groupMembersMatch) return handleListGroupMembers(session, Number(groupMembersMatch[1]));
 
         if (pathname === "/") return handleHome(session);
-        if (pathname === "/todo") return requireAuth() || handleTodos(url, session);
+        if (pathname === "/todo") return requireAuth() || handleTodosRedirect(url);
+        if (pathname === "/todo/kanban") return requireAuth() || handleTodos(url, session, "kanban");
+        if (pathname === "/todo/list") return requireAuth() || handleTodos(url, session, "list");
         if (pathname === "/settings") return requireAuth() || handleSettings(session);
         if (pathname === "/wallet") return requireAuth() || handleWalletPage(session);
 

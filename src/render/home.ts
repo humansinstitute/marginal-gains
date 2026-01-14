@@ -6,6 +6,7 @@ import { escapeHtml } from "../utils/html";
 import { renderAppMenu, renderPinModal } from "./components";
 
 import type { Group, GroupMember, Todo } from "../db";
+import type { ViewMode } from "../routes/home";
 import type { Session, TodoPriority, TodoState } from "../types";
 
 // Extended todo type that may include board info (for All Tasks view)
@@ -24,6 +25,7 @@ type RenderArgs = {
   isAllTasksView?: boolean;
   mineFilter?: boolean;
   groupMembers?: GroupMemberWithProfile[];
+  viewMode?: ViewMode;
 };
 
 type PageState = {
@@ -45,6 +47,7 @@ type PageState = {
   groupMembers: GroupMemberWithProfile[];
   currentUserNpub: string | null;
   userGroups: Group[];
+  viewMode: ViewMode;
 };
 
 export function renderHomePage({
@@ -58,9 +61,10 @@ export function renderHomePage({
   isAllTasksView = false,
   mineFilter = false,
   groupMembers = [],
+  viewMode = "kanban",
 }: RenderArgs) {
   const filteredTodos = filterTodos(todos, filterTags);
-  const pageState = buildPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage, isAllTasksView, mineFilter, groupMembers);
+  const pageState = buildPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage, isAllTasksView, mineFilter, groupMembers, viewMode);
 
   return `<!doctype html>
 <html lang="en">
@@ -177,6 +181,31 @@ function renderHero(session: Session | null, groupId: number | null, canManage: 
 }
 
 function renderWork(state: PageState) {
+  // Build view switcher URLs preserving query params
+  const buildViewUrl = (mode: ViewMode) => {
+    const params: string[] = [];
+    if (state.isAllTasksView) params.push("view=all");
+    else if (state.groupId) params.push(`group=${state.groupId}`);
+    if (state.mineFilter && state.groupId) params.push("mine=1");
+    if (state.showArchive) params.push("archive=1");
+    const query = params.length > 0 ? `?${params.join("&")}` : "";
+    return `/todo/${mode}${query}`;
+  };
+
+  const listUrl = buildViewUrl("list");
+  const kanbanUrl = buildViewUrl("kanban");
+  const isKanban = state.viewMode === "kanban";
+  const isList = state.viewMode === "list";
+
+  // Only render the active view
+  const viewContent = isKanban
+    ? `<div class="kanban-view" data-kanban-view>
+        ${renderKanbanBoard(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
+      </div>`
+    : `<div class="todo-list-view" data-list-view>
+        ${renderTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
+      </div>`;
+
   return `<section class="work" data-work-section>
     <div class="work-header">
       <h2>Work</h2>
@@ -184,24 +213,19 @@ function renderWork(state: PageState) {
         ${state.contextSwitcher}
         ${state.mineFilterToggle}
         <div class="view-switcher" data-view-switcher>
-          <button type="button" class="view-btn active" data-view-mode="list" title="List view">
+          <a href="${listUrl}" class="view-btn${isList ? " active" : ""}" title="List view">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4h12v1H2V4zm0 3.5h12v1H2v-1zm0 3.5h12v1H2v-1z"/></svg>
-          </button>
-          <button type="button" class="view-btn" data-view-mode="kanban" title="Kanban view">
+          </a>
+          <a href="${kanbanUrl}" class="view-btn${isKanban ? " active" : ""}" title="Kanban view">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2h4v12H1V2zm5 0h4v8H6V2zm5 0h4v10h-4V2z"/></svg>
-          </button>
+          </a>
         </div>
         <a class="archive-toggle" href="${state.archiveHref}">${state.archiveLabel}</a>
       </div>
     </div>
     <p class="remaining-summary">${state.remainingText}</p>
     ${state.tagFilterBar}
-    <div class="todo-list-view" data-list-view>
-      ${renderTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
-    </div>
-    <div class="kanban-view" data-kanban-view hidden>
-      ${renderKanbanBoard(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
-    </div>
+    ${viewContent}
     ${state.showArchive ? renderArchiveSection(state.doneTodos, state.emptyArchiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub) : ""}
   </section>`;
 }
@@ -298,29 +322,31 @@ function buildPageState(
   canManage: boolean,
   isAllTasksView: boolean,
   mineFilter: boolean,
-  groupMembers: GroupMemberWithProfile[]
+  groupMembers: GroupMemberWithProfile[],
+  viewMode: ViewMode
 ): PageState {
   const groupId = selectedGroup?.id ?? null;
   const activeTodos = todos.filter((t) => t.state !== "done");
   const doneTodos = todos.filter((t) => t.state === "done");
 
-  // Build URLs with group context preserved
+  // Build URLs with view mode route and group context preserved
+  const viewPath = `/todo/${viewMode}`;
   let baseUrl: string;
   if (isAllTasksView) {
-    baseUrl = "/todo?view=all";
+    baseUrl = `${viewPath}?view=all`;
   } else if (groupId) {
-    baseUrl = `/todo?group=${groupId}${mineFilter ? "&mine=1" : ""}`;
+    baseUrl = `${viewPath}?group=${groupId}${mineFilter ? "&mine=1" : ""}`;
   } else {
-    baseUrl = "/todo";
+    baseUrl = viewPath;
   }
   const archiveHref = showArchive ? baseUrl : `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}archive=1`;
   const archiveLabel = showArchive ? "Hide archive" : `Archive (${doneTodos.length})`;
-  const tagFilterBar = session ? renderTagFilterBar(todos, filterTags, showArchive, groupId, isAllTasksView, mineFilter) : "";
+  const tagFilterBar = session ? renderTagFilterBar(todos, filterTags, showArchive, groupId, isAllTasksView, mineFilter, viewMode) : "";
   const emptyActiveMessage = session ? "No active work. Add something new!" : "Sign in to view your todos.";
   const emptyArchiveMessage = session ? "Nothing archived yet." : "Sign in to view your archive.";
   const remainingText = session ? (activeTodos.length === 0 ? "All clear." : `${activeTodos.length} left to go.`) : "";
-  const contextSwitcher = session ? renderContextSwitcher(userGroups, selectedGroup, isAllTasksView) : "";
-  const mineFilterToggle = session && groupId && !isAllTasksView ? renderMineFilterToggle(groupId, mineFilter, showArchive) : "";
+  const contextSwitcher = session ? renderContextSwitcher(userGroups, selectedGroup, isAllTasksView, viewMode) : "";
+  const mineFilterToggle = session && groupId && !isAllTasksView ? renderMineFilterToggle(groupId, mineFilter, showArchive, viewMode) : "";
   const currentUserNpub = session?.npub ?? null;
 
   return {
@@ -342,26 +368,28 @@ function buildPageState(
     groupMembers,
     currentUserNpub,
     userGroups,
+    viewMode,
   };
 }
 
-function renderContextSwitcher(userGroups: Group[], selectedGroup: Group | null, isAllTasksView: boolean): string {
+function renderContextSwitcher(userGroups: Group[], selectedGroup: Group | null, isAllTasksView: boolean, viewMode: ViewMode): string {
   if (userGroups.length === 0) return "";
 
   const isPersonal = !selectedGroup && !isAllTasksView;
+  const viewPath = `/todo/${viewMode}`;
   const options = [
-    `<option value="" ${isPersonal ? "selected" : ""}>Personal</option>`,
-    `<option value="all" ${isAllTasksView ? "selected" : ""}>All My Tasks</option>`,
+    `<option value="${viewPath}" ${isPersonal ? "selected" : ""}>Personal</option>`,
+    `<option value="${viewPath}?view=all" ${isAllTasksView ? "selected" : ""}>All My Tasks</option>`,
     ...userGroups.map(
-      (g) => `<option value="${g.id}" ${selectedGroup?.id === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`
+      (g) => `<option value="${viewPath}?group=${g.id}" ${selectedGroup?.id === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`
     ),
   ].join("");
 
   return `<select class="context-switcher" data-context-switcher title="Switch context">${options}</select>`;
 }
 
-function renderMineFilterToggle(groupId: number, mineFilter: boolean, showArchive: boolean): string {
-  const baseUrl = `/todo?group=${groupId}`;
+function renderMineFilterToggle(groupId: number, mineFilter: boolean, showArchive: boolean, viewMode: ViewMode): string {
+  const baseUrl = `/todo/${viewMode}?group=${groupId}`;
   const archiveParam = showArchive ? "&archive=1" : "";
   const href = mineFilter ? `${baseUrl}${archiveParam}` : `${baseUrl}&mine=1${archiveParam}`;
   return `<a href="${href}" class="mine-filter-toggle${mineFilter ? " active" : ""}" title="${mineFilter ? "Show all tasks" : "Show only my tasks"}">
@@ -378,14 +406,15 @@ function filterTodos(allTodos: Todo[], filterTags: string[]) {
   });
 }
 
-function renderTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null, isAllTasksView: boolean, mineFilter: boolean) {
+function renderTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null, isAllTasksView: boolean, mineFilter: boolean, viewMode: ViewMode) {
   // Build base URL with all context preserved
+  const viewPath = `/todo/${viewMode}`;
   const viewParam = isAllTasksView ? "view=all" : "";
   const groupParam = !isAllTasksView && groupId ? `group=${groupId}` : "";
   const mineParam = !isAllTasksView && groupId && mineFilter ? "mine=1" : "";
   const archiveParam = showArchive ? "archive=1" : "";
   const params = [viewParam, groupParam, mineParam, archiveParam].filter(Boolean);
-  const baseUrl = params.length > 0 ? `/todo?${params.join("&")}` : "/todo";
+  const baseUrl = params.length > 0 ? `${viewPath}?${params.join("&")}` : viewPath;
   const separator = params.length > 0 ? "&" : "?";
 
   const tags = collectTags(allTodos);

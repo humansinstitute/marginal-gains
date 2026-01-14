@@ -4,7 +4,6 @@ export const state = {
   session: window.__NOSTR_SESSION__,
   isAdmin: false,
   summaries: { day: null, week: null },
-  viewMode: localStorage.getItem("taskViewMode") || "list", // "list" or "kanban"
   chat: {
     enabled: false,
     channels: [],
@@ -41,13 +40,6 @@ export const setSummaries = (summaries) => {
 export const setChatEnabled = (enabled) => {
   if (state.chat.enabled === enabled) return;
   state.chat.enabled = enabled;
-  refreshUI();
-};
-
-export const setViewMode = (mode) => {
-  if (state.viewMode === mode) return;
-  state.viewMode = mode;
-  localStorage.setItem("taskViewMode", mode);
   refreshUI();
 };
 
