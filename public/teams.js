@@ -9,6 +9,7 @@
  */
 
 import { state, setSession } from "./state.js";
+import { hashInviteCode, storeEncryptedKeyForInvite, redeemInviteForTeamKey } from "./teamCrypto.js";
 
 // ============================================================================
 // Team Selector (in app menu)
@@ -248,6 +249,20 @@ function initJoinTeamForm() {
       const result = await res.json();
 
       if (res.ok) {
+        // Redeem invite code to get team encryption key
+        try {
+          const teamSlug = result.team.slug;
+          console.log("[Teams] Redeeming team key for:", teamSlug);
+          const keyResult = await redeemInviteForTeamKey(code, teamSlug);
+          if (!keyResult.success) {
+            console.warn("[Teams] Failed to redeem team key:", keyResult.error);
+          } else {
+            console.log("[Teams] Team key redeemed successfully");
+          }
+        } catch (keyErr) {
+          console.error("[Teams] Error redeeming team key:", keyErr);
+        }
+
         // Switch to joined team
         await switchTeam(result.team.slug);
       } else {
@@ -486,6 +501,19 @@ function initInvitationManagement(team, isOwner) {
         console.log("[Teams] Invite API response:", result);
 
         if (res.ok) {
+          // Store encrypted team key for this invite
+          try {
+            const codeHash = await hashInviteCode(result.code);
+            const keyResult = await storeEncryptedKeyForInvite(result.code, codeHash);
+            if (!keyResult.success) {
+              console.warn("[Teams] Failed to store team key for invite:", keyResult.error);
+            } else {
+              console.log("[Teams] Team key stored for invite");
+            }
+          } catch (keyErr) {
+            console.error("[Teams] Error storing team key for invite:", keyErr);
+          }
+
           // Show invite link
           form.style.display = "none";
           const resultEl = inviteModal.querySelector("[data-invite-result]");

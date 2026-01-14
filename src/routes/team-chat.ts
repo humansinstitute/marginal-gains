@@ -77,9 +77,14 @@ export function handleTeamListChannels(
   const db = new TeamDatabase(ctx.teamDb);
 
   // Admins see all channels, regular users see only visible ones
-  const rawChannels = isAdmin(ctx.session.npub)
+  // But personal channels (owner_npub set) are ALWAYS filtered to only show the current user's
+  const allChannels = isAdmin(ctx.session.npub)
     ? db.listAllChannels()
     : db.listVisibleChannels(ctx.session.npub);
+
+  // Filter out ALL personal channels from the channels list
+  // Personal channels are returned separately as `personalChannel`
+  const rawChannels = allChannels.filter((c) => !c.owner_npub);
 
   // Check Wingman access for each channel
   const wingman = getWingmanIdentity();

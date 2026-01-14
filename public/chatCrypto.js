@@ -3,6 +3,7 @@
  * Handles encrypted channel operations and message encryption/decryption
  */
 
+import { chatUrl } from "./api.js";
 import {
   generateChannelKey,
   wrapKeyForUser,
@@ -14,6 +15,10 @@ import {
   fetchCommunityKey,
   getCachedCommunityKey,
 } from "./communityCrypto.js";
+import {
+  fetchTeamKey,
+  getCachedTeamKey,
+} from "./teamCrypto.js";
 import { state } from "./state.js";
 
 // Key cache in sessionStorage (survives refresh, clears on tab close)
@@ -77,7 +82,7 @@ export async function fetchChannelKey(channelId) {
   if (cached) return cached;
 
   try {
-    const res = await fetch(`/chat/channels/${channelId}/keys`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/keys`), {
       credentials: "same-origin",
     });
     if (!res.ok) {
@@ -115,7 +120,7 @@ export async function setupChannelEncryption(channelId, ownerPubkey) {
     const wrappedKey = await wrapKeyForUser(channelKey, ownerPubkey);
 
     // Store wrapped key on server
-    const res = await fetch(`/chat/channels/${channelId}/keys`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/keys`), {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -165,7 +170,7 @@ async function setupPersonalChannelEncryption(channelId) {
     const wrappedKey = await wrapKeyForUser(channelKey, userPubkey);
 
     // Store wrapped key on server
-    const res = await fetch(`/chat/channels/${channelId}/keys`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/keys`), {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -229,7 +234,7 @@ export async function distributeKeyToMember(channelId, memberPubkey) {
     const wrappedKey = await wrapKeyForUser(channelKey, memberPubkey);
 
     // Store wrapped key on server
-    const res = await fetch(`/chat/channels/${channelId}/keys`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/keys`), {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -256,7 +261,7 @@ export async function distributeKeyToMember(channelId, memberPubkey) {
  */
 export async function getPendingKeyMembers(channelId) {
   try {
-    const res = await fetch(`/chat/channels/${channelId}/keys/pending`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/keys/pending`), {
       credentials: "same-origin",
     });
     if (!res.ok) {
@@ -326,9 +331,9 @@ export async function encryptMessageForChannel(content, channelId) {
         }
       }
     }
-    // Otherwise check for community encryption (public channels)
+    // Otherwise check for community/team encryption (public channels)
     else if (usesCommunityEncryption(channelId)) {
-      key = await fetchCommunityKey();
+      key = await fetchPublicChannelKey();
     }
 
     if (!key) {
@@ -362,9 +367,9 @@ export async function decryptMessageFromChannel(ciphertext, channelId) {
     else if (isPersonalChannel(channelId)) {
       key = await fetchChannelKey(channelId);
     }
-    // Otherwise check for community encryption (public channels)
+    // Otherwise check for community/team encryption (public channels)
     else if (usesCommunityEncryption(channelId)) {
-      key = await fetchCommunityKey();
+      key = await fetchPublicChannelKey();
     }
 
     if (!key) {
@@ -398,27 +403,65 @@ export function isChannelEncrypted(channelId) {
 }
 
 /**
- * Check if a channel uses community-wide encryption (public channels)
+ * Check if we're in a team context
+ * @returns {boolean}
+ */
+export function isInTeamContext() {
+  return !!state.session?.currentTeamSlug;
+}
+
+/**
+ * Check if a channel uses team/community-wide encryption (public channels)
+ * In team context: uses team key
+ * In global context: uses community key
  * @param {string} channelId
  * @returns {boolean}
  */
 export function usesCommunityEncryption(channelId) {
-  // Check if community encryption is active (user has community key)
-  const hasCommunityKey = !!getCachedCommunityKey();
-  if (!hasCommunityKey) return false;
+  // Check if team or community encryption is active (user has appropriate key)
+  let hasKey = false;
+  if (isInTeamContext()) {
+    hasKey = !!getCachedTeamKey(state.session.currentTeamSlug);
+  } else {
+    hasKey = !!getCachedCommunityKey();
+  }
 
-  // Personal channels use self-encryption, not community encryption
+  if (!hasKey) return false;
+
+  // Personal channels use self-encryption, not community/team encryption
   if (state.chat.personalChannel?.id === channelId) {
     return false;
   }
 
-  // Public channels use community encryption when available
+  // Public channels use community/team encryption when available
   const channel = state.chat.channels.find((c) => c.id === channelId);
   if (channel && !channel.private && !channel.encrypted) {
     return true;
   }
 
   return false;
+}
+
+/**
+ * Fetch the appropriate public channel key (team or community)
+ * @returns {Promise<string|null>} Base64-encoded key
+ */
+export async function fetchPublicChannelKey() {
+  if (isInTeamContext()) {
+    return fetchTeamKey();
+  }
+  return fetchCommunityKey();
+}
+
+/**
+ * Get cached public channel key (team or community)
+ * @returns {string|null} Base64-encoded key
+ */
+export function getCachedPublicChannelKey() {
+  if (isInTeamContext()) {
+    return getCachedTeamKey(state.session.currentTeamSlug);
+  }
+  return getCachedCommunityKey();
 }
 
 /**
@@ -459,7 +502,7 @@ export async function processMessagesForDisplay(messages, channelId) {
   if (isPerChannelEncrypted || isPersonal) {
     key = await fetchChannelKey(channelId);
   } else if (isCommunityEncrypted) {
-    key = await fetchCommunityKey();
+    key = await fetchPublicChannelKey();
   }
 
   if (!key) {
@@ -554,7 +597,7 @@ export async function setupDmEncryption(dmChannel) {
     const otherWrappedKey = await wrapKeyForUser(channelKey, otherPubkey);
 
     // Store keys via batch endpoint
-    const res = await fetch(`/chat/channels/${channelId}/keys/batch`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/keys/batch`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

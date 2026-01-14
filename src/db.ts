@@ -187,6 +187,22 @@ export type InviteRedemption = {
   redeemed_at: number;
 };
 
+// Team Encryption Types (Zero-Knowledge Key Distribution)
+export type TeamEncryption = {
+  id: number;
+  team_pubkey: string; // Nostr pubkey for the team (derived from first invite)
+  initialized_at: string;
+  initialized_by: string;
+};
+
+export type UserTeamKey = {
+  user_pubkey: string;
+  encrypted_team_key: string; // NIP-44 wrapped team key for this user
+  wrapped_by: string; // Pubkey of who wrapped this key
+  created_at: string;
+  updated_at: string;
+};
+
 // CRM Types
 export type CrmCompany = {
   id: number;

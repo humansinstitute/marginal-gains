@@ -70,10 +70,16 @@ export class AuthService {
     };
   }
 
-  login(method: LoginMethod, event: LoginEvent) {
+  login(method: LoginMethod, event: LoginEvent, enrichSession?: (session: Session) => void) {
     const validation = this.validateLoginEvent(method, event);
     if (!validation.ok) return jsonResponse({ message: validation.message }, 422);
     const { session, cookie } = this.createSession(method, event);
+
+    // Allow caller to enrich session with additional data (e.g., team memberships)
+    if (enrichSession) {
+      enrichSession(session);
+    }
+
     return jsonResponse(session, 200, cookie);
   }
 

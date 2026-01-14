@@ -17,7 +17,7 @@ import { getSetting, listThreadMessages, createMessage, getUserByNpub, recordWin
 import { ASSETS_ROOT } from "../routes/assets";
 
 import { getWingmanChannelAccess, decryptMessageForWingman } from "./crypto";
-import { broadcast } from "./events";
+import { broadcastLegacy as broadcast } from "./events";
 
 import type { Message } from "../db";
 

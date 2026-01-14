@@ -39,7 +39,7 @@ import {
   sendEncryptedMessage,
   sendMessage,
 } from "../services/chat";
-import { broadcast } from "../services/events";
+import { broadcastLegacy as broadcast } from "../services/events";
 import { notifyChannelMessage } from "../services/push";
 import { executeSlashCommands } from "../services/slashCommands";
 
@@ -85,9 +85,14 @@ export function handleListChannels(session: Session | null) {
   if (!session) return unauthorized();
 
   // Admins see all channels, regular users see only visible ones
-  const rawChannels = isAdmin(session.npub)
+  // But personal channels (owner_npub set) are ALWAYS filtered to only show the current user's
+  const allChannels = isAdmin(session.npub)
     ? listAllChannels()
     : listVisibleChannels(session.npub);
+
+  // Filter out ALL personal channels from the channels list
+  // Personal channels are returned separately as `personalChannel`
+  const rawChannels = allChannels.filter((c) => !c.owner_npub);
 
   // Check Wingman access for each channel
   const wingman = getWingmanIdentity();
