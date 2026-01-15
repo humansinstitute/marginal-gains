@@ -16,6 +16,7 @@ export type Todo = {
   tags: string;
   group_id: number | null;
   assigned_to: string | null;
+  position: number | null;
 };
 
 export type TodoWithBoard = Todo & {
@@ -326,6 +327,7 @@ addColumn("ALTER TABLE todos ADD COLUMN scheduled_for TEXT DEFAULT NULL");
 addColumn("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE");
 addColumn("ALTER TABLE todos ADD COLUMN assigned_to TEXT DEFAULT NULL");
+addColumn("ALTER TABLE todos ADD COLUMN position INTEGER DEFAULT NULL");
 
 // Index for efficient group todo queries
 try {
@@ -776,13 +778,13 @@ db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_npub ON wallet_transactions(npu
 db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_created ON wallet_transactions(created_at)");
 
 const listByOwnerStmt = db.query<Todo>(
-  "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY created_at DESC"
+  "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY state, position IS NULL, position ASC, created_at DESC"
 );
 const listByGroupStmt = db.query<Todo>(
-  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? ORDER BY created_at DESC"
+  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? ORDER BY state, position IS NULL, position ASC, created_at DESC"
 );
 const listByGroupAssignedStmt = db.query<Todo>(
-  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? AND assigned_to = ? ORDER BY created_at DESC"
+  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? AND assigned_to = ? ORDER BY state, position IS NULL, position ASC, created_at DESC"
 );
 const listAllAssignedStmt = db.query<Todo & { group_name: string | null }>(
   `SELECT todos.*, groups.name as group_name
@@ -793,7 +795,7 @@ const listAllAssignedStmt = db.query<Todo & { group_name: string | null }>(
        todos.assigned_to = ?1
        OR (todos.owner = ?1 AND todos.group_id IS NULL)
      )
-   ORDER BY todos.created_at DESC`
+   ORDER BY todos.state, todos.position IS NULL, todos.position ASC, todos.created_at DESC`
 );
 const listScheduledStmt = db.query<Todo>(
   `SELECT * FROM todos
@@ -844,6 +846,18 @@ const transitionStmt = db.query<Todo>(
    WHERE id = ? AND owner = ?
    RETURNING *`
 );
+const transitionWithPositionStmt = db.query<Todo>(
+  `UPDATE todos
+   SET
+    state = ?,
+    done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
+    position = ?
+   WHERE id = ? AND owner = ?
+   RETURNING *`
+);
+const updatePositionStmt = db.query<Todo>(
+  `UPDATE todos SET position = ? WHERE id = ? RETURNING *`
+);
 const updateGroupTodoStmt = db.query<Todo>(
   `UPDATE todos
    SET
@@ -863,6 +877,15 @@ const transitionGroupTodoStmt = db.query<Todo>(
    SET
     state = ?,
     done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END
+   WHERE id = ? AND group_id = ?
+   RETURNING *`
+);
+const transitionGroupTodoWithPositionStmt = db.query<Todo>(
+  `UPDATE todos
+   SET
+    state = ?,
+    done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
+    position = ?
    WHERE id = ? AND group_id = ?
    RETURNING *`
 );
@@ -1117,6 +1140,16 @@ export function transitionTodo(id: number, owner: string, state: TodoState) {
   return todo ?? null;
 }
 
+export function transitionTodoWithPosition(id: number, owner: string, state: TodoState, position: number | null) {
+  const todo = transitionWithPositionStmt.get(state, state, position, id, owner) as Todo | undefined;
+  return todo ?? null;
+}
+
+export function updateTodoPosition(id: number, position: number | null) {
+  const todo = updatePositionStmt.get(position, id) as Todo | undefined;
+  return todo ?? null;
+}
+
 // Group todo functions
 export function deleteGroupTodo(id: number, groupId: number) {
   deleteGroupTodoStmt.run(id, groupId);
@@ -1152,6 +1185,11 @@ export function updateGroupTodo(
 
 export function transitionGroupTodo(id: number, groupId: number, state: TodoState) {
   const todo = transitionGroupTodoStmt.get(state, state, id, groupId) as Todo | undefined;
+  return todo ?? null;
+}
+
+export function transitionGroupTodoWithPosition(id: number, groupId: number, state: TodoState, position: number | null) {
+  const todo = transitionGroupTodoWithPositionStmt.get(state, state, position, id, groupId) as Todo | undefined;
   return todo ?? null;
 }
 

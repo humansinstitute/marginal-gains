@@ -3115,6 +3115,43 @@ body.chat-page {
 .kanban-board::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
 }
+/* Alpine.js loading/sync states */
+.kanban-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.sync-indicator {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  background: var(--accent);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  z-index: 1000;
+  animation: pulse 1s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.kanban-error {
+  background: var(--error-bg, #fee);
+  color: var(--error, #c00);
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  margin: 1rem 0;
+}
+.kanban-columns-wrapper {
+  display: flex;
+  gap: 1rem;
+  min-height: 400px;
+}
 .kanban-column {
   background: var(--bg);
   border-radius: var(--radius-md);
@@ -3190,6 +3227,14 @@ body.chat-page {
   opacity: 0.5;
   transform: rotate(3deg);
 }
+.drop-placeholder {
+  height: 60px;
+  background: var(--accent-lighter, #e0f0ff);
+  border: 2px dashed var(--accent, #0066cc);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  transition: all 0.15s ease;
+}
 .kanban-card-title {
   font-weight: 600;
   font-size: 0.9rem;
@@ -3231,12 +3276,12 @@ body.chat-page {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.2rem;
+  height: 1.2rem;
   border-radius: 50%;
   background: var(--chat-accent, #6b3a6b);
   color: white;
-  font-size: 0.65rem;
+  font-size: 0.52rem;
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -3251,9 +3296,9 @@ body.chat-page {
 }
 /* List view assignee - slightly smaller */
 .badges .assignee-avatar {
-  width: 1.25rem;
-  height: 1.25rem;
-  font-size: 0.55rem;
+  width: 1rem;
+  height: 1rem;
+  font-size: 0.44rem;
 }
 
 /* Mine filter toggle button */

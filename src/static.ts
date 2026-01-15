@@ -8,6 +8,7 @@ const CONTENT_TYPE_MAP: Record<string, string> = {
   ".webmanifest": "application/manifest+json",
   ".json": "application/json",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
 };
 

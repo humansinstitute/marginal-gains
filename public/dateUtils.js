@@ -92,6 +92,39 @@ export function formatShortDateTime(dateStr) {
 }
 
 /**
+ * Format timestamp smartly based on age:
+ * - Today: just time (e.g., "2:30 PM")
+ * - Older: date + time (e.g., "Jan 14, 2:30 PM")
+ * @param {string} dateStr - Timestamp from SQLite
+ * @returns {string} - Smart formatted timestamp
+ */
+export function formatSmartTimestamp(dateStr) {
+  const date = parseUTCTimestamp(dateStr);
+  const now = new Date();
+
+  // Check if same day (in local timezone)
+  const isToday = date.getFullYear() === now.getFullYear() &&
+                  date.getMonth() === now.getMonth() &&
+                  date.getDate() === now.getDate();
+
+  if (isToday) {
+    // Just show time for today's messages
+    return date.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  // Show date + time for older messages
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/**
  * Format a Unix timestamp (seconds) as a local date
  * @param {number} unixSeconds - Unix timestamp in seconds
  * @returns {string} - Localized date string

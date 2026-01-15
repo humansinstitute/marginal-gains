@@ -7,7 +7,9 @@ import {
   removeGroupTodo,
   removeTodo,
   transitionGroupTodoState,
+  transitionGroupTodoStateWithPosition,
   transitionTodoState,
+  transitionTodoStateWithPosition,
   updateGroupTodoFromForm,
   updateTodoFromForm,
 } from "../services/todos";
@@ -123,15 +125,23 @@ export async function handleApiTodoState(req: Request, session: Session | null, 
     const body = await req.json();
     const nextState = normalizeStateInput(String(body.state ?? "ready"));
     const groupId = body.group_id ? Number(body.group_id) : null;
+    // Position is optional - only provided when reordering within column
+    const position = typeof body.position === "number" ? body.position : null;
 
     let updated;
     if (groupId && Number.isInteger(groupId) && groupId > 0) {
       if (!canManageGroupTodo(session.npub, groupId)) {
         return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: jsonHeaders });
       }
-      updated = transitionGroupTodoState(groupId, id, nextState);
+      // Use position-aware function when position is provided
+      updated = position !== null
+        ? transitionGroupTodoStateWithPosition(groupId, id, nextState, position)
+        : transitionGroupTodoState(groupId, id, nextState);
     } else {
-      updated = transitionTodoState(session.npub, id, nextState);
+      // Use position-aware function when position is provided
+      updated = position !== null
+        ? transitionTodoStateWithPosition(session.npub, id, nextState, position)
+        : transitionTodoState(session.npub, id, nextState);
     }
 
     if (!updated) {
@@ -141,7 +151,7 @@ export async function handleApiTodoState(req: Request, session: Session | null, 
       });
     }
 
-    return new Response(JSON.stringify({ success: true, state: nextState }), { status: 200, headers: jsonHeaders });
+    return new Response(JSON.stringify({ success: true, state: nextState, position }), { status: 200, headers: jsonHeaders });
   } catch (_err) {
     return new Response(JSON.stringify({ error: "Invalid request body" }), { status: 400, headers: jsonHeaders });
   }
