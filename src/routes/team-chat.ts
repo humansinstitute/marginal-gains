@@ -225,17 +225,18 @@ export async function handleTeamSendMessage(
     return jsonResponse({ error: "Message content is required" }, 400);
   }
 
+  // Calculate threadRootId from parent if replying
+  let threadRootId: number | null = null;
+  const parentIdNum = parentId ? Number(parentId) : null;
+  if (parentIdNum) {
+    const parent = db.getMessage(parentIdNum);
+    if (parent) {
+      threadRootId = parent.thread_root_id ?? parent.id;
+    }
+  }
+
   let message;
   if (encrypted) {
-    // Calculate threadRootId from parent if replying
-    let threadRootId: number | null = null;
-    const parentIdNum = parentId ? Number(parentId) : null;
-    if (parentIdNum) {
-      const parent = db.getMessage(parentIdNum);
-      if (parent) {
-        threadRootId = parent.thread_root_id ?? parent.id;
-      }
-    }
     message = db.createEncryptedMessage(
       channelId,
       ctx.session.npub,
@@ -245,10 +246,8 @@ export async function handleTeamSendMessage(
       null, // quotedMessageId
       1     // keyVersion
     );
-  } else if (parentId) {
-    message = db.createMessage(channelId, ctx.session.npub, content, parentId);
   } else {
-    message = db.createMessage(channelId, ctx.session.npub, content);
+    message = db.createMessage(channelId, ctx.session.npub, content, threadRootId, parentIdNum, null);
   }
 
   if (!message) {
