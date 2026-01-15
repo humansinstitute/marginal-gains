@@ -12,6 +12,7 @@ import { renderTeamTodosPage } from "../render/home";
 import { TeamDatabase } from "../team-db";
 import { normalizeStateInput, validateTodoForm, validateTodoTitle } from "../validation";
 
+import type { ViewMode } from "../routes/home";
 import type { Session } from "../types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
@@ -22,7 +23,7 @@ function requireTeamContext(session: Session | null, teamSlug: string, returnPat
 }
 
 function getRedirectUrl(teamSlug: string, groupId: number | null): string {
-  const base = `/t/${teamSlug}/todo`;
+  const base = `/t/${teamSlug}/todo/kanban`;
   return groupId ? `${base}?group=${groupId}` : base;
 }
 
@@ -51,9 +52,21 @@ function canManageTeamGroupTodo(
 }
 
 /**
- * GET /t/:slug/todo - Team todos page
+ * GET /t/:slug/todo - Redirect to default view (kanban)
  */
-export function handleTeamTodos(url: URL, session: Session | null, teamSlug: string) {
+export function handleTeamTodosRedirect(url: URL, teamSlug: string) {
+  const newUrl = new URL(url);
+  newUrl.pathname = `/t/${teamSlug}/todo/kanban`;
+  return new Response(null, {
+    status: 302,
+    headers: { Location: newUrl.pathname + newUrl.search },
+  });
+}
+
+/**
+ * GET /t/:slug/todo/kanban or /t/:slug/todo/list - Team todos page
+ */
+export function handleTeamTodos(url: URL, session: Session | null, teamSlug: string, viewMode: ViewMode = "kanban") {
   const result = requireTeamContext(session, teamSlug, url.pathname + url.search);
   if (!result.ok) return result.response;
 
@@ -103,6 +116,7 @@ export function handleTeamTodos(url: URL, session: Session | null, teamSlug: str
     selectedGroup,
     canManage,
     teamSlug,
+    viewMode,
   });
 
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });

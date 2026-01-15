@@ -1127,6 +1127,7 @@ type TeamRenderArgs = RenderArgs & {
 
 type TeamPageState = PageState & {
   teamSlug: string;
+  viewMode: ViewMode;
 };
 
 /**
@@ -1142,9 +1143,10 @@ export function renderTeamTodosPage({
   selectedGroup = null,
   canManage = true,
   teamSlug,
+  viewMode = "kanban",
 }: TeamRenderArgs) {
   const filteredTodos = filterTodos(todos, filterTags);
-  const pageState = buildTeamPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage, teamSlug);
+  const pageState = buildTeamPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage, teamSlug, viewMode);
 
   return `<!doctype html>
 <html lang="en">
@@ -1162,9 +1164,11 @@ ${renderHead()}
     ${renderQrModal()}
     ${renderProfileModal()}
     ${renderPinModal()}
-    ${renderTeamTaskEditModal(pageState.groupId, teamSlug)}
+    ${renderTeamTaskEditModal(pageState.groupId, [], userGroups, teamSlug)}
   </main>
-  ${renderTeamSessionSeed(session, pageState.groupId, teamSlug)}
+  ${renderTeamSessionSeed(session, pageState.groupId, teamSlug, pageState.activeTodos)}
+  ${renderKanbanStoreScript()}
+  <script src="/lib/alpine.min.js" defer></script>
   <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>`;
@@ -1229,21 +1233,22 @@ function buildTeamPageState(
   userGroups: Group[],
   selectedGroup: Group | null,
   canManage: boolean,
-  teamSlug: string
+  teamSlug: string,
+  viewMode: ViewMode
 ): TeamPageState {
   const groupId = selectedGroup?.id ?? null;
   const activeTodos = todos.filter((t) => t.state !== "done");
   const doneTodos = todos.filter((t) => t.state === "done");
 
-  // Build URLs with team and group context preserved
-  const baseUrl = groupId ? `/t/${teamSlug}/todo?group=${groupId}` : `/t/${teamSlug}/todo`;
-  const archiveHref = showArchive ? baseUrl : `${baseUrl}${groupId ? "&" : "?"}archive=1`;
+  // Build URLs with team, group context, and view mode preserved
+  const baseKanban = groupId ? `/t/${teamSlug}/todo/kanban?group=${groupId}` : `/t/${teamSlug}/todo/kanban`;
+  const archiveHref = showArchive ? baseKanban : `${baseKanban}${groupId ? "&" : "?"}archive=1`;
   const archiveLabel = showArchive ? "Hide archive" : `Archive (${doneTodos.length})`;
-  const tagFilterBar = session ? renderTeamTagFilterBar(todos, filterTags, showArchive, groupId, teamSlug) : "";
+  const tagFilterBar = session ? renderTeamTagFilterBar(todos, filterTags, showArchive, groupId, teamSlug, viewMode) : "";
   const emptyActiveMessage = session ? "No active work. Add something new!" : "Sign in to view your todos.";
   const emptyArchiveMessage = session ? "Nothing archived yet." : "Sign in to view your archive.";
   const remainingText = session ? (activeTodos.length === 0 ? "All clear." : `${activeTodos.length} left to go.`) : "";
-  const contextSwitcher = session ? renderTeamContextSwitcher(userGroups, selectedGroup, teamSlug) : "";
+  const contextSwitcher = session ? renderTeamContextSwitcher(userGroups, selectedGroup, teamSlug, viewMode) : "";
 
   return {
     archiveHref,
@@ -1259,10 +1264,18 @@ function buildTeamPageState(
     canManage,
     contextSwitcher,
     teamSlug,
+    viewMode,
+    // Required by PageState but not used in team context
+    isAllTasksView: false,
+    mineFilter: false,
+    mineFilterToggle: "",
+    groupMembers: [],
+    currentUserNpub: session?.npub ?? null,
+    userGroups,
   };
 }
 
-function renderTeamContextSwitcher(userGroups: Group[], selectedGroup: Group | null, teamSlug: string): string {
+function renderTeamContextSwitcher(userGroups: Group[], selectedGroup: Group | null, teamSlug: string, viewMode: ViewMode): string {
   if (userGroups.length === 0) return "";
 
   const options = [
@@ -1272,15 +1285,15 @@ function renderTeamContextSwitcher(userGroups: Group[], selectedGroup: Group | n
     ),
   ].join("");
 
-  return `<select class="context-switcher" data-context-switcher data-team-slug="${teamSlug}" title="Switch context">${options}</select>`;
+  return `<select class="context-switcher" data-context-switcher data-team-slug="${teamSlug}" data-view-mode="${viewMode}" title="Switch context">${options}</select>`;
 }
 
-function renderTeamTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null, teamSlug: string) {
-  // Build base URL with team and group context
+function renderTeamTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null, teamSlug: string, viewMode: ViewMode) {
+  // Build base URL with team, group context, and view mode
   const groupParam = groupId ? `group=${groupId}` : "";
   const archiveParam = showArchive ? "archive=1" : "";
   const params = [groupParam, archiveParam].filter(Boolean);
-  const baseUrl = params.length > 0 ? `/t/${teamSlug}/todo?${params.join("&")}` : `/t/${teamSlug}/todo`;
+  const baseUrl = params.length > 0 ? `/t/${teamSlug}/todo/${viewMode}?${params.join("&")}` : `/t/${teamSlug}/todo/${viewMode}`;
   const separator = params.length > 0 ? "&" : "?";
 
   const tags = collectTags(allTodos);
@@ -1301,30 +1314,48 @@ function renderTeamTagFilterBar(allTodos: Todo[], activeTags: string[], showArch
 }
 
 function renderTeamWork(state: TeamPageState) {
+  // Build view switcher URLs preserving query params
+  const buildViewUrl = (mode: ViewMode) => {
+    const params: string[] = [];
+    if (state.groupId) params.push(`group=${state.groupId}`);
+    if (state.showArchive) params.push("archive=1");
+    const query = params.length > 0 ? `?${params.join("&")}` : "";
+    return `/t/${state.teamSlug}/todo/${mode}${query}`;
+  };
+
+  const listUrl = buildViewUrl("list");
+  const kanbanUrl = buildViewUrl("kanban");
+  const isKanban = state.viewMode === "kanban";
+  const isList = state.viewMode === "list";
+
+  // Only render the active view
+  const viewContent = isKanban
+    ? `<div class="kanban-view" data-kanban-view>
+        ${renderKanbanBoardAlpine(state.groupId, state.canManage, false)}
+      </div>`
+    : `<div class="todo-list-view" data-list-view>
+        ${renderTeamTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.teamSlug)}
+      </div>`;
+
   return `<section class="work" data-work-section>
     <div class="work-header">
       <h2>Work</h2>
       <div class="work-header-actions">
         ${state.contextSwitcher}
         <div class="view-switcher" data-view-switcher>
-          <button type="button" class="view-btn active" data-view-mode="list" title="List view">
+          <a href="${listUrl}" class="view-btn${isList ? " active" : ""}" title="List view">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4h12v1H2V4zm0 3.5h12v1H2v-1zm0 3.5h12v1H2v-1z"/></svg>
-          </button>
-          <button type="button" class="view-btn" data-view-mode="kanban" title="Kanban view">
+          </a>
+          <a href="${kanbanUrl}" class="view-btn${isKanban ? " active" : ""}" title="Kanban view">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2h4v12H1V2zm5 0h4v8H6V2zm5 0h4v10h-4V2z"/></svg>
-          </button>
+          </a>
         </div>
         <a class="archive-toggle" href="${state.archiveHref}">${state.archiveLabel}</a>
       </div>
     </div>
     <p class="remaining-summary">${state.remainingText}</p>
     ${state.tagFilterBar}
-    <div class="todo-list-view" data-list-view>
-      ${renderTeamTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.teamSlug)}
-    </div>
-    <div class="kanban-view" data-kanban-view hidden>
-      ${renderTeamKanbanBoard(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.teamSlug)}
-    </div>
+    ${viewContent}
     ${state.showArchive ? renderTeamArchiveSection(state.doneTodos, state.emptyArchiveMessage, state.groupId, state.canManage, state.teamSlug) : ""}
   </section>`;
 }
@@ -1336,7 +1367,7 @@ function renderTeamTodoList(todos: Todo[], emptyMessage: string, groupId: number
   return `<ul class="todo-list">${todos.map((todo) => renderTeamTodoItem(todo, groupId, canManage, teamSlug)).join("")}</ul>`;
 }
 
-function renderTeamKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: number | null, canManage: boolean, teamSlug: string) {
+function _renderTeamKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: number | null, canManage: boolean, teamSlug: string) {
   const columns: { state: string; label: string; todos: Todo[] }[] = [
     { state: "new", label: "New", todos: [] },
     { state: "ready", label: "Ready", todos: [] },
@@ -1566,11 +1597,18 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
   </div>`;
 }
 
-function renderTeamSessionSeed(session: Session | null, groupId: number | null, teamSlug: string) {
+function renderTeamSessionSeed(session: Session | null, groupId: number | null, teamSlug: string, todos: Todo[] = []) {
+  // Enrich todos with thread counts for client-side rendering
+  const todosWithThreads = todos.map(todo => ({
+    ...todo,
+    threadCount: getThreadLinkCount(todo.id),
+  }));
+
   return `<script>
     window.__NOSTR_SESSION__ = ${JSON.stringify(session ?? null)};
     window.__GROUP_ID__ = ${groupId ?? "null"};
     window.__TEAM_SLUG__ = ${JSON.stringify(teamSlug)};
+    window.__INITIAL_TODOS__ = ${JSON.stringify(todosWithThreads)};
   </script>`;
 }
 
