@@ -15,6 +15,12 @@ export type Todo = {
   scheduled_for: string | null;
   tags: string;
   group_id: number | null;
+  assigned_to: string | null;
+  position: number | null;
+};
+
+export type TodoWithBoard = Todo & {
+  group_name: string | null;
 };
 
 export type Summary = {
@@ -58,6 +64,20 @@ export type Message = {
   key_version: number | null; // Which key version was used for encryption
   created_at: string;
   edited_at: string | null;
+};
+
+export type Reaction = {
+  id: number;
+  message_id: number;
+  reactor: string;
+  emoji: string;
+  created_at: string;
+};
+
+export type ReactionGroup = {
+  emoji: string;
+  count: number;
+  reactors: string[];
 };
 
 export type ChannelReadState = {
@@ -128,6 +148,17 @@ export type TaskThread = {
   id: number;
   todo_id: number;
   message_id: number;
+  linked_by: string;
+  linked_at: string;
+};
+
+export type TaskCrmLink = {
+  id: number;
+  todo_id: number;
+  contact_id: number | null;
+  company_id: number | null;
+  activity_id: number | null;
+  opportunity_id: number | null;
   linked_by: string;
   linked_at: string;
 };
@@ -311,10 +342,21 @@ addColumn("ALTER TABLE todos ADD COLUMN owner TEXT NOT NULL DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN scheduled_for TEXT DEFAULT NULL");
 addColumn("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE");
+addColumn("ALTER TABLE todos ADD COLUMN assigned_to TEXT DEFAULT NULL");
+addColumn("ALTER TABLE todos ADD COLUMN position INTEGER DEFAULT NULL");
 
 // Index for efficient group todo queries
 try {
   db.run("CREATE INDEX idx_todos_group_id ON todos(group_id)");
+} catch (error) {
+  if (!(error instanceof Error) || !error.message.includes("already exists")) {
+    throw error;
+  }
+}
+
+// Index for efficient assigned_to queries (All My Tasks view)
+try {
+  db.run("CREATE INDEX idx_todos_assigned_to ON todos(assigned_to)");
 } catch (error) {
   if (!(error instanceof Error) || !error.message.includes("already exists")) {
     throw error;
@@ -527,6 +569,25 @@ db.run(`
 db.run("CREATE INDEX IF NOT EXISTS idx_task_threads_todo ON task_threads(todo_id)");
 db.run("CREATE INDEX IF NOT EXISTS idx_task_threads_message ON task_threads(message_id)");
 
+// Task-CRM links (link tasks to CRM entities)
+db.run(`
+  CREATE TABLE IF NOT EXISTS task_crm_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+    contact_id INTEGER REFERENCES crm_contacts(id) ON DELETE CASCADE,
+    company_id INTEGER REFERENCES crm_companies(id) ON DELETE CASCADE,
+    activity_id INTEGER REFERENCES crm_activities(id) ON DELETE CASCADE,
+    opportunity_id INTEGER REFERENCES crm_opportunities(id) ON DELETE CASCADE,
+    linked_by TEXT NOT NULL,
+    linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_todo ON task_crm_links(todo_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_contact ON task_crm_links(contact_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_company ON task_crm_links(company_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_activity ON task_crm_links(activity_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_task_crm_links_opportunity ON task_crm_links(opportunity_id)");
+
 // App-wide settings table (key-value store)
 db.run(`
   CREATE TABLE IF NOT EXISTS app_settings (
@@ -733,10 +794,24 @@ db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_npub ON wallet_transactions(npu
 db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_created ON wallet_transactions(created_at)");
 
 const listByOwnerStmt = db.query<Todo>(
-  "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY created_at DESC"
+  "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY state, position IS NULL, position ASC, created_at DESC"
 );
 const listByGroupStmt = db.query<Todo>(
-  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? ORDER BY created_at DESC"
+  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? ORDER BY state, position IS NULL, position ASC, created_at DESC"
+);
+const listByGroupAssignedStmt = db.query<Todo>(
+  "SELECT * FROM todos WHERE deleted = 0 AND group_id = ? AND assigned_to = ? ORDER BY state, position IS NULL, position ASC, created_at DESC"
+);
+const listAllAssignedStmt = db.query<Todo & { group_name: string | null }>(
+  `SELECT todos.*, groups.name as group_name
+   FROM todos
+   LEFT JOIN groups ON todos.group_id = groups.id
+   WHERE todos.deleted = 0
+     AND (
+       todos.assigned_to = ?1
+       OR (todos.owner = ?1 AND todos.group_id IS NULL)
+     )
+   ORDER BY todos.state, todos.position IS NULL, todos.position ASC, todos.created_at DESC`
 );
 const listScheduledStmt = db.query<Todo>(
   `SELECT * FROM todos
@@ -755,11 +830,11 @@ const listUnscheduledStmt = db.query<Todo>(
    ORDER BY created_at DESC`
 );
 const insertStmt = db.query<Todo>(
-  "INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id) VALUES (?, '', 'sand', 'new', 0, ?, ?, ?) RETURNING *"
+  "INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id, assigned_to) VALUES (?, '', 'sand', 'new', 0, ?, ?, ?, ?) RETURNING *"
 );
 const insertFullStmt = db.query<Todo>(
-  `INSERT INTO todos (title, description, priority, state, done, owner, scheduled_for, tags, group_id)
-   VALUES (?, ?, ?, ?, CASE WHEN ? = 'done' THEN 1 ELSE 0 END, ?, ?, ?, ?)
+  `INSERT INTO todos (title, description, priority, state, done, owner, scheduled_for, tags, group_id, assigned_to)
+   VALUES (?, ?, ?, ?, CASE WHEN ? = 'done' THEN 1 ELSE 0 END, ?, ?, ?, ?, ?)
    RETURNING *`
 );
 const deleteStmt = db.query("UPDATE todos SET deleted = 1 WHERE id = ? AND owner = ?");
@@ -774,7 +849,8 @@ const updateStmt = db.query<Todo>(
     state = ?,
     done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
     scheduled_for = ?,
-    tags = ?
+    tags = ?,
+    assigned_to = ?
    WHERE id = ? AND owner = ?
    RETURNING *`
 );
@@ -786,6 +862,18 @@ const transitionStmt = db.query<Todo>(
    WHERE id = ? AND owner = ?
    RETURNING *`
 );
+const transitionWithPositionStmt = db.query<Todo>(
+  `UPDATE todos
+   SET
+    state = ?,
+    done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
+    position = ?
+   WHERE id = ? AND owner = ?
+   RETURNING *`
+);
+const updatePositionStmt = db.query<Todo>(
+  `UPDATE todos SET position = ? WHERE id = ? RETURNING *`
+);
 const updateGroupTodoStmt = db.query<Todo>(
   `UPDATE todos
    SET
@@ -795,7 +883,8 @@ const updateGroupTodoStmt = db.query<Todo>(
     state = ?,
     done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
     scheduled_for = ?,
-    tags = ?
+    tags = ?,
+    assigned_to = ?
    WHERE id = ? AND group_id = ?
    RETURNING *`
 );
@@ -805,6 +894,21 @@ const transitionGroupTodoStmt = db.query<Todo>(
     state = ?,
     done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END
    WHERE id = ? AND group_id = ?
+   RETURNING *`
+);
+const transitionGroupTodoWithPositionStmt = db.query<Todo>(
+  `UPDATE todos
+   SET
+    state = ?,
+    done = CASE WHEN ? = 'done' THEN 1 ELSE 0 END,
+    position = ?
+   WHERE id = ? AND group_id = ?
+   RETURNING *`
+);
+const moveTodoBoardStmt = db.query<Todo>(
+  `UPDATE todos
+   SET group_id = ?, assigned_to = ?
+   WHERE id = ? AND owner = ?
    RETURNING *`
 );
 const upsertSummaryStmt = db.query<Summary>(
@@ -883,6 +987,22 @@ const getMessageByIdStmt = db.query<Message>(
 );
 const deleteMessageStmt = db.query("DELETE FROM messages WHERE id = ?");
 
+// Reaction statements
+const getReactionStmt = db.query<Reaction>(
+  "SELECT * FROM message_reactions WHERE message_id = ? AND reactor = ? AND emoji = ?"
+);
+const insertReactionStmt = db.query<Reaction>(
+  `INSERT INTO message_reactions (message_id, reactor, emoji)
+   VALUES (?, ?, ?)
+   RETURNING *`
+);
+const deleteReactionStmt = db.query(
+  "DELETE FROM message_reactions WHERE message_id = ? AND reactor = ? AND emoji = ?"
+);
+const listReactionsForMessageStmt = db.query<Reaction>(
+  "SELECT * FROM message_reactions WHERE message_id = ? ORDER BY created_at ASC"
+);
+
 // Channel read state statements
 const getReadStateStmt = db.query<ChannelReadState>(
   "SELECT * FROM channel_read_state WHERE npub = ? AND channel_id = ?"
@@ -921,8 +1041,19 @@ export function listTodos(owner: string | null, filterTags?: string[]) {
   });
 }
 
-export function listGroupTodos(groupId: number, filterTags?: string[]) {
-  const todos = listByGroupStmt.all(groupId);
+export function listGroupTodos(groupId: number, filterTags?: string[], assigneeFilter?: string) {
+  const todos = assigneeFilter
+    ? listByGroupAssignedStmt.all(groupId, assigneeFilter)
+    : listByGroupStmt.all(groupId);
+  if (!filterTags || filterTags.length === 0) return todos;
+  return todos.filter((todo) => {
+    const todoTags = todo.tags ? todo.tags.split(",").map((t) => t.trim().toLowerCase()) : [];
+    return filterTags.some((ft) => todoTags.includes(ft.toLowerCase()));
+  });
+}
+
+export function listAllAssignedTodos(npub: string, filterTags?: string[]): TodoWithBoard[] {
+  const todos = listAllAssignedStmt.all(npub);
   if (!filterTags || filterTags.length === 0) return todos;
   return todos.filter((todo) => {
     const todoTags = todo.tags ? todo.tags.split(",").map((t) => t.trim().toLowerCase()) : [];
@@ -934,6 +1065,10 @@ export function getTodoById(id: number) {
   return getTodoByIdStmt.get(id) as Todo | undefined ?? null;
 }
 
+export function moveTodoToBoard(id: number, owner: string, newGroupId: number | null, newAssignee: string | null) {
+  return moveTodoBoardStmt.get(newGroupId, newAssignee, id, owner) ?? null;
+}
+
 export function listScheduledTodos(owner: string, endDate: string) {
   return listScheduledStmt.all(owner, endDate);
 }
@@ -942,9 +1077,9 @@ export function listUnscheduledTodos(owner: string) {
   return listUnscheduledStmt.all(owner);
 }
 
-export function addTodo(title: string, owner: string, tags: string = "", groupId: number | null = null) {
+export function addTodo(title: string, owner: string, tags: string = "", groupId: number | null = null, assignedTo: string | null = null) {
   if (!title.trim()) return null;
-  const todo = insertStmt.get(title.trim(), owner, tags, groupId) as Todo | undefined;
+  const todo = insertStmt.get(title.trim(), owner, tags, groupId, assignedTo) as Todo | undefined;
   return todo ?? null;
 }
 
@@ -957,6 +1092,7 @@ export function addTodoFull(
     state?: TodoState;
     scheduled_for?: string | null;
     tags?: string;
+    assigned_to?: string | null;
   },
   groupId: number | null = null
 ) {
@@ -967,6 +1103,7 @@ export function addTodoFull(
   const state = fields.state ?? "new";
   const scheduled_for = fields.scheduled_for ?? null;
   const tags = fields.tags?.trim() ?? "";
+  const assigned_to = fields.assigned_to ?? null;
   const todo = insertFullStmt.get(
     title,
     description,
@@ -976,7 +1113,8 @@ export function addTodoFull(
     owner,
     scheduled_for,
     tags,
-    groupId
+    groupId,
+    assigned_to
   ) as Todo | undefined;
   return todo ?? null;
 }
@@ -995,6 +1133,7 @@ export function updateTodo(
     state: TodoState;
     scheduled_for: string | null;
     tags: string;
+    assigned_to: string | null;
   }
 ) {
   const todo = updateStmt.get(
@@ -1005,6 +1144,7 @@ export function updateTodo(
     fields.state,
     fields.scheduled_for,
     fields.tags,
+    fields.assigned_to,
     id,
     owner
   ) as Todo | undefined;
@@ -1013,6 +1153,16 @@ export function updateTodo(
 
 export function transitionTodo(id: number, owner: string, state: TodoState) {
   const todo = transitionStmt.get(state, state, id, owner) as Todo | undefined;
+  return todo ?? null;
+}
+
+export function transitionTodoWithPosition(id: number, owner: string, state: TodoState, position: number | null) {
+  const todo = transitionWithPositionStmt.get(state, state, position, id, owner) as Todo | undefined;
+  return todo ?? null;
+}
+
+export function updateTodoPosition(id: number, position: number | null) {
+  const todo = updatePositionStmt.get(position, id) as Todo | undefined;
   return todo ?? null;
 }
 
@@ -1031,6 +1181,7 @@ export function updateGroupTodo(
     state: TodoState;
     scheduled_for: string | null;
     tags: string;
+    assigned_to: string | null;
   }
 ) {
   const todo = updateGroupTodoStmt.get(
@@ -1041,6 +1192,7 @@ export function updateGroupTodo(
     fields.state,
     fields.scheduled_for,
     fields.tags,
+    fields.assigned_to,
     id,
     groupId
   ) as Todo | undefined;
@@ -1049,6 +1201,11 @@ export function updateGroupTodo(
 
 export function transitionGroupTodo(id: number, groupId: number, state: TodoState) {
   const todo = transitionGroupTodoStmt.get(state, state, id, groupId) as Todo | undefined;
+  return todo ?? null;
+}
+
+export function transitionGroupTodoWithPosition(id: number, groupId: number, state: TodoState, position: number | null) {
+  const todo = transitionGroupTodoWithPositionStmt.get(state, state, position, id, groupId) as Todo | undefined;
   return todo ?? null;
 }
 
@@ -1160,6 +1317,67 @@ export function createEncryptedMessage(
 export function deleteMessage(id: number): boolean {
   const result = deleteMessageStmt.run(id);
   return result.changes > 0;
+}
+
+// Reaction functions
+export function toggleReaction(
+  messageId: number,
+  reactor: string,
+  emoji: string
+): { action: "add" | "remove"; reaction?: Reaction } {
+  const existing = getReactionStmt.get(messageId, reactor, emoji) as Reaction | undefined;
+  if (existing) {
+    deleteReactionStmt.run(messageId, reactor, emoji);
+    return { action: "remove" };
+  }
+  const reaction = insertReactionStmt.get(messageId, reactor, emoji) as Reaction | undefined;
+  return { action: "add", reaction: reaction ?? undefined };
+}
+
+export function getMessageReactions(messageId: number): ReactionGroup[] {
+  const reactions = listReactionsForMessageStmt.all(messageId);
+  return groupReactions(reactions);
+}
+
+export function getMessagesReactions(messageIds: number[]): Map<number, ReactionGroup[]> {
+  const result = new Map<number, ReactionGroup[]>();
+  if (messageIds.length === 0) return result;
+
+  // Batch query all reactions for these messages
+  const placeholders = messageIds.map(() => "?").join(",");
+  const stmt = db.query<Reaction>(
+    `SELECT * FROM message_reactions WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
+  );
+  const allReactions = stmt.all(...messageIds);
+
+  // Group by message_id first
+  const byMessage = new Map<number, Reaction[]>();
+  for (const r of allReactions) {
+    const list = byMessage.get(r.message_id) || [];
+    list.push(r);
+    byMessage.set(r.message_id, list);
+  }
+
+  // Convert to ReactionGroup arrays
+  for (const [msgId, reactions] of byMessage) {
+    result.set(msgId, groupReactions(reactions));
+  }
+
+  return result;
+}
+
+function groupReactions(reactions: Reaction[]): ReactionGroup[] {
+  const groups = new Map<string, ReactionGroup>();
+  for (const r of reactions) {
+    const existing = groups.get(r.emoji);
+    if (existing) {
+      existing.count++;
+      existing.reactors.push(r.reactor);
+    } else {
+      groups.set(r.emoji, { emoji: r.emoji, count: 1, reactors: [r.reactor] });
+    }
+  }
+  return Array.from(groups.values());
 }
 
 // Channel read state functions
@@ -1745,6 +1963,163 @@ export function getThreadLinkCount(todoId: number): number {
 
 export function getTaskThreadLink(todoId: number, messageId: number) {
   return getTaskThreadLinkStmt.get(todoId, messageId) as TaskThread | undefined ?? null;
+}
+
+// Task-CRM linking statements
+type TaskWithCrmLink = Todo & { link_id: number; linked_at: string };
+
+const linkTaskToCrmStmt = db.query<TaskCrmLink>(
+  `INSERT INTO task_crm_links (todo_id, contact_id, company_id, activity_id, opportunity_id, linked_by)
+   VALUES (?, ?, ?, ?, ?, ?)
+   RETURNING *`
+);
+const unlinkTaskFromCrmStmt = db.query(
+  "DELETE FROM task_crm_links WHERE id = ?"
+);
+const getCrmLinksForTaskStmt = db.query<TaskCrmLink>(
+  "SELECT * FROM task_crm_links WHERE todo_id = ? ORDER BY linked_at DESC"
+);
+const getTasksForContactStmt = db.query<TaskWithCrmLink>(
+  `SELECT t.*, tcl.id as link_id, tcl.linked_at
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   WHERE tcl.contact_id = ?
+     AND t.deleted = 0
+     AND (t.state != 'done' OR datetime(t.created_at) > datetime('now', '-21 days'))
+   ORDER BY t.state = 'done', t.created_at DESC`
+);
+const getTasksForCompanyStmt = db.query<TaskWithCrmLink>(
+  `SELECT t.*, tcl.id as link_id, tcl.linked_at
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   WHERE tcl.company_id = ?
+     AND t.deleted = 0
+     AND (t.state != 'done' OR datetime(t.created_at) > datetime('now', '-21 days'))
+   ORDER BY t.state = 'done', t.created_at DESC`
+);
+const getTasksForActivityStmt = db.query<TaskWithCrmLink>(
+  `SELECT t.*, tcl.id as link_id, tcl.linked_at
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   WHERE tcl.activity_id = ?
+     AND t.deleted = 0
+     AND (t.state != 'done' OR datetime(t.created_at) > datetime('now', '-21 days'))
+   ORDER BY t.state = 'done', t.created_at DESC`
+);
+const getTasksForOpportunityStmt = db.query<TaskWithCrmLink>(
+  `SELECT t.*, tcl.id as link_id, tcl.linked_at
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   WHERE tcl.opportunity_id = ?
+     AND t.deleted = 0
+     AND (t.state != 'done' OR datetime(t.created_at) > datetime('now', '-21 days'))
+   ORDER BY t.state = 'done', t.created_at DESC`
+);
+
+// Task-CRM linking functions
+export function linkTaskToCrm(
+  todoId: number,
+  entities: { contactId?: number; companyId?: number; activityId?: number; opportunityId?: number },
+  linkedBy: string
+) {
+  return linkTaskToCrmStmt.get(
+    todoId,
+    entities.contactId ?? null,
+    entities.companyId ?? null,
+    entities.activityId ?? null,
+    entities.opportunityId ?? null,
+    linkedBy
+  ) as TaskCrmLink | undefined ?? null;
+}
+
+export function unlinkTaskFromCrm(linkId: number) {
+  unlinkTaskFromCrmStmt.run(linkId);
+}
+
+export function getCrmLinksForTask(todoId: number) {
+  return getCrmLinksForTaskStmt.all(todoId);
+}
+
+// Get CRM links with entity details
+const getCrmLinksWithDetailsStmt = db.query<TaskCrmLink & {
+  contact_name: string | null;
+  company_name: string | null;
+  activity_subject: string | null;
+  activity_type: string | null;
+  opportunity_title: string | null;
+}>(
+  `SELECT tcl.*,
+    con.name as contact_name,
+    com.name as company_name,
+    act.subject as activity_subject,
+    act.type as activity_type,
+    opp.title as opportunity_title
+   FROM task_crm_links tcl
+   LEFT JOIN crm_contacts con ON tcl.contact_id = con.id
+   LEFT JOIN crm_companies com ON tcl.company_id = com.id
+   LEFT JOIN crm_activities act ON tcl.activity_id = act.id
+   LEFT JOIN crm_opportunities opp ON tcl.opportunity_id = opp.id
+   WHERE tcl.todo_id = ?
+   ORDER BY tcl.linked_at DESC`
+);
+
+export function getCrmLinksWithDetails(todoId: number) {
+  return getCrmLinksWithDetailsStmt.all(todoId);
+}
+
+export function getTasksForContact(contactId: number) {
+  return getTasksForContactStmt.all(contactId);
+}
+
+export function getTasksForCompany(companyId: number) {
+  return getTasksForCompanyStmt.all(companyId);
+}
+
+export function getTasksForActivity(activityId: number) {
+  return getTasksForActivityStmt.all(activityId);
+}
+
+export function getTasksForOpportunity(opportunityId: number) {
+  return getTasksForOpportunityStmt.all(opportunityId);
+}
+
+// Get all outstanding tasks linked to CRM entities
+type CrmLinkedTask = Todo & {
+  link_id: number;
+  contact_id: number | null;
+  company_id: number | null;
+  activity_id: number | null;
+  opportunity_id: number | null;
+  contact_name: string | null;
+  company_name: string | null;
+  opportunity_title: string | null;
+};
+
+const getOutstandingCrmTasksStmt = db.query<CrmLinkedTask>(
+  `SELECT DISTINCT t.*, tcl.id as link_id,
+    tcl.contact_id, tcl.company_id, tcl.activity_id, tcl.opportunity_id,
+    con.name as contact_name,
+    com.name as company_name,
+    opp.title as opportunity_title
+   FROM todos t
+   JOIN task_crm_links tcl ON t.id = tcl.todo_id
+   LEFT JOIN crm_contacts con ON tcl.contact_id = con.id
+   LEFT JOIN crm_companies com ON tcl.company_id = com.id
+   LEFT JOIN crm_opportunities opp ON tcl.opportunity_id = opp.id
+   WHERE t.deleted = 0
+     AND t.state != 'done'
+   ORDER BY
+     CASE t.priority
+       WHEN 'rock' THEN 1
+       WHEN 'pebble' THEN 2
+       WHEN 'sand' THEN 3
+     END,
+     t.created_at DESC
+   LIMIT 20`
+);
+
+export function getOutstandingCrmTasks() {
+  return getOutstandingCrmTasksStmt.all();
 }
 
 // App settings statements

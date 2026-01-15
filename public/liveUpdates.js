@@ -42,6 +42,7 @@ const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
 const eventHandlers = {
   "message:new": [],
   "message:delete": [],
+  "message:reaction": [],
   "channel:new": [],
   "channel:update": [],
   "channel:delete": [],
@@ -142,6 +143,17 @@ export async function connect() {
       emitEvent("message:new", { ...data, wasNearBottom });
     } catch (err) {
       console.error("[LiveUpdates] Error handling message:new:", err);
+    }
+  });
+
+  // Handle message reactions
+  eventSource.addEventListener("message:reaction", (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log("[LiveUpdates] Message reaction:", data);
+      emitEvent("message:reaction", data);
+    } catch (err) {
+      console.error("[LiveUpdates] Error handling message:reaction:", err);
     }
   });
 

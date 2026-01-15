@@ -12,6 +12,8 @@ import {
   getLatestKeyVersion,
   getLatestMessageId,
   getMessage,
+  getMessageReactions,
+  getMessagesReactions,
   getOrCreateDmChannel,
   getOrCreatePersonalChannel,
   getUnreadCounts,
@@ -24,6 +26,7 @@ import {
   listVisibleChannels,
   setChannelEncrypted,
   storeUserChannelKey,
+  toggleReaction,
   updateChannelReadState,
   upsertUser,
   userHasChannelAccessViaGroups,
@@ -323,7 +326,16 @@ export function handleGetMessages(session: Session | null, channelId: number) {
   }
 
   const messages = getChannelMessages(channelId);
-  return jsonResponse(messages);
+
+  // Augment messages with reactions
+  const messageIds = messages.map((m) => m.id);
+  const reactionsMap = getMessagesReactions(messageIds);
+  const messagesWithReactions = messages.map((m) => ({
+    ...m,
+    reactions: reactionsMap.get(m.id) || [],
+  }));
+
+  return jsonResponse(messagesWithReactions);
 }
 
 export async function handleSendMessage(req: Request, session: Session | null, channelId: number) {
@@ -736,4 +748,55 @@ export function handleGetPendingKeyMembers(session: Session | null, channelId: n
   }).filter(m => m.pubkey); // Only include members with known pubkeys
 
   return jsonResponse({ pendingMembers, channelEncrypted: channel.encrypted === 1 });
+}
+
+/**
+ * Toggle reaction on a message
+ * POST /api/messages/:id/reactions
+ * Body: { emoji: string }
+ */
+export async function handleToggleReaction(req: Request, session: Session | null, messageId: number) {
+  if (!session) return unauthorized();
+
+  const message = getMessage(messageId);
+  if (!message) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  // Check if user has access to the channel
+  if (!canUserAccessChannel(message.channel_id, session.npub) && !isAdmin(session.npub)) {
+    return forbidden("You don't have access to this message");
+  }
+
+  const body = await req.json();
+  const { emoji } = body;
+
+  if (!emoji || typeof emoji !== "string" || !emoji.trim()) {
+    return jsonResponse({ error: "Emoji is required" }, 400);
+  }
+
+  // Toggle the reaction
+  const result = toggleReaction(messageId, session.npub, emoji.trim());
+
+  // Get updated reactions for the message
+  const reactions = getMessageReactions(messageId);
+
+  // Broadcast reaction event
+  broadcast({
+    type: "message:reaction",
+    data: {
+      messageId,
+      emoji: emoji.trim(),
+      reactor: session.npub,
+      action: result.action,
+      reactions,
+    },
+    channelId: message.channel_id,
+  });
+
+  return jsonResponse({
+    success: true,
+    action: result.action,
+    reactions,
+  });
 }

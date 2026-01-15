@@ -14,6 +14,7 @@ import type { Database } from "bun:sqlite";
 // Event types that can be broadcast
 export type EventType =
   | "message:new"
+  | "message:reaction"
   | "channel:new"
   | "channel:update"
   | "channel:delete"

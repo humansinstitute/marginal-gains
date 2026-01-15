@@ -195,3 +195,6 @@ registerCommand({
   isAvailable: () => true,
   handler: handleReceiveCommand,
 });
+
+// Note: /hang command is handled client-side in public/chat.js
+// This allows hang.live room IDs to remain private in encrypted channels

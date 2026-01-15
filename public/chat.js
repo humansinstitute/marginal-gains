@@ -1,5 +1,6 @@
 import { baseChatUrl, channelUrl, chatUrl, dmUrl, eventsUrl } from "./api.js";
 import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
+import { formatLocalDateTime } from "./dateUtils.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
 import { loadNostrLibs } from "./nostr.js";
 import { connect as connectLiveUpdates, disconnect as disconnectLiveUpdates, onEvent, getConnectionState } from "./liveUpdates.js";
@@ -18,6 +19,7 @@ import {
   renderMessageMenu,
   groupByParent,
 } from "./messageRenderer.js";
+import { initReactions, updateMessageReactions } from "./reactions.js";
 import {
   setupChannelEncryption,
   distributeKeyToMember,
@@ -37,6 +39,11 @@ const localUserCache = new Map();
 
 // Cache for npub to pubkey conversions
 const npubToPubkeyCache = new Map();
+
+// Cache for rendered channel lists to avoid unnecessary DOM recreation
+// This prevents image flickering on Safari PWA
+let lastRenderedDmSignature = null;
+let lastRenderedChannelSignature = null;
 
 // Track currently open thread
 let openThreadId = null;
@@ -61,6 +68,41 @@ function parseSlashCommands(text) {
     commands.push(match[1].toLowerCase());
   }
   return commands;
+}
+
+/**
+ * Generate a 63-character random alphanumeric string for hang.live rooms
+ * @returns {string} 63-character random ID
+ */
+function generateHangId() {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const bytes = new Uint8Array(63);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
+/**
+ * Transform /hang commands into hang.live room links (client-side)
+ * This runs before encryption so the server never sees hang room IDs in encrypted channels
+ * @param {string} text - Message text
+ * @returns {string} Transformed text with /hang replaced by room link
+ */
+function transformHangCommand(text) {
+  // Match /hang at word boundary (not /hangout or similar)
+  const hangPattern = /\/hang\b/gi;
+
+  if (!hangPattern.test(text)) {
+    return text;
+  }
+
+  // Reset regex state after test
+  hangPattern.lastIndex = 0;
+
+  // Replace each /hang with a unique room link
+  return text.replace(hangPattern, () => {
+    const hangId = generateHangId();
+    return `https://hang.live/@${hangId}`;
+  });
 }
 
 /**
@@ -561,6 +603,12 @@ function setupLiveUpdateHandlers() {
     }
   });
 
+  // When a reaction is added/removed
+  onEvent("message:reaction", (data) => {
+    const { messageId, reactions } = data;
+    updateMessageReactions(messageId, reactions);
+  });
+
   // When connection state changes, update avatar outline
   onEvent("connection:change", (data) => {
     updateAvatarConnectionStatus(data.state);
@@ -617,6 +665,9 @@ export const initChat = async () => {
 
   // Initialize slash commands module
   await initSlashCommands();
+
+  // Initialize reactions module
+  initReactions();
 
   // Initialize message renderer with dependencies
   initMessageRenderer({
@@ -711,6 +762,7 @@ export const initChat = async () => {
   wireComposer();
   wireThreadSidebar();
   wireChannelSettingsModal();
+  wireHangButtons();
   wireDmModal();
   wireTaskLinkModal();
   updateChannelSettingsCog();
@@ -1158,7 +1210,7 @@ function wireComposer() {
         const threadText = allMessages
           .map((msg) => {
             const author = getAuthorDisplayName(msg.author);
-            const time = new Date(msg.createdAt).toLocaleString();
+            const time = formatLocalDateTime(msg.createdAt);
             return `[${author} - ${time}]\n${msg.body}`;
           })
           .join("\n\n");
@@ -1238,17 +1290,20 @@ async function sendMessage() {
   setReplyTarget(null);
 
   try {
-    let content = body;
+    // Transform client-side commands (like /hang) before anything else
+    // This ensures the server never sees hang room IDs in encrypted channels
+    let content = transformHangCommand(body);
     let encrypted = false;
 
     // Parse slash commands and mentions from plaintext BEFORE encryption
     // This allows the server to handle these without decrypting
-    const commands = parseSlashCommands(body);
-    const mentions = parseMentions(body);
+    // Note: /hang is already transformed, so it won't be in the commands list
+    const commands = parseSlashCommands(content);
+    const mentions = parseMentions(content);
 
     // Encrypt message if channel needs encryption (private or community)
     if (channelNeedsEncryption(channelId)) {
-      const encResult = await encryptMessageForChannel(body, channelId);
+      const encResult = await encryptMessageForChannel(content, channelId);
       if (encResult) {
         content = encResult.encrypted;
         encrypted = true;
@@ -1300,62 +1355,82 @@ export const refreshChatUI = () => {
 };
 
 function renderChannels() {
-  // Render regular channels
+  // Render regular channels (with signature-based caching to avoid unnecessary DOM updates)
   if (el.chatChannelList) {
     const channels = state.chat.channels;
-    el.chatChannelList.innerHTML = channels
-      .map((channel) => {
-        const isActive = channel.id === state.chat.selectedChannelId;
-        const unreadCount = getUnreadCount(channel.id);
-        const mentionCount = getSessionMentionCount(channel.id);
-        const hasUnread = unreadCount > 0 && !isActive;
-        // Show shield for encrypted, lock for private non-encrypted
-        let statusIcon = '';
-        if (channel.encrypted) {
-          statusIcon = '<span class="channel-encrypted" title="E2E Encrypted">&#128737;</span>';
-        } else if (!channel.isPublic) {
-          statusIcon = '<span class="channel-lock" title="Private">&#128274;</span>';
-        }
-        // Show wingman icon if Wingman has access
-        const wingmanIcon = channel.hasWingmanAccess
-          ? '<img src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />'
-          : '';
-        // Show unread badge
-        let unreadBadge = '';
-        if (mentionCount > 0 && !isActive) {
-          unreadBadge = `<span class="unread-badge mention">(${mentionCount > 99 ? '99+' : mentionCount})</span>`;
-        }
-        return `<button class="chat-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
-          <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}${wingmanIcon}${unreadBadge}</div>
-        </button>`;
-      })
-      .join("");
-  }
+    // Build signature: channel ids, active state, unread counts, mention counts
+    const channelSignature = channels.map(c => {
+      const isActive = c.id === state.chat.selectedChannelId;
+      return `${c.id}:${isActive}:${getUnreadCount(c.id)}:${getSessionMentionCount(c.id)}:${c.encrypted}:${c.isPublic}:${c.hasWingmanAccess}`;
+    }).join('|');
 
-  // Render DM channels
-  if (el.dmList) {
-    const dmChannels = state.chat.dmChannels;
-    if (dmChannels.length === 0) {
-      el.dmList.innerHTML = `<p class="dm-empty">No conversations yet</p>`;
-    } else {
-      el.dmList.innerHTML = dmChannels
-        .map((dm) => {
-          const isActive = dm.id === state.chat.selectedChannelId;
-          const unreadCount = getUnreadCount(dm.id);
+    if (channelSignature !== lastRenderedChannelSignature) {
+      lastRenderedChannelSignature = channelSignature;
+      el.chatChannelList.innerHTML = channels
+        .map((channel) => {
+          const isActive = channel.id === state.chat.selectedChannelId;
+          const unreadCount = getUnreadCount(channel.id);
+          const mentionCount = getSessionMentionCount(channel.id);
           const hasUnread = unreadCount > 0 && !isActive;
-          const displayName = getDmDisplayName(dm);
-          const avatarUrl = getAuthorAvatarUrl(dm.otherNpub);
-          const unreadBadge = hasUnread
-            ? `<span class="unread-badge">(${unreadCount > 99 ? '99+' : unreadCount})</span>`
+          // Show shield for encrypted, lock for private non-encrypted
+          let statusIcon = '';
+          if (channel.encrypted) {
+            statusIcon = '<span class="channel-encrypted" title="E2E Encrypted">&#128737;</span>';
+          } else if (!channel.isPublic) {
+            statusIcon = '<span class="channel-lock" title="Private">&#128274;</span>';
+          }
+          // Show wingman icon if Wingman has access
+          const wingmanIcon = channel.hasWingmanAccess
+            ? '<img src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />'
             : '';
-          return `<button class="chat-channel dm-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${dm.id}">
-            <img class="dm-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
-            <div class="dm-info">
-              <div class="chat-channel-name">${escapeHtml(displayName)}${unreadBadge}</div>
-            </div>
+          // Show unread badge
+          let unreadBadge = '';
+          if (mentionCount > 0 && !isActive) {
+            unreadBadge = `<span class="unread-badge mention">(${mentionCount > 99 ? '99+' : mentionCount})</span>`;
+          }
+          return `<button class="chat-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${channel.id}" title="${escapeHtml(channel.displayName)}">
+            <div class="chat-channel-name">#${escapeHtml(channel.name)} ${statusIcon}${wingmanIcon}${unreadBadge}</div>
           </button>`;
         })
         .join("");
+    }
+  }
+
+  // Render DM channels (with signature-based caching to prevent avatar flickering on Safari)
+  if (el.dmList) {
+    const dmChannels = state.chat.dmChannels;
+    // Build signature: dm ids, active state, unread counts, avatar urls
+    const dmSignature = dmChannels.length === 0
+      ? 'empty'
+      : dmChannels.map(dm => {
+          const isActive = dm.id === state.chat.selectedChannelId;
+          return `${dm.id}:${isActive}:${getUnreadCount(dm.id)}:${dm.otherNpub}`;
+        }).join('|');
+
+    if (dmSignature !== lastRenderedDmSignature) {
+      lastRenderedDmSignature = dmSignature;
+      if (dmChannels.length === 0) {
+        el.dmList.innerHTML = `<p class="dm-empty">No conversations yet</p>`;
+      } else {
+        el.dmList.innerHTML = dmChannels
+          .map((dm) => {
+            const isActive = dm.id === state.chat.selectedChannelId;
+            const unreadCount = getUnreadCount(dm.id);
+            const hasUnread = unreadCount > 0 && !isActive;
+            const displayName = getDmDisplayName(dm);
+            const avatarUrl = getAuthorAvatarUrl(dm.otherNpub);
+            const unreadBadge = hasUnread
+              ? `<span class="unread-badge">(${unreadCount > 99 ? '99+' : unreadCount})</span>`
+              : '';
+            return `<button class="chat-channel dm-channel${isActive ? " active" : ""}${hasUnread ? " unread" : ""}" data-channel-id="${dm.id}">
+              <img class="dm-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
+              <div class="dm-info">
+                <div class="chat-channel-name">${escapeHtml(displayName)}${unreadBadge}</div>
+              </div>
+            </button>`;
+          })
+          .join("");
+      }
     }
   }
 
@@ -1660,16 +1735,17 @@ async function sendThreadReply() {
   el.threadSendBtn?.setAttribute("disabled", "disabled");
 
   try {
-    let content = body;
+    // Transform client-side commands (like /hang) before anything else
+    let content = transformHangCommand(body);
     let encrypted = false;
 
     // Parse slash commands and mentions from plaintext BEFORE encryption
-    const commands = parseSlashCommands(body);
-    const mentions = parseMentions(body);
+    const commands = parseSlashCommands(content);
+    const mentions = parseMentions(content);
 
     // Encrypt message if channel needs encryption (private or community)
     if (channelNeedsEncryption(channelId)) {
-      const encResult = await encryptMessageForChannel(body, channelId);
+      const encResult = await encryptMessageForChannel(content, channelId);
       if (encResult) {
         content = encResult.encrypted;
         encrypted = true;
@@ -1708,15 +1784,24 @@ async function sendThreadReply() {
 let channelSettingsGroups = [];
 let allGroups = [];
 
-// Update cog button visibility based on admin status and selected channel
+// Update cog button and hang button visibility based on admin status and selected channel
 export function updateChannelSettingsCog() {
-  if (!el.channelSettingsBtn) return;
-
   // Show cog only for admins when a channel is selected
-  if (state.isAdmin && state.chat.selectedChannelId) {
-    show(el.channelSettingsBtn);
-  } else {
-    hide(el.channelSettingsBtn);
+  if (el.channelSettingsBtn) {
+    if (state.isAdmin && state.chat.selectedChannelId) {
+      show(el.channelSettingsBtn);
+    } else {
+      hide(el.channelSettingsBtn);
+    }
+  }
+
+  // Show hang button for all users when a channel is selected
+  if (el.channelHangBtn) {
+    if (state.chat.selectedChannelId) {
+      show(el.channelHangBtn);
+    } else {
+      hide(el.channelHangBtn);
+    }
   }
 }
 
@@ -2096,6 +2181,75 @@ function wireChannelSettingsModal() {
   });
 }
 
+// ========== Hang Buttons ==========
+
+/**
+ * Send a hang message to a channel or thread
+ * @param {string|number} channelId - The channel ID
+ * @param {number|null} parentId - Thread parent ID (null for channel message)
+ */
+async function sendHangMessage(channelId, parentId = null) {
+  if (!state.session) return;
+
+  const hangId = generateHangId();
+  const hangUrl = `https://hang.live/@${hangId}`;
+  const body = `Join the hang: ${hangUrl}`;
+
+  try {
+    let content = body;
+    let encrypted = false;
+
+    // Encrypt if channel needs it
+    if (channelNeedsEncryption(channelId)) {
+      const encResult = await encryptMessageForChannel(body, channelId);
+      if (encResult) {
+        content = encResult.encrypted;
+        encrypted = true;
+      } else {
+        console.error("[Hang] Failed to encrypt hang message");
+        return;
+      }
+    }
+
+    const res = await fetch(`/chat/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content,
+        parentId: parentId ? Number(parentId) : null,
+        encrypted,
+      }),
+    });
+
+    if (res.ok) {
+      await fetchMessages(channelId);
+      // If this was a thread reply, refresh the thread view
+      if (parentId && openThreadId) {
+        const messages = getActiveChannelMessages();
+        const byParent = groupByParent(messages);
+        openThread(parentId, messages, byParent);
+      }
+    }
+  } catch (err) {
+    console.error("[Hang] Failed to send hang message:", err);
+  }
+}
+
+// Wire hang buttons
+function wireHangButtons() {
+  // Channel hang button - sends to current channel
+  el.channelHangBtn?.addEventListener("click", () => {
+    if (!state.chat.selectedChannelId) return;
+    sendHangMessage(state.chat.selectedChannelId, null);
+  });
+
+  // Thread hang button - sends to current thread
+  el.threadHangBtn?.addEventListener("click", () => {
+    if (!state.chat.selectedChannelId || !openThreadId) return;
+    sendHangMessage(state.chat.selectedChannelId, openThreadId);
+  });
+}
+
 // ========== DM Modal ==========
 
 let dmSearchQuery = "";
@@ -2293,8 +2447,8 @@ function renderTaskSearchResults(tasks, container = null) {
     .map((task) => `<button type="button" class="task-result-item" data-link-task-id="${task.id}">
       <span class="task-result-title">${escapeHtml(task.title)}</span>
       <span class="task-result-meta">
-        <span class="badge priority-${task.priority}">${task.priority}</span>
-        <span class="badge state-${task.state}">${task.state.replace("_", " ")}</span>
+        ${task.group_name ? `<span class="task-result-board">${escapeHtml(task.group_name)}</span>` : '<span class="task-result-board">Personal</span>'}
+        <span class="badge badge-state-${task.state}">${task.state.replace("_", " ")}</span>
       </span>
     </button>`)
     .join("");
@@ -2395,12 +2549,22 @@ async function openTaskLinkModal() {
   switchTaskLinkTab("create");
   el.taskLinkCreateForm?.reset();
   if (el.taskSearchInput) el.taskSearchInput.value = "";
-  if (el.taskResults) el.taskResults.innerHTML = `<p class="task-search-empty">Start typing to search tasks...</p>`;
+  if (el.taskResults) el.taskResults.innerHTML = `<p class="task-search-empty">Select a board and search for tasks...</p>`;
 
-  // Populate board dropdown
+  // Populate both board dropdowns (create and search)
   await populateBoardDropdown();
+  await populateSearchBoardDropdown();
 
   show(el.taskLinkModal);
+}
+
+// Populate the search board dropdown with user's groups
+async function populateSearchBoardDropdown() {
+  const select = document.querySelector("[data-task-search-board]");
+  if (!select) return;
+  const groups = await fetchUserGroups();
+  select.innerHTML = `<option value="all">All Boards</option><option value="">Personal</option>` +
+    groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("");
 }
 
 // Switch between create/existing tabs
@@ -2425,8 +2589,37 @@ function switchTaskLinkTab(tab) {
   } else {
     hide(createForm);
     show(existingSection);
-    // Load initial tasks
-    searchTasks("");
+    // Load initial tasks for selected board (default to "all")
+    const boardSelect = document.querySelector("[data-task-search-board]");
+    const groupId = boardSelect?.value || "all";
+    searchTasks("", groupId);
+  }
+}
+
+// Unlink a thread from a task
+async function unlinkThreadFromTask(taskId, messageId) {
+  if (!confirm("Unlink this task from the thread?")) return;
+
+  try {
+    const res = await fetch(`/api/tasks/${taskId}/threads/${messageId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to unlink");
+
+    // Remove from cache and refresh dropdown
+    threadLinkedTasks = threadLinkedTasks.filter((t) => t.id !== taskId);
+    const dropdown = document.querySelector(".thread-tasks-dropdown");
+    if (dropdown) dropdown.remove();
+
+    // Update button visibility
+    if (threadLinkedTasks.length === 0) {
+      hide(el.viewThreadTasksBtn);
+    } else {
+      showLinkedTasksDropdown();
+    }
+  } catch (err) {
+    console.error("Failed to unlink thread from task:", err);
+    alert("Failed to unlink task");
   }
 }
 
@@ -2444,13 +2637,16 @@ function showLinkedTasksDropdown() {
   const dropdown = document.createElement("div");
   dropdown.className = "thread-tasks-dropdown";
   dropdown.innerHTML = threadLinkedTasks
-    .map((task) => `<a href="/todo" class="thread-task-item" data-task-id="${task.id}">
-      <span class="thread-task-title">${escapeHtml(task.title)}</span>
-      <span class="thread-task-meta">
-        <span class="badge priority-${task.priority}">${task.priority}</span>
-        <span class="badge state-${task.state}">${task.state.replace("_", " ")}</span>
-      </span>
-    </a>`)
+    .map((task) => `<div class="thread-task-item">
+      <a href="/todo" class="thread-task-link" data-task-id="${task.id}">
+        <span class="thread-task-title">${escapeHtml(task.title)}</span>
+        <span class="thread-task-meta">
+          <span class="badge priority-${task.priority}">${task.priority}</span>
+          <span class="badge state-${task.state}">${task.state.replace("_", " ")}</span>
+        </span>
+      </a>
+      <button type="button" class="thread-task-unlink" data-unlink-task="${task.id}" title="Unlink">&times;</button>
+    </div>`)
     .join("");
 
   // Position below the button
@@ -2463,6 +2659,19 @@ function showLinkedTasksDropdown() {
   }
 
   document.body.appendChild(dropdown);
+
+  // Handle unlink button clicks
+  dropdown.addEventListener("click", (e) => {
+    const unlinkBtn = e.target.closest("[data-unlink-task]");
+    if (unlinkBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const taskId = Number(unlinkBtn.dataset.unlinkTask);
+      if (openThreadId) {
+        unlinkThreadFromTask(taskId, openThreadId);
+      }
+    }
+  });
 
   // Close on click outside
   const closeHandler = (e) => {
@@ -2522,7 +2731,17 @@ function wireTaskLinkModal() {
     clearTimeout(taskSearchDebounce);
     taskSearchDebounce = setTimeout(() => {
       const query = el.taskSearchInput.value.trim();
-      searchTasks(query);
+      const boardSelect = document.querySelector("[data-task-search-board]");
+      const groupId = boardSelect?.value || null;
+      searchTasks(query, groupId);
     }, 300);
+  });
+
+  // Board selector change - re-run search with new board
+  const searchBoardSelect = document.querySelector("[data-task-search-board]");
+  searchBoardSelect?.addEventListener("change", () => {
+    const query = el.taskSearchInput?.value.trim() || "";
+    const groupId = searchBoardSelect.value || null;
+    searchTasks(query, groupId);
   });
 }

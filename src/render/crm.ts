@@ -1,5 +1,6 @@
 import {
   getCrmPipelineSummary,
+  getOutstandingCrmTasks,
   listCrmActivities,
   listCrmCompanies,
   listCrmContacts,
@@ -20,6 +21,7 @@ export function renderCrmPage(session: Session | null) {
   const opportunities = listCrmOpportunities();
   const activities = listCrmActivities().slice(0, 20);
   const pipelineSummary = getCrmPipelineSummary();
+  const outstandingTasks = getOutstandingCrmTasks();
 
   return `<!doctype html>
 <html lang="en">
@@ -27,7 +29,7 @@ ${renderHead()}
 <body class="chat-page">
   <main class="chat-app-shell">
     ${renderCrmHeader(session)}
-    ${session ? renderCrmContent(companies, contacts, opportunities, activities, pipelineSummary) : renderAuthRequired()}
+    ${session ? renderCrmContent(companies, contacts, opportunities, activities, pipelineSummary, outstandingTasks) : renderAuthRequired()}
   </main>
   ${renderSessionSeed(session)}
   <script type="module" src="/crm.js?v=6"></script>
@@ -137,7 +139,8 @@ function renderCrmContent(
   contacts: ReturnType<typeof listCrmContacts>,
   opportunities: ReturnType<typeof listCrmOpportunities>,
   activities: ReturnType<typeof listCrmActivities>,
-  pipelineSummary: ReturnType<typeof getCrmPipelineSummary>
+  pipelineSummary: ReturnType<typeof getCrmPipelineSummary>,
+  outstandingTasks: ReturnType<typeof getOutstandingCrmTasks>
 ) {
   return `<section class="chat-shell chat-shell-page" data-crm-shell>
     <div class="chat-layout crm-layout">
@@ -165,7 +168,7 @@ function renderCrmContent(
       </aside>
       <section class="chat-messages-area crm-main">
         <div class="crm-view" data-view="dashboard">
-          ${renderDashboard(companies, opportunities, contacts, activities, pipelineSummary)}
+          ${renderDashboard(companies, opportunities, contacts, activities, pipelineSummary, outstandingTasks)}
         </div>
         <div class="crm-view" data-view="pipeline" hidden>
           ${renderPipelineView(opportunities)}
@@ -186,6 +189,7 @@ function renderCrmContent(
     ${renderContactModal()}
     ${renderOpportunityModal()}
     ${renderActivityModal()}
+    ${renderTaskLinkModal()}
     ${renderPinModal()}
   </section>`;
 }
@@ -195,12 +199,14 @@ function renderDashboard(
   opportunities: ReturnType<typeof listCrmOpportunities>,
   contacts: ReturnType<typeof listCrmContacts>,
   activities: ReturnType<typeof listCrmActivities>,
-  pipelineSummary: ReturnType<typeof getCrmPipelineSummary>
+  pipelineSummary: ReturnType<typeof getCrmPipelineSummary>,
+  outstandingTasks: ReturnType<typeof getOutstandingCrmTasks>
 ) {
   const leads = opportunities.filter((o) => o.stage === "lead").slice(0, 5);
   const recentCompanies = companies.slice(0, 5);
   const recentContacts = contacts.slice(0, 5);
   const recentActivities = activities.slice(0, 5);
+  const tasks = outstandingTasks.slice(0, 10);
 
   const summaryMap = new Map(pipelineSummary.map((s) => [s.stage, s]));
   const totalValue = pipelineSummary
@@ -233,6 +239,29 @@ function renderDashboard(
     </div>
 
     <div class="crm-dashboard-grid">
+      <div class="crm-card full-width">
+        <div class="crm-card-header">
+          <h3>Outstanding Tasks</h3>
+          <a href="/todo" target="_blank" class="text-btn">View all</a>
+        </div>
+        <div class="crm-card-body">
+          ${tasks.length === 0 ? '<p class="crm-empty">No outstanding tasks</p>' : tasks.map((t) => {
+            const boardUrl = t.group_id ? `/todo?group=${t.group_id}` : "/todo";
+            const linkedTo = t.contact_name || t.company_name || t.opportunity_title || "";
+            return `
+            <div class="crm-task-item">
+              <a href="${boardUrl}" target="_blank" class="crm-task-link">
+                <span class="badge badge-priority-${t.priority}">${t.priority}</span>
+                <span class="crm-task-title">${escapeHtml(t.title)}</span>
+              </a>
+              ${linkedTo ? `<span class="crm-task-linked-to">${escapeHtml(linkedTo)}</span>` : ""}
+              <span class="badge badge-state-${t.state}">${t.state.replace("_", " ")}</span>
+            </div>
+          `;
+          }).join("")}
+        </div>
+      </div>
+
       <div class="crm-card">
         <div class="crm-card-header">
           <h3>Latest Leads</h3>
@@ -380,6 +409,7 @@ function renderContactsView(contacts: ReturnType<typeof listCrmContacts>) {
                 <td>${c.phone ? escapeHtml(c.phone) : "–"}</td>
                 <td>${c.company_name ? escapeHtml(c.company_name) : "–"}</td>
                 <td class="crm-cell-actions">
+                  <button class="crm-icon-btn" data-link-task="contact" data-entity-id="${c.id}" title="Link Task">📌</button>
                   <button class="crm-icon-btn" data-edit-contact="${c.id}" title="Edit">✏️</button>
                   <button class="crm-icon-btn danger" data-delete-contact="${c.id}" title="Delete">🗑️</button>
                 </td>
@@ -415,6 +445,7 @@ function renderCompaniesView(companies: ReturnType<typeof listCrmCompanies>) {
                 <td>${c.industry ? renderIndustryTags(c.industry) : "–"}</td>
                 <td>${c.website ? `<a href="${escapeHtml(c.website)}" target="_blank">${escapeHtml(c.website)}</a>` : "–"}</td>
                 <td class="crm-cell-actions">
+                  <button class="crm-icon-btn" data-link-task="company" data-entity-id="${c.id}" title="Link Task">📌</button>
                   <button class="crm-icon-btn" data-edit-company="${c.id}" title="Edit">✏️</button>
                   <button class="crm-icon-btn danger" data-delete-company="${c.id}" title="Delete">🗑️</button>
                 </td>
@@ -445,6 +476,7 @@ function renderActivitiesView(activities: ReturnType<typeof listCrmActivities>) 
             </span>
             ${a.description ? `<p class="crm-activity-desc">${escapeHtml(a.description)}</p>` : ""}
           </div>
+          <button class="crm-icon-btn" data-link-task="activity" data-entity-id="${a.id}" title="Link Task">📌</button>
           <button class="crm-icon-btn danger" data-delete-activity="${a.id}" title="Delete">🗑️</button>
         </div>
       `).join("")}
@@ -503,6 +535,13 @@ function renderCompanyModal() {
           <span>Notes</span>
           <textarea name="notes" rows="3"></textarea>
         </label>
+        <div class="crm-linked-tasks-section" data-linked-tasks-section hidden>
+          <div class="crm-linked-tasks-header">
+            <span>Linked Tasks</span>
+            <button type="button" class="crm-link-task-btn" data-link-task="companies" data-entity-id="">+ Link Task</button>
+          </div>
+          <div class="crm-linked-tasks-list" data-linked-tasks-list></div>
+        </div>
         <div class="chat-form-actions">
           <button type="button" class="ghost" data-modal-cancel>Cancel</button>
           <button type="submit" class="primary">Save</button>
@@ -555,6 +594,13 @@ function renderContactModal() {
           <span>Notes</span>
           <textarea name="notes" rows="3"></textarea>
         </label>
+        <div class="crm-linked-tasks-section" data-linked-tasks-section hidden>
+          <div class="crm-linked-tasks-header">
+            <span>Linked Tasks</span>
+            <button type="button" class="crm-link-task-btn" data-link-task="contacts" data-entity-id="">+ Link Task</button>
+          </div>
+          <div class="crm-linked-tasks-list" data-linked-tasks-list></div>
+        </div>
         <div class="chat-form-actions">
           <button type="button" class="ghost" data-modal-cancel>Cancel</button>
           <button type="submit" class="primary">Save</button>
@@ -588,7 +634,8 @@ function renderOpportunityModal() {
               <option value="USD">USD</option>
               <option value="EUR">EUR</option>
               <option value="GBP">GBP</option>
-              <option value="BTC">BTC</option>
+              <option value="AUD">AUD</option>
+              <option value="SATS">Sats</option>
             </select>
           </label>
         </div>
@@ -627,6 +674,13 @@ function renderOpportunityModal() {
           <span>Notes</span>
           <textarea name="notes" rows="3"></textarea>
         </label>
+        <div class="crm-linked-tasks-section" data-linked-tasks-section hidden>
+          <div class="crm-linked-tasks-header">
+            <span>Linked Tasks</span>
+            <button type="button" class="crm-link-task-btn" data-link-task="opportunities" data-entity-id="">+ Link Task</button>
+          </div>
+          <div class="crm-linked-tasks-list" data-linked-tasks-list></div>
+        </div>
         <div class="chat-form-actions">
           <button type="button" class="ghost" data-modal-cancel>Cancel</button>
           <button type="submit" class="primary">Save</button>
@@ -684,6 +738,14 @@ function renderActivityModal() {
             <option value="">– No opportunity –</option>
           </select>
         </label>
+        <input type="hidden" name="id" data-activity-id />
+        <div class="crm-linked-tasks-section" data-linked-tasks-section hidden>
+          <div class="crm-linked-tasks-header">
+            <span>Linked Tasks</span>
+            <button type="button" class="crm-link-task-btn" data-link-task="activities" data-entity-id="">+ Link Task</button>
+          </div>
+          <div class="crm-linked-tasks-list" data-linked-tasks-list></div>
+        </div>
         <div class="chat-form-actions">
           <button type="button" class="ghost" data-modal-cancel>Cancel</button>
           <button type="submit" class="primary">Save</button>
@@ -760,4 +822,42 @@ function renderIndustryTags(industry: string): string {
   return tags
     .map((tag) => `<span class="crm-tag">${escapeHtml(tag)}</span>`)
     .join(" ");
+}
+
+function renderTaskLinkModal() {
+  return `<div class="chat-modal" data-task-link-modal hidden>
+    <div class="chat-modal-body">
+      <header class="chat-modal-header">
+        <h3 data-task-modal-title>Link Task</h3>
+        <button type="button" class="ghost" data-modal-close>&times;</button>
+      </header>
+      <div class="crm-task-search">
+        <div class="crm-task-search-row">
+          <select class="crm-task-board-select" data-task-board-select>
+            <option value="all">All Boards</option>
+            <option value="">Personal</option>
+          </select>
+          <input
+            type="text"
+            class="crm-task-search-input"
+            data-task-search-input
+            placeholder="Search tasks..."
+            autocomplete="off"
+          />
+        </div>
+        <div class="crm-task-search-results" data-task-search-results hidden></div>
+      </div>
+      <div class="crm-task-create">
+        <span class="crm-divider-text">or create new task on</span>
+        <div class="crm-task-create-row">
+          <select class="crm-task-board-select" data-task-create-board-select>
+            <option value="">Personal</option>
+          </select>
+          <button type="button" class="primary" data-create-linked-task>Create Task</button>
+        </div>
+      </div>
+      <input type="hidden" data-task-link-entity-type />
+      <input type="hidden" data-task-link-entity-id />
+    </div>
+  </div>`;
 }

@@ -1,11 +1,15 @@
+import { getTodoById } from "../db";
 import { redirect, unauthorized } from "../http";
 import {
   canManageGroupTodo,
+  moveTaskToBoard,
   quickAddTodo,
   removeGroupTodo,
   removeTodo,
   transitionGroupTodoState,
+  transitionGroupTodoStateWithPosition,
   transitionTodoState,
+  transitionTodoStateWithPosition,
   updateGroupTodoFromForm,
   updateTodoFromForm,
 } from "../services/todos";
@@ -44,18 +48,36 @@ export async function handleTodoCreate(req: Request, session: Session | null) {
 export async function handleTodoUpdate(req: Request, session: Session | null, id: number) {
   if (!session) return unauthorized();
   const form = await req.formData();
-  const groupId = parseGroupId(form.get("group_id"));
+  const newGroupId = parseGroupId(form.get("group_id"));
 
-  if (groupId) {
-    if (!canManageGroupTodo(session.npub, groupId)) {
+  // Check if the board is changing
+  const currentTodo = getTodoById(id);
+  if (!currentTodo) {
+    return new Response("Task not found", { status: 404 });
+  }
+
+  const currentGroupId = currentTodo.group_id;
+  const boardIsChanging = currentGroupId !== newGroupId;
+
+  // If board is changing, move the task first
+  if (boardIsChanging) {
+    const moveResult = moveTaskToBoard(session.npub, id, newGroupId);
+    if (!moveResult.success) {
+      return new Response(moveResult.error || "Failed to move task", { status: 403 });
+    }
+  }
+
+  // Now perform the regular update on the new board
+  if (newGroupId) {
+    if (!canManageGroupTodo(session.npub, newGroupId)) {
       return new Response("Forbidden", { status: 403 });
     }
-    updateGroupTodoFromForm(groupId, id, form);
+    updateGroupTodoFromForm(newGroupId, id, form);
   } else {
     updateTodoFromForm(session.npub, id, form);
   }
 
-  return redirect(getRedirectUrl(groupId));
+  return redirect(getRedirectUrl(newGroupId));
 }
 
 export async function handleTodoState(req: Request, session: Session | null, id: number) {
@@ -103,15 +125,23 @@ export async function handleApiTodoState(req: Request, session: Session | null, 
     const body = await req.json();
     const nextState = normalizeStateInput(String(body.state ?? "ready"));
     const groupId = body.group_id ? Number(body.group_id) : null;
+    // Position is optional - only provided when reordering within column
+    const position = typeof body.position === "number" ? body.position : null;
 
     let updated;
     if (groupId && Number.isInteger(groupId) && groupId > 0) {
       if (!canManageGroupTodo(session.npub, groupId)) {
         return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: jsonHeaders });
       }
-      updated = transitionGroupTodoState(groupId, id, nextState);
+      // Use position-aware function when position is provided
+      updated = position !== null
+        ? transitionGroupTodoStateWithPosition(groupId, id, nextState, position)
+        : transitionGroupTodoState(groupId, id, nextState);
     } else {
-      updated = transitionTodoState(session.npub, id, nextState);
+      // Use position-aware function when position is provided
+      updated = position !== null
+        ? transitionTodoStateWithPosition(session.npub, id, nextState, position)
+        : transitionTodoState(session.npub, id, nextState);
     }
 
     if (!updated) {
@@ -121,7 +151,7 @@ export async function handleApiTodoState(req: Request, session: Session | null, 
       });
     }
 
-    return new Response(JSON.stringify({ success: true, state: nextState }), { status: 200, headers: jsonHeaders });
+    return new Response(JSON.stringify({ success: true, state: nextState, position }), { status: 200, headers: jsonHeaders });
   } catch (_err) {
     return new Response(JSON.stringify({ error: "Invalid request body" }), { status: 400, headers: jsonHeaders });
   }

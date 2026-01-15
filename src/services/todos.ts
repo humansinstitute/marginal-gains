@@ -7,14 +7,20 @@ import {
   getGroup,
   getLatestSummaries,
   getTodoById,
+  listAllAssignedTodos,
+  listGroupMembers,
   listGroupTodos,
   listScheduledTodos,
   listTodos,
   listUnscheduledTodos,
+  moveTodoToBoard,
   transitionGroupTodo,
+  transitionGroupTodoWithPosition,
   transitionTodo,
+  transitionTodoWithPosition,
   updateGroupTodo,
   updateTodo,
+  updateTodoPosition,
   upsertSummary,
 } from "../db";
 import { isAllowedTransition, normalizePriority, normalizeState, TODO_PRIORITIES, TODO_STATES } from "../domain/todos";
@@ -34,12 +40,79 @@ export function canManageGroupTodo(npub: string, groupId: number): boolean {
   return group?.created_by === npub;
 }
 
+/**
+ * Move a task to a different board with proper assignee handling.
+ * - Personal → Group: Keep assigned to mover (easier to find on group board)
+ * - Group → Personal: Set assignee to owner
+ * - Group → Different Group: Clear assignee (user may not be in new group)
+ */
+export function moveTaskToBoard(
+  npub: string,
+  todoId: number,
+  newGroupId: number | null
+): { success: boolean; error?: string } {
+  // Get the current task
+  const todo = getTodoById(todoId);
+  if (!todo) {
+    return { success: false, error: "Task not found" };
+  }
+
+  // Only the task owner can move it
+  if (todo.owner !== npub) {
+    return { success: false, error: "Only the task owner can move it" };
+  }
+
+  const currentGroupId = todo.group_id;
+
+  // No change needed
+  if (currentGroupId === newGroupId) {
+    return { success: true };
+  }
+
+  // Check permissions on the new board if it's a group
+  if (newGroupId !== null && !canManageGroupTodo(npub, newGroupId)) {
+    return { success: false, error: "You don't have permission to move tasks to this group" };
+  }
+
+  // Determine new assignee based on move direction
+  let newAssignee: string | null;
+  if (newGroupId === null) {
+    // Moving to personal board - assign to owner
+    newAssignee = npub;
+  } else if (currentGroupId === null) {
+    // Moving from personal to group - keep assigned to mover
+    newAssignee = npub;
+  } else {
+    // Moving between groups - keep assignee if they're a member of the target group
+    const currentAssignee = todo.assigned_to;
+    if (currentAssignee) {
+      const targetMembers = listGroupMembers(newGroupId);
+      const isMemberOfTarget = targetMembers.some(m => m.npub === currentAssignee);
+      newAssignee = isMemberOfTarget ? currentAssignee : null;
+    } else {
+      newAssignee = null;
+    }
+  }
+
+  // Perform the move
+  const updated = moveTodoToBoard(todoId, npub, newGroupId, newAssignee);
+  if (!updated) {
+    return { success: false, error: "Failed to move task" };
+  }
+
+  return { success: true };
+}
+
 export function listOwnerTodos(owner: string | null) {
   return listTodos(owner);
 }
 
-export function listTodosForGroup(groupId: number) {
-  return listGroupTodos(groupId);
+export function listTodosForGroup(groupId: number, filterTags?: string[], assigneeFilter?: string) {
+  return listGroupTodos(groupId, filterTags, assigneeFilter);
+}
+
+export function listAllUserAssignedTodos(npub: string, filterTags?: string[]) {
+  return listAllAssignedTodos(npub, filterTags);
 }
 
 export function listOwnerScheduled(owner: string, endDate: string) {
@@ -50,7 +123,7 @@ export function listOwnerUnscheduled(owner: string) {
   return listUnscheduledTodos(owner);
 }
 
-export function createTodoFromForm(owner: string, form: FormData) {
+export function createTodoFromForm(owner: string, form: FormData, groupId: number | null = null) {
   const fields = validateTodoForm({
     title: form.get("title"),
     description: form.get("description"),
@@ -58,16 +131,23 @@ export function createTodoFromForm(owner: string, form: FormData) {
     state: form.get("state"),
     scheduled_for: form.get("scheduled_for"),
     tags: form.get("tags"),
+    assigned_to: form.get("assigned_to"),
   });
   if (!fields) return null;
-  return addTodoFull(owner, fields);
+  // For personal tasks (no group), default assignee to owner
+  if (groupId === null && !fields.assigned_to) {
+    fields.assigned_to = owner;
+  }
+  return addTodoFull(owner, fields, groupId);
 }
 
-export function quickAddTodo(owner: string, title: string, tags: string, groupId: number | null = null) {
+export function quickAddTodo(owner: string, title: string, tags: string, groupId: number | null = null, assignedTo: string | null = null) {
   const normalizedTitle = validateTodoTitle(title);
   if (!normalizedTitle) return null;
   const normalizedTags = tags?.trim() ?? "";
-  return addTodo(normalizedTitle, owner, normalizedTags, groupId);
+  // For personal tasks (no group), default assignee to owner
+  const effectiveAssignee = groupId === null ? owner : assignedTo;
+  return addTodo(normalizedTitle, owner, normalizedTags, groupId, effectiveAssignee);
 }
 
 export function updateTodoFromForm(owner: string, id: number, form: FormData) {
@@ -78,6 +158,7 @@ export function updateTodoFromForm(owner: string, id: number, form: FormData) {
     state: form.get("state"),
     scheduled_for: form.get("scheduled_for"),
     tags: form.get("tags"),
+    assigned_to: form.get("assigned_to"),
   });
   if (!fields) return null;
   return updateTodo(id, owner, fields);
@@ -89,6 +170,20 @@ export function transitionTodoState(owner: string, id: number, state: string) {
   if (!existing) return null;
   if (!isAllowedTransition(existing.state, normalized)) return null;
   return transitionTodo(id, owner, normalized);
+}
+
+export function transitionTodoStateWithPosition(owner: string, id: number, state: string, position: number | null) {
+  const normalized = normalizeStateInput(state);
+  const existing = listTodos(owner).find((todo) => todo.id === id);
+  if (!existing) return null;
+  // Allow same-state moves for reordering within a column
+  const sameState = existing.state === normalized;
+  if (!sameState && !isAllowedTransition(existing.state, normalized)) return null;
+  return transitionTodoWithPosition(id, owner, normalized, position);
+}
+
+export function setTodoPosition(id: number, position: number | null) {
+  return updateTodoPosition(id, position);
 }
 
 export function removeTodo(owner: string, id: number) {
@@ -104,6 +199,7 @@ export function updateGroupTodoFromForm(groupId: number, id: number, form: FormD
     state: form.get("state"),
     scheduled_for: form.get("scheduled_for"),
     tags: form.get("tags"),
+    assigned_to: form.get("assigned_to"),
   });
   if (!fields) return null;
   return updateGroupTodo(id, groupId, fields);
@@ -115,6 +211,16 @@ export function transitionGroupTodoState(groupId: number, id: number, state: str
   if (!existing || existing.group_id !== groupId) return null;
   if (!isAllowedTransition(existing.state, normalized)) return null;
   return transitionGroupTodo(id, groupId, normalized);
+}
+
+export function transitionGroupTodoStateWithPosition(groupId: number, id: number, state: string, position: number | null) {
+  const normalized = normalizeStateInput(state);
+  const existing = getTodoById(id);
+  if (!existing || existing.group_id !== groupId) return null;
+  // Allow same-state moves for reordering within a column
+  const sameState = existing.state === normalized;
+  if (!sameState && !isAllowedTransition(existing.state, normalized)) return null;
+  return transitionGroupTodoWithPosition(id, groupId, normalized, position);
 }
 
 export function removeGroupTodo(groupId: number, id: number) {
