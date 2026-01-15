@@ -1,10 +1,15 @@
 /**
  * Server-Sent Events (SSE) broadcaster service
  * Manages connected clients and broadcasts events to relevant users
+ *
+ * Multi-tenant: Connections are namespaced by team slug to ensure
+ * events are only sent to clients within the same team.
  */
 
 import { isAdmin } from "../config";
-import { canUserAccessChannel } from "../db";
+
+import type { Database } from "bun:sqlite";
+
 
 // Event types that can be broadcast
 export type EventType =
@@ -29,22 +34,50 @@ export interface BroadcastEvent {
 
 interface ConnectedClient {
   npub: string;
+  teamSlug: string;
   controller: ReadableStreamDefaultController;
   connectedAt: Date;
 }
 
-// Store connected clients by npub (one connection per user for now)
-const connectedClients = new Map<string, ConnectedClient>();
+// Store connected clients by team slug, then by npub
+// Map<teamSlug, Map<npub, ConnectedClient>>
+const connectedClients = new Map<string, Map<string, ConnectedClient>>();
+
+/**
+ * Get the clients map for a specific team (creates if doesn't exist)
+ */
+function getTeamClients(teamSlug: string): Map<string, ConnectedClient> {
+  let teamClients = connectedClients.get(teamSlug);
+  if (!teamClients) {
+    teamClients = new Map();
+    connectedClients.set(teamSlug, teamClients);
+  }
+  return teamClients;
+}
+
+/**
+ * Get total count of connected clients across all teams
+ */
+function getTotalClientCount(): number {
+  let total = 0;
+  for (const teamClients of connectedClients.values()) {
+    total += teamClients.size;
+  }
+  return total;
+}
 
 /**
  * Register a new SSE client connection
  */
 export function registerClient(
+  teamSlug: string,
   npub: string,
   controller: ReadableStreamDefaultController
 ): void {
-  // Close existing connection if any (single connection per user)
-  const existing = connectedClients.get(npub);
+  const teamClients = getTeamClients(teamSlug);
+
+  // Close existing connection if any (single connection per user per team)
+  const existing = teamClients.get(npub);
   if (existing) {
     try {
       existing.controller.close();
@@ -53,21 +86,29 @@ export function registerClient(
     }
   }
 
-  connectedClients.set(npub, {
+  teamClients.set(npub, {
     npub,
+    teamSlug,
     controller,
     connectedAt: new Date(),
   });
 
-  console.log(`[SSE] Client connected: ${npub.slice(0, 12)}... (${connectedClients.size} total)`);
+  console.log(`[SSE] Client connected: ${npub.slice(0, 12)}... to team '${teamSlug}' (${getTotalClientCount()} total)`);
 }
 
 /**
  * Unregister a client connection
  */
-export function unregisterClient(npub: string): void {
-  connectedClients.delete(npub);
-  console.log(`[SSE] Client disconnected: ${npub.slice(0, 12)}... (${connectedClients.size} total)`);
+export function unregisterClient(teamSlug: string, npub: string): void {
+  const teamClients = connectedClients.get(teamSlug);
+  if (teamClients) {
+    teamClients.delete(npub);
+    // Clean up empty team maps
+    if (teamClients.size === 0) {
+      connectedClients.delete(teamSlug);
+    }
+  }
+  console.log(`[SSE] Client disconnected: ${npub.slice(0, 12)}... from team '${teamSlug}' (${getTotalClientCount()} total)`);
 }
 
 /**
@@ -85,14 +126,47 @@ function sendToClient(client: ConnectedClient, event: BroadcastEvent): boolean {
 }
 
 /**
- * Broadcast an event to relevant clients
+ * Check if user can access a channel (team-aware version)
  */
-export function broadcast(event: BroadcastEvent): void {
+function canUserAccessChannelInTeam(
+  teamDb: Database,
+  channelId: number,
+  npub: string
+): boolean {
+  const result = teamDb
+    .query<{ can_access: number }, [number, string, string, string]>(
+      `SELECT 1 as can_access FROM channels c
+       WHERE c.id = ? AND (
+         c.is_public = 1
+         OR c.owner_npub = ?
+         OR EXISTS (
+           SELECT 1 FROM dm_participants dp WHERE dp.channel_id = c.id AND dp.npub = ?
+         )
+         OR EXISTS (
+           SELECT 1 FROM channel_groups cg
+           JOIN group_members gm ON gm.group_id = cg.group_id
+           WHERE cg.channel_id = c.id AND gm.npub = ?
+         )
+       )`
+    )
+    .get(channelId, npub, npub, npub);
+  return result !== undefined;
+}
+
+/**
+ * Broadcast an event to relevant clients within a team
+ */
+export function broadcast(teamSlug: string, teamDb: Database, event: BroadcastEvent): void {
+  const teamClients = connectedClients.get(teamSlug);
+  if (!teamClients) {
+    return; // No clients connected to this team
+  }
+
   const failedClients: string[] = [];
 
-  for (const [npub, client] of connectedClients) {
+  for (const [npub, client] of teamClients) {
     // Check if this client should receive the event
-    if (!shouldReceiveEvent(npub, event)) {
+    if (!shouldReceiveEvent(teamDb, npub, event)) {
       continue;
     }
 
@@ -104,14 +178,49 @@ export function broadcast(event: BroadcastEvent): void {
 
   // Clean up failed connections
   for (const npub of failedClients) {
-    unregisterClient(npub);
+    unregisterClient(teamSlug, npub);
+  }
+}
+
+/**
+ * LEGACY: Broadcast to all connected teams
+ *
+ * This is a backward-compatibility function for routes that haven't been
+ * migrated to use RequestContext yet. It broadcasts to all connected
+ * teams without channel access checking.
+ *
+ * TODO: Migrate all routes to use the team-aware broadcast() function
+ * and remove this legacy function.
+ */
+export function broadcastLegacy(event: BroadcastEvent): void {
+  const failedClients: Array<{ teamSlug: string; npub: string }> = [];
+
+  for (const [teamSlug, teamClients] of connectedClients) {
+    for (const [npub, client] of teamClients) {
+      // For legacy broadcasts, only filter by recipientNpubs
+      if (event.recipientNpubs && event.recipientNpubs.length > 0) {
+        if (!event.recipientNpubs.includes(npub)) {
+          continue;
+        }
+      }
+
+      const success = sendToClient(client, event);
+      if (!success) {
+        failedClients.push({ teamSlug, npub });
+      }
+    }
+  }
+
+  // Clean up failed connections
+  for (const { teamSlug, npub } of failedClients) {
+    unregisterClient(teamSlug, npub);
   }
 }
 
 /**
  * Determine if a user should receive a specific event
  */
-function shouldReceiveEvent(npub: string, event: BroadcastEvent): boolean {
+function shouldReceiveEvent(teamDb: Database, npub: string, event: BroadcastEvent): boolean {
   // If specific recipients are set, check if user is in the list
   if (event.recipientNpubs && event.recipientNpubs.length > 0) {
     return event.recipientNpubs.includes(npub);
@@ -123,19 +232,22 @@ function shouldReceiveEvent(npub: string, event: BroadcastEvent): boolean {
     if (isAdmin(npub)) {
       return true;
     }
-    // Check channel access
-    return canUserAccessChannel(event.channelId, npub);
+    // Check channel access within the team's database
+    return canUserAccessChannelInTeam(teamDb, event.channelId, npub);
   }
 
-  // Default: send to everyone (for public events like new public channels)
+  // Default: send to everyone in the team (for public events like new public channels)
   return true;
 }
 
 /**
  * Send initial sync data to a newly connected client
  */
-export function sendInitialSync(npub: string, data: unknown): void {
-  const client = connectedClients.get(npub);
+export function sendInitialSync(teamSlug: string, npub: string, data: unknown): void {
+  const teamClients = connectedClients.get(teamSlug);
+  if (!teamClients) return;
+
+  const client = teamClients.get(npub);
   if (client) {
     sendToClient(client, {
       type: "sync:init",
@@ -146,9 +258,28 @@ export function sendInitialSync(npub: string, data: unknown): void {
 
 /**
  * Get count of connected clients (for monitoring)
+ * If teamSlug provided, returns count for that team only
  */
-export function getConnectedCount(): number {
-  return connectedClients.size;
+export function getConnectedCount(teamSlug?: string): number {
+  if (teamSlug) {
+    const teamClients = connectedClients.get(teamSlug);
+    return teamClients?.size ?? 0;
+  }
+  return getTotalClientCount();
+}
+
+/**
+ * Get connection statistics per team (for monitoring/debugging)
+ */
+export function getConnectionStats(): { total: number; byTeam: Record<string, number> } {
+  const byTeam: Record<string, number> = {};
+  for (const [slug, clients] of connectedClients) {
+    byTeam[slug] = clients.size;
+  }
+  return {
+    total: getTotalClientCount(),
+    byTeam,
+  };
 }
 
 /**
@@ -158,19 +289,22 @@ export function sendHeartbeat(): void {
   const encoder = new TextEncoder();
   const heartbeat = encoder.encode(": heartbeat\n\n");
 
-  const failedClients: string[] = [];
+  // Collect failed clients with their team slugs
+  const failedClients: Array<{ teamSlug: string; npub: string }> = [];
 
-  for (const [npub, client] of connectedClients) {
-    try {
-      client.controller.enqueue(heartbeat);
-    } catch {
-      failedClients.push(npub);
+  for (const [teamSlug, teamClients] of connectedClients) {
+    for (const [npub, client] of teamClients) {
+      try {
+        client.controller.enqueue(heartbeat);
+      } catch {
+        failedClients.push({ teamSlug, npub });
+      }
     }
   }
 
   // Clean up failed connections
-  for (const npub of failedClients) {
-    unregisterClient(npub);
+  for (const { teamSlug, npub } of failedClients) {
+    unregisterClient(teamSlug, npub);
   }
 }
 

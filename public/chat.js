@@ -1,3 +1,4 @@
+import { baseChatUrl, channelUrl, chatUrl, dmUrl, eventsUrl } from "./api.js";
 import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
 import { formatLocalDateTime } from "./dateUtils.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
@@ -173,7 +174,7 @@ async function copyToClipboard(text) {
 // Update browser URL to reflect current channel (for deep linking)
 function updateChatUrl(channelId) {
   if (!channelId) {
-    history.replaceState(null, "", "/chat");
+    history.replaceState(null, "", baseChatUrl());
     return;
   }
 
@@ -182,13 +183,13 @@ function updateChatUrl(channelId) {
   const dm = state.chat.dmChannels.find((c) => c.id === channelId);
   const personal = state.chat.personalChannel?.id === channelId ? state.chat.personalChannel : null;
 
-  let url = "/chat";
+  let url = baseChatUrl();
   if (channel) {
-    url = `/chat/channel/${encodeURIComponent(channel.name)}`;
+    url = channelUrl(channel.name);
   } else if (dm) {
-    url = `/chat/dm/${channelId}`;
+    url = dmUrl(channelId);
   } else if (personal) {
-    url = `/chat/channel/${encodeURIComponent(personal.name)}`;
+    url = channelUrl(personal.name);
   }
 
   // Use replaceState to avoid cluttering history
@@ -360,7 +361,7 @@ function hideWingmanThinking(threadId) {
 async function fetchLocalUsers() {
   if (!state.session) return;
   try {
-    const res = await fetch("/chat/users");
+    const res = await fetch(chatUrl("/users"));
     if (!res.ok) return;
     const users = await res.json();
     console.log("[Chat] Loaded users from server:", users);
@@ -379,7 +380,7 @@ async function fetchLocalUsers() {
 async function saveUserToServer(npub, pubkey, profile) {
   if (!state.session) return;
   try {
-    await fetch("/chat/users", {
+    await fetch(chatUrl("/users"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -500,7 +501,7 @@ async function prefetchAuthorProfiles(messages) {
 async function fetchUserInfo() {
   if (!state.session) return;
   try {
-    const res = await fetch("/chat/me");
+    const res = await fetch(chatUrl("/me"));
     if (!res.ok) return;
     const info = await res.json();
     setIsAdmin(info.isAdmin === true);
@@ -770,7 +771,7 @@ export const initChat = async () => {
 async function fetchChannels() {
   if (!state.session) return;
   try {
-    const res = await fetch("/chat/channels");
+    const res = await fetch(chatUrl("/channels"));
     if (!res.ok) return;
     const data = await res.json();
 
@@ -830,7 +831,7 @@ async function markChannelAsRead(channelId) {
   if (!state.session || !channelId) return;
 
   try {
-    const res = await fetch(`/chat/channels/${channelId}/read`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/read`), {
       method: "POST",
     });
     if (res.ok) {
@@ -862,7 +863,7 @@ async function fetchMessages(channelId) {
   }
 
   try {
-    const res = await fetch(`/chat/channels/${channelId}/messages`);
+    const res = await fetch(chatUrl(`/channels/${channelId}/messages`));
     if (!res.ok) return;
     const messages = await res.json();
     let mapped = messages.map((m) => ({
@@ -946,7 +947,7 @@ function wireChannelModal() {
   const loadGroupsForDropdown = async () => {
     if (!el.channelGroupSelect) return;
     try {
-      const res = await fetch("/chat/groups");
+      const res = await fetch(chatUrl("/groups"));
       if (!res.ok) return;
       const groups = await res.json();
       el.channelGroupSelect.innerHTML = `<option value="">Select a group...</option>` +
@@ -1036,7 +1037,7 @@ function wireChannelModal() {
     };
 
     try {
-      const res = await fetch("/chat/channels", {
+      const res = await fetch(chatUrl("/channels"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -1053,7 +1054,7 @@ function wireChannelModal() {
             // Encryption setup failed - delete the channel to avoid orphaned unencrypted channels
             console.error('[Chat] Failed to setup encryption keys, deleting channel');
             try {
-              await fetch(`/chat/channels/${channelId}`, { method: "DELETE" });
+              await fetch(chatUrl(`/channels/${channelId}`), { method: "DELETE" });
             } catch (_e) {
               console.error('[Chat] Failed to delete channel after encryption failure');
             }
@@ -1238,7 +1239,7 @@ function wireComposer() {
       if (!confirm("Delete this message? Thread replies will also be removed.")) return;
 
       try {
-        const res = await fetch(`/chat/messages/${messageId}`, { method: "DELETE" });
+        const res = await fetch(chatUrl(`/messages/${messageId}`), { method: "DELETE" });
         if (!res.ok) {
           const err = await res.json();
           alert(err.error || "Failed to delete message");
@@ -1316,7 +1317,7 @@ async function sendMessage() {
       }
     }
 
-    const res = await fetch(`/chat/channels/${channelId}/messages`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/messages`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1754,7 +1755,7 @@ async function sendThreadReply() {
       }
     }
 
-    const res = await fetch(`/chat/channels/${channelId}/messages`, {
+    const res = await fetch(chatUrl(`/channels/${channelId}/messages`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1807,7 +1808,7 @@ export function updateChannelSettingsCog() {
 // Fetch all groups for the dropdown
 async function fetchAllGroups() {
   try {
-    const res = await fetch("/chat/groups");
+    const res = await fetch(chatUrl("/groups"));
     if (!res.ok) return;
     allGroups = await res.json();
   } catch (_err) {
@@ -1818,7 +1819,7 @@ async function fetchAllGroups() {
 // Fetch groups assigned to a channel
 async function fetchChannelGroups(channelId) {
   try {
-    const res = await fetch(`/chat/channels/${channelId}/groups`);
+    const res = await fetch(chatUrl(`/channels/${channelId}/groups`));
     if (!res.ok) return [];
     return await res.json();
   } catch (_err) {
@@ -1883,13 +1884,13 @@ async function loadEncryptionKeyStatus(channelId) {
 
   try {
     // Fetch all keys for the channel
-    const keysRes = await fetch(`/chat/channels/${channelId}/keys/all`, {
+    const keysRes = await fetch(chatUrl(`/channels/${channelId}/keys/all`), {
       credentials: "same-origin",
     });
     const keysData = keysRes.ok ? await keysRes.json() : { keys: [] };
 
     // Fetch pending members
-    const pendingRes = await fetch(`/chat/channels/${channelId}/keys/pending`, {
+    const pendingRes = await fetch(chatUrl(`/channels/${channelId}/keys/pending`), {
       credentials: "same-origin",
     });
     const pendingData = pendingRes.ok ? await pendingRes.json() : { pendingMembers: [] };
@@ -1998,7 +1999,7 @@ async function addChannelGroup(groupId) {
   if (!state.chat.selectedChannelId || !groupId) return;
 
   try {
-    const res = await fetch(`/chat/channels/${state.chat.selectedChannelId}/groups`, {
+    const res = await fetch(chatUrl(`/channels/${state.chat.selectedChannelId}/groups`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ groupIds: [groupId] }),
@@ -2030,7 +2031,7 @@ async function removeChannelGroup(groupId) {
   if (!state.chat.selectedChannelId) return;
 
   try {
-    const res = await fetch(`/chat/channels/${state.chat.selectedChannelId}/groups/${groupId}`, {
+    const res = await fetch(chatUrl(`/channels/${state.chat.selectedChannelId}/groups/${groupId}`), {
       method: "DELETE",
     });
     if (res.ok) {
@@ -2054,7 +2055,7 @@ async function saveChannelSettings(e) {
   const isPublic = formData.get("isPublic") === "on";
 
   try {
-    const res = await fetch(`/chat/channels/${state.chat.selectedChannelId}`, {
+    const res = await fetch(chatUrl(`/channels/${state.chat.selectedChannelId}`), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ displayName, description, isPublic }),
@@ -2091,7 +2092,7 @@ async function deleteChannel() {
   if (!confirmed) return;
 
   try {
-    const res = await fetch(`/chat/channels/${channel.id}`, {
+    const res = await fetch(chatUrl(`/channels/${channel.id}`), {
       method: "DELETE",
     });
 
@@ -2307,7 +2308,7 @@ async function createDmWithUser(targetNpub) {
   const displayName = user?.display_name || user?.name || "DM";
 
   try {
-    const res = await fetch("/chat/dm", {
+    const res = await fetch(chatUrl("/dm"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ targetNpub, displayName: `DM - ${displayName}` }),
@@ -2394,7 +2395,7 @@ async function updateThreadTasksButton(threadId) {
 // Fetch user's groups for the board dropdown
 async function fetchUserGroups() {
   try {
-    const res = await fetch("/chat/groups");
+    const res = await fetch(chatUrl("/groups"));
     if (!res.ok) return [];
     return await res.json();
   } catch (_err) {

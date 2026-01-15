@@ -1,3 +1,4 @@
+import { chatUrl } from "./api.js";
 import {
   AUTO_LOGIN_METHOD_KEY,
   AUTO_LOGIN_PUBKEY_KEY,
@@ -924,7 +925,7 @@ const completeLogin = async (method, event) => {
       nip05: profile?.nip05 || null,
     };
     console.log("[Login] Saving user data:", userData);
-    const res = await fetch("/chat/users", {
+    const res = await fetch(chatUrl("/users"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(userData),
@@ -935,13 +936,18 @@ const completeLogin = async (method, event) => {
   }
 
   await fetchSummaries();
-  // Redirect to return path if set, otherwise default to /chat
+
+  // Redirect priority: 1) return path, 2) team context, 3) default
   const returnPath = window.__RETURN_PATH__;
   // Only allow relative paths starting with / to prevent open redirects
   if (returnPath && returnPath.startsWith("/") && !returnPath.startsWith("//")) {
     window.location.href = returnPath;
+  } else if (session.currentTeamSlug) {
+    // User has a team context - go directly to team chat
+    window.location.href = `/t/${session.currentTeamSlug}/chat`;
   } else {
-    window.location.href = "/chat";
+    // No team context - go to teams page to select one
+    window.location.href = "/teams";
   }
 };
 

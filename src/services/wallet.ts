@@ -13,7 +13,7 @@ import { firstValueFrom, filter, take, timeout as rxTimeout, type Observable } f
 import { saveWalletTransaction, listWalletTransactions } from "../db";
 import { createMessage } from "../db";
 
-import { broadcast } from "./events";
+import { broadcastLegacy as broadcast } from "./events";
 import {
   isLightningAddress,
   isBolt11Invoice,
