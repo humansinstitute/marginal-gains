@@ -1069,7 +1069,7 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
           <input name="title" data-task-modal-title required />
         </label>
         <label>Description
-          <textarea name="description" data-task-modal-description rows="3"></textarea>
+          <textarea name="description" data-task-modal-description rows="8"></textarea>
         </label>
         <div class="task-modal-row">
           <label>Priority
@@ -1558,7 +1558,7 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
           <input name="title" data-task-modal-title required />
         </label>
         <label>Description
-          <textarea name="description" data-task-modal-description rows="3"></textarea>
+          <textarea name="description" data-task-modal-description rows="8"></textarea>
         </label>
         <div class="task-modal-row">
           <label>Priority

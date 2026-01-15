@@ -3452,6 +3452,11 @@ body.chat-page {
   background: var(--bg);
   font-family: inherit;
 }
+.task-modal-form textarea {
+  min-height: 6rem;
+  max-height: 40vh;
+  resize: vertical;
+}
 .task-modal-form input:focus,
 .task-modal-form textarea:focus,
 .task-modal-form select:focus {
