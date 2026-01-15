@@ -337,7 +337,12 @@ export class TeamDatabase {
   }
 
   listAllChannels(): Channel[] {
-    return this.db.query<Channel, []>("SELECT * FROM channels ORDER BY created_at DESC").all();
+    return this.db.query<Channel, []>(
+      `SELECT * FROM channels
+       WHERE name NOT LIKE 'dm-%'
+         AND owner_npub IS NULL
+       ORDER BY created_at DESC`
+    ).all();
   }
 
   canUserAccessChannel(channelId: number, npub: string): boolean {
