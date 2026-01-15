@@ -63,7 +63,10 @@ export function initTeamSchema(db: Database): void {
   addColumn(db, "ALTER TABLE todos ADD COLUMN scheduled_for TEXT DEFAULT NULL");
   addColumn(db, "ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
   addColumn(db, "ALTER TABLE todos ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE");
+  addColumn(db, "ALTER TABLE todos ADD COLUMN assigned_to TEXT DEFAULT NULL");
+  addColumn(db, "ALTER TABLE todos ADD COLUMN position INTEGER DEFAULT NULL");
   createIndex(db, "CREATE INDEX idx_todos_group_id ON todos(group_id)");
+  createIndex(db, "CREATE INDEX idx_todos_assigned_to ON todos(assigned_to)");
 
   // AI Summaries
   db.run(`
@@ -290,6 +293,28 @@ export function initTeamSchema(db: Database): void {
   `);
   createIndex(db, "CREATE INDEX idx_task_threads_todo ON task_threads(todo_id)");
   createIndex(db, "CREATE INDEX idx_task_threads_message ON task_threads(message_id)");
+
+  // ============================================================================
+  // Task-CRM Links
+  // ============================================================================
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS task_crm_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+      contact_id INTEGER REFERENCES crm_contacts(id) ON DELETE CASCADE,
+      company_id INTEGER REFERENCES crm_companies(id) ON DELETE CASCADE,
+      activity_id INTEGER REFERENCES crm_activities(id) ON DELETE CASCADE,
+      opportunity_id INTEGER REFERENCES crm_opportunities(id) ON DELETE CASCADE,
+      linked_by TEXT NOT NULL,
+      linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  createIndex(db, "CREATE INDEX idx_task_crm_links_todo ON task_crm_links(todo_id)");
+  createIndex(db, "CREATE INDEX idx_task_crm_links_contact ON task_crm_links(contact_id)");
+  createIndex(db, "CREATE INDEX idx_task_crm_links_company ON task_crm_links(company_id)");
+  createIndex(db, "CREATE INDEX idx_task_crm_links_activity ON task_crm_links(activity_id)");
+  createIndex(db, "CREATE INDEX idx_task_crm_links_opportunity ON task_crm_links(opportunity_id)");
 
   // ============================================================================
   // App Settings
