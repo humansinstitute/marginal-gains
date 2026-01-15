@@ -318,6 +318,8 @@ export async function handleTeamApiTodoState(
     const body = await req.json();
     const nextState = normalizeStateInput(String(body.state ?? "ready"));
     const groupId = body.group_id ? Number(body.group_id) : null;
+    // Position is optional - only provided when reordering within column
+    const position = typeof body.position === "number" ? body.position : null;
 
     const db = new TeamDatabase(result.ctx.teamDb);
 
@@ -348,9 +350,15 @@ export async function handleTeamApiTodoState(
           headers: jsonHeaders,
         });
       }
-      updated = db.transitionGroupTodo(id, groupId, nextState);
+      // Use position-aware function when position is provided
+      updated = position !== null
+        ? db.transitionGroupTodoWithPosition(id, groupId, nextState, position)
+        : db.transitionGroupTodo(id, groupId, nextState);
     } else {
-      updated = db.transitionTodo(id, result.ctx.session.npub, nextState);
+      // Use position-aware function when position is provided
+      updated = position !== null
+        ? db.transitionTodoWithPosition(id, result.ctx.session.npub, nextState, position)
+        : db.transitionTodo(id, result.ctx.session.npub, nextState);
     }
 
     if (!updated) {
@@ -360,7 +368,7 @@ export async function handleTeamApiTodoState(
       });
     }
 
-    return new Response(JSON.stringify({ success: true, state: nextState }), {
+    return new Response(JSON.stringify({ success: true, state: nextState, position }), {
       status: 200,
       headers: jsonHeaders,
     });

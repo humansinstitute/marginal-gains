@@ -194,6 +194,13 @@ export class TeamDatabase {
     ).get(state, done, id, owner) ?? null;
   }
 
+  transitionTodoWithPosition(id: number, owner: string, state: TodoState, position: number | null): Todo | null {
+    const done = state === "done" ? 1 : 0;
+    return this.db.query<Todo, [string, number, number | null, number, string]>(
+      "UPDATE todos SET state = ?, done = ?, position = ? WHERE id = ? AND owner = ? RETURNING *"
+    ).get(state, done, position, id, owner) ?? null;
+  }
+
   deleteGroupTodo(id: number, groupId: number): void {
     this.db.run("UPDATE todos SET deleted = 1 WHERE id = ? AND group_id = ?", [id, groupId]);
   }
@@ -232,6 +239,13 @@ export class TeamDatabase {
     return this.db.query<Todo, [string, number, number, number]>(
       "UPDATE todos SET state = ?, done = ? WHERE id = ? AND group_id = ? RETURNING *"
     ).get(state, done, id, groupId) ?? null;
+  }
+
+  transitionGroupTodoWithPosition(id: number, groupId: number, state: TodoState, position: number | null): Todo | null {
+    const done = state === "done" ? 1 : 0;
+    return this.db.query<Todo, [string, number, number | null, number, number]>(
+      "UPDATE todos SET state = ?, done = ?, position = ? WHERE id = ? AND group_id = ? RETURNING *"
+    ).get(state, done, position, id, groupId) ?? null;
   }
 
   assignAllTodosToOwner(npub: string): void {
@@ -311,15 +325,15 @@ export class TeamDatabase {
   }
 
   listVisibleChannels(npub: string): Channel[] {
-    return this.db.query<Channel, [string, string]>(
+    return this.db.query<Channel, [string]>(
       `SELECT DISTINCT c.* FROM channels c
        LEFT JOIN channel_groups cg ON c.id = cg.channel_id
        LEFT JOIN group_members gm ON cg.group_id = gm.group_id
-       WHERE c.is_public = 1
-          OR c.owner_npub = ?
-          OR gm.npub = ?
-       ORDER BY c.created_at DESC`
-    ).all(npub, npub);
+       WHERE c.name NOT LIKE 'dm-%'
+         AND c.owner_npub IS NULL
+         AND (c.is_public = 1 OR gm.npub = ?)
+       ORDER BY c.id`
+    ).all(npub);
   }
 
   listAllChannels(): Channel[] {
@@ -359,13 +373,16 @@ export class TeamDatabase {
   // DM Channels
   // ============================================================================
 
-  listDmChannels(npub: string): Channel[] {
-    return this.db.query<Channel, [string]>(
-      `SELECT c.* FROM channels c
+  listDmChannels(npub: string): (Channel & { other_npub: string | null })[] {
+    return this.db.query<Channel & { other_npub: string | null }, [string, string]>(
+      `SELECT c.*,
+              (SELECT dp2.npub FROM dm_participants dp2
+               WHERE dp2.channel_id = c.id AND dp2.npub != ?) as other_npub
+       FROM channels c
        JOIN dm_participants dp ON c.id = dp.channel_id
        WHERE dp.npub = ?
        ORDER BY c.created_at DESC`
-    ).all(npub);
+    ).all(npub, npub);
   }
 
   findDmChannel(npub1: string, npub2: string): Channel | null {
