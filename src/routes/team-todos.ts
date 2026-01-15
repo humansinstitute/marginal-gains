@@ -16,9 +16,9 @@ import type { Session } from "../types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
-// Helper to create and validate team context
-function requireTeamContext(session: Session | null, teamSlug: string) {
-  return createTeamRouteContext(session, teamSlug);
+// Helper to create and validate team context with return path for auth redirect
+function requireTeamContext(session: Session | null, teamSlug: string, returnPath?: string) {
+  return createTeamRouteContext(session, teamSlug, returnPath);
 }
 
 function getRedirectUrl(teamSlug: string, groupId: number | null): string {
@@ -54,7 +54,7 @@ function canManageTeamGroupTodo(
  * GET /t/:slug/todo - Team todos page
  */
 export function handleTeamTodos(url: URL, session: Session | null, teamSlug: string) {
-  const result = requireTeamContext(session, teamSlug);
+  const result = requireTeamContext(session, teamSlug, url.pathname + url.search);
   if (!result.ok) return result.response;
 
   const tagsParam = url.searchParams.get("tags");

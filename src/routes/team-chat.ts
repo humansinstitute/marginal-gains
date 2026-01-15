@@ -28,9 +28,10 @@ function forbidden(message = "Forbidden") {
  */
 function requireTeamContext(
   session: Session | null,
-  teamSlug: string
+  teamSlug: string,
+  returnPath?: string
 ): TeamContextResult {
-  return createTeamRouteContext(session, teamSlug);
+  return createTeamRouteContext(session, teamSlug, returnPath);
 }
 
 // ============================================================================
@@ -42,7 +43,14 @@ export function handleTeamChatPage(
   teamSlug: string,
   deepLink?: DeepLink
 ): Response {
-  const result = requireTeamContext(session, teamSlug);
+  // Build return path based on deep link
+  let returnPath = `/t/${teamSlug}/chat`;
+  if (deepLink?.type === "channel") {
+    returnPath = `/t/${teamSlug}/chat/channel/${deepLink.slug}`;
+  } else if (deepLink?.type === "dm") {
+    returnPath = `/t/${teamSlug}/chat/dm/${deepLink.id}`;
+  }
+  const result = requireTeamContext(session, teamSlug, returnPath);
   if (!result.ok) return result.response;
 
   const { ctx } = result;

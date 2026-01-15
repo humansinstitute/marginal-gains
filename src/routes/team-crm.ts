@@ -26,14 +26,14 @@ const VALID_STAGES: CrmOpportunityStage[] = [
 const VALID_ACTIVITY_TYPES = ["call", "email", "meeting", "note", "task"];
 
 // Helper to create and validate team context
-function requireTeamContext(session: Session | null, teamSlug: string) {
-  return createTeamRouteContext(session, teamSlug);
+function requireTeamContext(session: Session | null, teamSlug: string, returnPath?: string) {
+  return createTeamRouteContext(session, teamSlug, returnPath);
 }
 
 // ==================== CRM Page ====================
 
 export function handleTeamCrmPage(session: Session | null, teamSlug: string) {
-  const result = requireTeamContext(session, teamSlug);
+  const result = requireTeamContext(session, teamSlug, `/t/${teamSlug}/crm`);
   if (!result.ok) return result.response;
 
   // Only managers and owners can access CRM

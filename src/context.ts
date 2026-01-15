@@ -187,18 +187,24 @@ export type TeamContextResult =
  * - User has access to team (member or admin)
  *
  * Updates session with team context
+ *
+ * @param returnPath - Optional full path to return to after login (e.g., "/t/myteam/chat")
  */
 export function createTeamRouteContext(
   session: Session | null,
-  teamSlug: string
+  teamSlug: string,
+  returnPath?: string
 ): TeamContextResult {
   // Check authentication
   if (!session) {
+    // Default return path to the team root if not specified
+    const path = returnPath ?? `/t/${teamSlug}`;
+    const encodedReturn = encodeURIComponent(path);
     return {
       ok: false,
       response: new Response(null, {
         status: 302,
-        headers: { Location: "/auth/login" },
+        headers: { Location: `/?return=${encodedReturn}` },
       }),
     };
   }
