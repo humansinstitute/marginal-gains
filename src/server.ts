@@ -137,6 +137,7 @@ import {
   handleTeamSendMessage,
   handleTeamStoreChannelKey,
   handleTeamStoreChannelKeysBatch,
+  handleTeamToggleReaction,
   handleTeamUpdateChannel,
   handleTeamUpdateUser,
 } from "./routes/team-chat";
@@ -611,6 +612,11 @@ const server = Bun.serve({
         const teamMarkReadMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/read$/);
         if (teamMarkReadMatch) {
           return handleTeamMarkChannelRead(session, teamMarkReadMatch[1], Number(teamMarkReadMatch[2]));
+        }
+
+        const teamReactionMatch = pathname.match(/^\/t\/([^/]+)\/api\/messages\/(\d+)\/reactions$/);
+        if (teamReactionMatch) {
+          return handleTeamToggleReaction(req, session, teamReactionMatch[1], Number(teamReactionMatch[2]));
         }
 
         const teamAddChannelGroupsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/groups$/);

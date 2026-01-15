@@ -24,6 +24,8 @@ import type {
   InviteCode,
   Message,
   PushSubscription,
+  Reaction,
+  ReactionGroup,
   Summary,
   TaskThread,
   TeamEncryption,
@@ -59,6 +61,8 @@ export type {
   InviteRedemption,
   Message,
   PushSubscription,
+  Reaction,
+  ReactionGroup,
   Summary,
   TaskThread,
   TeamEncryption,
@@ -476,6 +480,56 @@ export class TeamDatabase {
   deleteMessage(id: number): boolean {
     const result = this.db.run("DELETE FROM messages WHERE id = ?", [id]);
     return result.changes > 0;
+  }
+
+  // ============================================================================
+  // Reactions
+  // ============================================================================
+
+  toggleReaction(
+    messageId: number,
+    reactor: string,
+    emoji: string
+  ): { action: "add" | "remove"; reaction?: Reaction } {
+    const existing = this.db.query<Reaction, [number, string, string]>(
+      "SELECT * FROM message_reactions WHERE message_id = ? AND reactor = ? AND emoji = ?"
+    ).get(messageId, reactor, emoji);
+
+    if (existing) {
+      this.db.run(
+        "DELETE FROM message_reactions WHERE message_id = ? AND reactor = ? AND emoji = ?",
+        [messageId, reactor, emoji]
+      );
+      return { action: "remove" };
+    }
+
+    const reaction = this.db.query<Reaction, [number, string, string]>(
+      "INSERT INTO message_reactions (message_id, reactor, emoji) VALUES (?, ?, ?) RETURNING *"
+    ).get(messageId, reactor, emoji);
+
+    return { action: "add", reaction: reaction ?? undefined };
+  }
+
+  getMessageReactions(messageId: number): ReactionGroup[] {
+    const reactions = this.db.query<Reaction, [number]>(
+      "SELECT * FROM message_reactions WHERE message_id = ? ORDER BY created_at ASC"
+    ).all(messageId);
+
+    return this.groupReactions(reactions);
+  }
+
+  private groupReactions(reactions: Reaction[]): ReactionGroup[] {
+    const groups = new Map<string, ReactionGroup>();
+    for (const r of reactions) {
+      const existing = groups.get(r.emoji);
+      if (existing) {
+        existing.count++;
+        existing.reactors.push(r.reactor);
+      } else {
+        groups.set(r.emoji, { emoji: r.emoji, count: 1, reactors: [r.reactor] });
+      }
+    }
+    return Array.from(groups.values());
   }
 
   getLatestMessageId(channelId: number): number | null {

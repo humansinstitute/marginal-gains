@@ -3,6 +3,7 @@
  */
 
 import { state } from "./state.js";
+import { teamUrl } from "./api.js";
 
 const QUICK_EMOJIS = ["\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\ude02", "\ud83c\udf89", "\ud83d\udc40", "\ud83d\ude4f"];
 
@@ -162,7 +163,7 @@ function createEmojiPicker(messageId) {
 export async function toggleReaction(messageId, emoji) {
   console.log("[Reactions] Toggling reaction:", { messageId, emoji });
   try {
-    const res = await fetch(`/api/messages/${messageId}/reactions`, {
+    const res = await fetch(teamUrl(`/api/messages/${messageId}/reactions`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ emoji }),
