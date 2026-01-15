@@ -9,6 +9,7 @@ import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
 } from "./config";
+import { createContext, createTeamRouteContext } from "./context";
 import { withErrorHandling } from "./http";
 import { logError } from "./logger";
 import { handleAiTasks, handleAiTasksPost, handleLatestSummary, handleSummaryPost } from "./routes/ai";
@@ -75,7 +76,7 @@ import {
   handleUpdateOpportunity,
 } from "./routes/crm";
 import { handleDebugLog, handleClearDebugLog, handleGetDebugLog } from "./routes/debug";
-import { handleChatEvents } from "./routes/events";
+import { handleChatEvents, handleTeamChatEvents } from "./routes/events";
 import {
   handleAddChannelGroups,
   handleAddGroupMembers,
@@ -98,7 +99,7 @@ import {
   handlePushUpdateFrequency,
   handleSendTestNotification,
 } from "./routes/push";
-import { handleSettings } from "./routes/settings";
+import { handleSettings, handleAppSettingsPage, handleTeamConfigPage } from "./routes/settings";
 import {
   handleCreateTask,
   handleGetActivityTasks,
@@ -115,6 +116,108 @@ import {
   handleUnlinkTaskFromCrm,
   handleUnlinkThreadFromTask,
 } from "./routes/tasks";
+import {
+  handleTeamAddChannelGroups,
+  handleTeamChatPage,
+  handleTeamCreateChannel,
+  handleTeamCreateDm,
+  handleTeamDeleteChannel,
+  handleTeamDeleteMessage,
+  handleTeamGetChannel,
+  handleTeamGetChannelKey,
+  handleTeamGetChannelKeysAll,
+  handleTeamGetMe,
+  handleTeamGetMessages,
+  handleTeamGetPendingKeyMembers,
+  handleTeamListChannelGroups,
+  handleTeamListChannels,
+  handleTeamListUsers,
+  handleTeamMarkChannelRead,
+  handleTeamRemoveChannelGroup,
+  handleTeamSendMessage,
+  handleTeamStoreChannelKey,
+  handleTeamStoreChannelKeysBatch,
+  handleTeamUpdateChannel,
+  handleTeamUpdateUser,
+} from "./routes/team-chat";
+import {
+  handleTeamCrmPage,
+  handleTeamListCompanies,
+  handleTeamGetCompany,
+  handleTeamCreateCompany,
+  handleTeamUpdateCompany,
+  handleTeamDeleteCompany,
+  handleTeamListContacts,
+  handleTeamGetContact,
+  handleTeamCreateContact,
+  handleTeamUpdateContact,
+  handleTeamDeleteContact,
+  handleTeamListOpportunities,
+  handleTeamGetOpportunity,
+  handleTeamCreateOpportunity,
+  handleTeamUpdateOpportunity,
+  handleTeamDeleteOpportunity,
+  handleTeamListActivities,
+  handleTeamGetActivity,
+  handleTeamCreateActivity,
+  handleTeamDeleteActivity,
+  handleTeamPipelineSummary,
+} from "./routes/team-crm";
+import {
+  handleGetTeamEncryption,
+  handleGetUserTeamKey,
+  handleStoreUserTeamKey,
+  handleGetInviteKey,
+  handleInitTeamEncryption,
+  handleStoreInviteKey,
+} from "./routes/team-encryption";
+import {
+  handleTeamListGroups,
+  handleTeamGetGroup,
+  handleTeamCreateGroup,
+  handleTeamUpdateGroup,
+  handleTeamDeleteGroup,
+  handleTeamListGroupMembers,
+  handleTeamAddGroupMembers,
+  handleTeamRemoveGroupMember,
+} from "./routes/team-groups";
+import {
+  handleTeamSearchTasks,
+  handleTeamGetTaskThreads,
+  handleTeamGetThreadTasks,
+  handleTeamCreateTask,
+  handleTeamLinkThreadToTask,
+  handleTeamUnlinkThreadFromTask,
+} from "./routes/team-tasks";
+import {
+  handleTeamTodos,
+  handleTeamTodosRedirect,
+  handleTeamTodoCreate,
+  handleTeamTodoUpdate,
+  handleTeamTodoState,
+  handleTeamTodoDelete,
+  handleTeamApiTodoState,
+} from "./routes/team-todos";
+import {
+  handleTeamsPage,
+  handleListTeams,
+  handleSwitchTeam,
+  handleCreateTeam,
+  handleJoinTeam,
+  handleJoinTeamPage,
+  handleTeamSettingsPage,
+  handleUpdateTeam,
+  handleDeleteTeam,
+  handleListTeamMembers,
+  handleAddTeamMember,
+  handleUpdateTeamMember,
+  handleRemoveTeamMember,
+  handleListTeamInvitations,
+  handleCreateTeamInvitation,
+  handleDeleteTeamInvitation,
+  handleListTeamManagers,
+  handleAddTeamManager,
+} from "./routes/teams";
 import { handleApiTodoState, handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
 import {
   handleWalletPage,
@@ -173,6 +276,112 @@ const server = Bun.serve({
         const assetResponse = await serveAsset(pathname);
         if (assetResponse) return assetResponse;
 
+        // Team routes - no team context required
+        if (pathname === "/teams") return handleTeamsPage(session, url);
+        if (pathname === "/api/teams") return handleListTeams(session);
+        const joinTeamPageMatch = pathname.match(/^\/teams\/join\/([^/]+)$/);
+        if (joinTeamPageMatch) return handleJoinTeamPage(session, joinTeamPageMatch[1]);
+        const teamSettingsMatch = pathname.match(/^\/t\/([^/]+)\/settings$/);
+        if (teamSettingsMatch) return handleTeamSettingsPage(session, teamSettingsMatch[1]);
+        const teamMembersMatch = pathname.match(/^\/api\/teams\/(\d+)\/members$/);
+        if (teamMembersMatch) return handleListTeamMembers(session, Number(teamMembersMatch[1]));
+        const teamInvitationsMatch = pathname.match(/^\/api\/teams\/(\d+)\/invitations$/);
+        if (teamInvitationsMatch) return handleListTeamInvitations(session, Number(teamInvitationsMatch[1]));
+        if (pathname === "/api/team-managers") return handleListTeamManagers(session);
+
+        // Team-scoped chat page and SSE events
+        const teamChatPageMatch = pathname.match(/^\/t\/([^/]+)\/chat$/);
+        if (teamChatPageMatch) {
+          return handleTeamChatPage(session, teamChatPageMatch[1]);
+        }
+        const teamChatChannelMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channel\/([^/]+)$/);
+        if (teamChatChannelMatch) {
+          return handleTeamChatPage(session, teamChatChannelMatch[1], {
+            type: "channel",
+            slug: teamChatChannelMatch[2],
+          });
+        }
+        const teamChatDmMatch = pathname.match(/^\/t\/([^/]+)\/chat\/dm\/(\d+)$/);
+        if (teamChatDmMatch) {
+          return handleTeamChatPage(session, teamChatDmMatch[1], {
+            type: "dm",
+            id: Number(teamChatDmMatch[2]),
+          });
+        }
+        const teamChatEventsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/events$/);
+        if (teamChatEventsMatch) {
+          return handleTeamChatEvents(req, session, teamChatEventsMatch[1]);
+        }
+
+        // Team-scoped API routes
+        const teamChannelsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels$/);
+        if (teamChannelsMatch) return handleTeamListChannels(session, teamChannelsMatch[1]);
+
+        const teamUsersMatch = pathname.match(/^\/t\/([^/]+)\/chat\/users$/);
+        if (teamUsersMatch) return handleTeamListUsers(session, teamUsersMatch[1]);
+
+        const teamMeMatch = pathname.match(/^\/t\/([^/]+)\/chat\/me$/);
+        if (teamMeMatch) return handleTeamGetMe(session, teamMeMatch[1]);
+
+        const teamChannelMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)$/);
+        if (teamChannelMatch) {
+          return handleTeamGetChannel(session, teamChannelMatch[1], Number(teamChannelMatch[2]));
+        }
+
+        const teamMessagesMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/messages$/);
+        if (teamMessagesMatch) {
+          return handleTeamGetMessages(session, teamMessagesMatch[1], Number(teamMessagesMatch[2]));
+        }
+
+        const teamChannelGroupsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/groups$/);
+        if (teamChannelGroupsMatch) {
+          return handleTeamListChannelGroups(session, teamChannelGroupsMatch[1], Number(teamChannelGroupsMatch[2]));
+        }
+
+        // Team-scoped groups route (for chat UI to fetch available groups)
+        const teamChatGroupsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/groups$/);
+        if (teamChatGroupsMatch) {
+          return handleTeamListGroups(session, teamChatGroupsMatch[1]);
+        }
+
+        // Team-scoped channel encryption key routes
+        const teamChannelKeysMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/keys$/);
+        if (teamChannelKeysMatch) {
+          return handleTeamGetChannelKey(session, teamChannelKeysMatch[1], Number(teamChannelKeysMatch[2]));
+        }
+
+        const teamChannelKeysAllMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/keys\/all$/);
+        if (teamChannelKeysAllMatch) {
+          return handleTeamGetChannelKeysAll(session, teamChannelKeysAllMatch[1], Number(teamChannelKeysAllMatch[2]));
+        }
+
+        const teamChannelKeysPendingMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/keys\/pending$/);
+        if (teamChannelKeysPendingMatch) {
+          return handleTeamGetPendingKeyMembers(session, teamChannelKeysPendingMatch[1], Number(teamChannelKeysPendingMatch[2]));
+        }
+
+        // Team-level encryption routes (zero-knowledge key distribution)
+        const teamEncryptionMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/encryption$/);
+        if (teamEncryptionMatch) {
+          const result = createTeamRouteContext(session, teamEncryptionMatch[1]);
+          if (!result.ok) return result.response;
+          return handleGetTeamEncryption(result.ctx);
+        }
+
+        const teamUserKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/key$/);
+        if (teamUserKeyMatch) {
+          const result = createTeamRouteContext(session, teamUserKeyMatch[1]);
+          if (!result.ok) return result.response;
+          return handleGetUserTeamKey(result.ctx);
+        }
+
+        const teamInviteKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/invite-key$/);
+        if (teamInviteKeyMatch) {
+          const result = createTeamRouteContext(session, teamInviteKeyMatch[1]);
+          if (!result.ok) return result.response;
+          return handleGetInviteKey(result.ctx, url);
+        }
+
         const aiTasksMatch = pathname.match(/^\/ai\/tasks\/(\d+)(?:\/(yes|no))?$/);
         if (aiTasksMatch) return handleAiTasks(url, aiTasksMatch);
         if (pathname === "/ai/summary/latest") return handleLatestSummary(url);
@@ -190,7 +399,7 @@ const server = Bun.serve({
         if (chatChannelMatch) return requireAuth() || handleChatPage(session, { type: "channel", slug: chatChannelMatch[1] });
         const chatDmMatch = pathname.match(/^\/chat\/dm\/(\d+)$/);
         if (chatDmMatch) return requireAuth() || handleChatPage(session, { type: "dm", id: Number(chatDmMatch[1]) });
-        if (pathname === "/chat/events") return handleChatEvents(req, session);
+        if (pathname === "/chat/events") return handleChatEvents(req, createContext(session));
         if (pathname === "/chat/channels") return handleListChannels(session);
         if (pathname === "/chat/users") return handleListUsers(session);
         if (pathname === "/chat/me") return handleGetMe(session);
@@ -221,6 +430,73 @@ const server = Bun.serve({
         if (pathname === "/todo/kanban") return requireAuth() || handleTodos(url, session, "kanban");
         if (pathname === "/todo/list") return requireAuth() || handleTodos(url, session, "list");
         if (pathname === "/settings") return requireAuth() || handleSettings(session);
+        if (pathname === "/admin/settings") return handleAppSettingsPage(session);
+        const teamConfigMatch = pathname.match(/^\/t\/([^/]+)\/config$/);
+        if (teamConfigMatch) return handleTeamConfigPage(session, teamConfigMatch[1]);
+
+        // Team-scoped group routes
+        const teamGroupsMatch = pathname.match(/^\/t\/([^/]+)\/groups$/);
+        if (teamGroupsMatch) return handleTeamListGroups(session, teamGroupsMatch[1]);
+        const teamGroupMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)$/);
+        if (teamGroupMatch) return handleTeamGetGroup(session, teamGroupMatch[1], Number(teamGroupMatch[2]));
+        const teamGroupMembersMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/members$/);
+        if (teamGroupMembersMatch) return handleTeamListGroupMembers(session, teamGroupMembersMatch[1], Number(teamGroupMembersMatch[2]));
+
+        // Team-scoped tasks page (with view mode routing)
+        const teamTodosRedirectMatch = pathname.match(/^\/t\/([^/]+)\/todo$/);
+        if (teamTodosRedirectMatch) return handleTeamTodosRedirect(url, teamTodosRedirectMatch[1]);
+        const teamTodosKanbanMatch = pathname.match(/^\/t\/([^/]+)\/todo\/kanban$/);
+        if (teamTodosKanbanMatch) return handleTeamTodos(url, session, teamTodosKanbanMatch[1], "kanban");
+        const teamTodosListMatch = pathname.match(/^\/t\/([^/]+)\/todo\/list$/);
+        if (teamTodosListMatch) return handleTeamTodos(url, session, teamTodosListMatch[1], "list");
+
+        // Team-scoped CRM page
+        const teamCrmPageMatch = pathname.match(/^\/t\/([^/]+)\/crm$/);
+        if (teamCrmPageMatch) return handleTeamCrmPage(session, teamCrmPageMatch[1]);
+
+        // Team-scoped CRM API routes
+        const teamCrmCompaniesMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/companies$/);
+        if (teamCrmCompaniesMatch) return handleTeamListCompanies(session, teamCrmCompaniesMatch[1]);
+        const teamCrmCompanyMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/companies\/(\d+)$/);
+        if (teamCrmCompanyMatch) return handleTeamGetCompany(session, teamCrmCompanyMatch[1], Number(teamCrmCompanyMatch[2]));
+        const teamCrmContactsMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/contacts$/);
+        if (teamCrmContactsMatch) {
+          const companyId = url.searchParams.get("company_id");
+          return handleTeamListContacts(session, teamCrmContactsMatch[1], companyId ? Number(companyId) : undefined);
+        }
+        const teamCrmContactMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/contacts\/(\d+)$/);
+        if (teamCrmContactMatch) return handleTeamGetContact(session, teamCrmContactMatch[1], Number(teamCrmContactMatch[2]));
+        const teamCrmOpportunitiesMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/opportunities$/);
+        if (teamCrmOpportunitiesMatch) {
+          const stage = url.searchParams.get("stage") ?? undefined;
+          return handleTeamListOpportunities(session, teamCrmOpportunitiesMatch[1], stage);
+        }
+        const teamCrmOpportunityMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/opportunities\/(\d+)$/);
+        if (teamCrmOpportunityMatch) return handleTeamGetOpportunity(session, teamCrmOpportunityMatch[1], Number(teamCrmOpportunityMatch[2]));
+        const teamCrmActivitiesMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/activities$/);
+        if (teamCrmActivitiesMatch) {
+          const contactId = url.searchParams.get("contact_id");
+          const opportunityId = url.searchParams.get("opportunity_id");
+          const companyId = url.searchParams.get("company_id");
+          return handleTeamListActivities(session, teamCrmActivitiesMatch[1], {
+            contact_id: contactId ? Number(contactId) : undefined,
+            opportunity_id: opportunityId ? Number(opportunityId) : undefined,
+            company_id: companyId ? Number(companyId) : undefined,
+          });
+        }
+        const teamCrmActivityMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/activities\/(\d+)$/);
+        if (teamCrmActivityMatch) return handleTeamGetActivity(session, teamCrmActivityMatch[1], Number(teamCrmActivityMatch[2]));
+        const teamCrmPipelineMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/pipeline$/);
+        if (teamCrmPipelineMatch) return handleTeamPipelineSummary(session, teamCrmPipelineMatch[1]);
+
+        // Team-scoped tasks API routes
+        const teamTasksSearchMatch = pathname.match(/^\/t\/([^/]+)\/api\/tasks\/search$/);
+        if (teamTasksSearchMatch) return handleTeamSearchTasks(url, session, teamTasksSearchMatch[1]);
+        const teamTaskThreadsMatch = pathname.match(/^\/t\/([^/]+)\/api\/tasks\/(\d+)\/threads$/);
+        if (teamTaskThreadsMatch) return handleTeamGetTaskThreads(session, teamTaskThreadsMatch[1], Number(teamTaskThreadsMatch[2]));
+        const teamThreadTasksMatch = pathname.match(/^\/t\/([^/]+)\/api\/threads\/(\d+)\/tasks$/);
+        if (teamThreadTasksMatch) return handleTeamGetThreadTasks(session, teamThreadTasksMatch[1], Number(teamThreadTasksMatch[2]));
+
         if (pathname === "/wallet") return requireAuth() || handleWalletPage(session);
 
         // Push notification routes
@@ -306,6 +582,111 @@ const server = Bun.serve({
       if (req.method === "POST") {
         if (pathname === "/auth/login") return login(req);
         if (pathname === "/auth/logout") return logout(req);
+
+        // Team routes
+        if (pathname === "/api/teams") return handleCreateTeam(req, session);
+        if (pathname === "/teams/switch") return handleSwitchTeam(req, session);
+        if (pathname === "/teams/join") return handleJoinTeam(req, session);
+        const addTeamMemberMatch = pathname.match(/^\/api\/teams\/(\d+)\/members$/);
+        if (addTeamMemberMatch) return handleAddTeamMember(req, session, Number(addTeamMemberMatch[1]));
+        const createTeamInviteMatch = pathname.match(/^\/api\/teams\/(\d+)\/invitations$/);
+        if (createTeamInviteMatch) return handleCreateTeamInvitation(req, session, Number(createTeamInviteMatch[1]));
+        if (pathname === "/api/team-managers") return handleAddTeamManager(req, session);
+
+        // Team-scoped chat POST routes
+        const teamCreateChannelMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels$/);
+        if (teamCreateChannelMatch) return handleTeamCreateChannel(req, session, teamCreateChannelMatch[1]);
+
+        const teamCreateDmMatch = pathname.match(/^\/t\/([^/]+)\/chat\/dm$/);
+        if (teamCreateDmMatch) return handleTeamCreateDm(req, session, teamCreateDmMatch[1]);
+
+        const teamUpdateUserMatch = pathname.match(/^\/t\/([^/]+)\/chat\/users$/);
+        if (teamUpdateUserMatch) return handleTeamUpdateUser(req, session, teamUpdateUserMatch[1]);
+
+        const teamSendMessageMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/messages$/);
+        if (teamSendMessageMatch) {
+          return handleTeamSendMessage(req, session, teamSendMessageMatch[1], Number(teamSendMessageMatch[2]));
+        }
+
+        const teamMarkReadMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/read$/);
+        if (teamMarkReadMatch) {
+          return handleTeamMarkChannelRead(session, teamMarkReadMatch[1], Number(teamMarkReadMatch[2]));
+        }
+
+        const teamAddChannelGroupsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/groups$/);
+        if (teamAddChannelGroupsMatch) {
+          return handleTeamAddChannelGroups(req, session, teamAddChannelGroupsMatch[1], Number(teamAddChannelGroupsMatch[2]));
+        }
+
+        // Team-scoped channel encryption key routes
+        const teamStoreChannelKeyMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/keys$/);
+        if (teamStoreChannelKeyMatch) {
+          return handleTeamStoreChannelKey(req, session, teamStoreChannelKeyMatch[1], Number(teamStoreChannelKeyMatch[2]));
+        }
+
+        const teamStoreChannelKeysBatchMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/keys\/batch$/);
+        if (teamStoreChannelKeysBatchMatch) {
+          return handleTeamStoreChannelKeysBatch(req, session, teamStoreChannelKeysBatchMatch[1], Number(teamStoreChannelKeysBatchMatch[2]));
+        }
+
+        // Team-level encryption POST routes (zero-knowledge key distribution)
+        const teamInitEncryptionMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/init-encryption$/);
+        if (teamInitEncryptionMatch) {
+          const result = createTeamRouteContext(session, teamInitEncryptionMatch[1]);
+          if (!result.ok) return result.response;
+          return handleInitTeamEncryption(req, result.ctx);
+        }
+
+        const teamStoreUserKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/key$/);
+        if (teamStoreUserKeyMatch) {
+          const result = createTeamRouteContext(session, teamStoreUserKeyMatch[1]);
+          if (!result.ok) return result.response;
+          return handleStoreUserTeamKey(req, result.ctx);
+        }
+
+        const teamStoreInviteKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/invite-key$/);
+        if (teamStoreInviteKeyMatch) {
+          const result = createTeamRouteContext(session, teamStoreInviteKeyMatch[1]);
+          if (!result.ok) return result.response;
+          return handleStoreInviteKey(req, result.ctx);
+        }
+
+        // Team-scoped group POST routes
+        const teamCreateGroupMatch = pathname.match(/^\/t\/([^/]+)\/groups$/);
+        if (teamCreateGroupMatch) return handleTeamCreateGroup(req, session, teamCreateGroupMatch[1]);
+        const teamAddGroupMembersMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/members$/);
+        if (teamAddGroupMembersMatch) {
+          return handleTeamAddGroupMembers(req, session, teamAddGroupMembersMatch[1], Number(teamAddGroupMembersMatch[2]));
+        }
+
+        // Team-scoped todos POST routes
+        const teamTodoCreateMatch = pathname.match(/^\/t\/([^/]+)\/todos$/);
+        if (teamTodoCreateMatch) return handleTeamTodoCreate(req, session, teamTodoCreateMatch[1]);
+        const teamTodoUpdateMatch = pathname.match(/^\/t\/([^/]+)\/todos\/(\d+)\/update$/);
+        if (teamTodoUpdateMatch) return handleTeamTodoUpdate(req, session, teamTodoUpdateMatch[1], Number(teamTodoUpdateMatch[2]));
+        const teamTodoStateMatch = pathname.match(/^\/t\/([^/]+)\/todos\/(\d+)\/state$/);
+        if (teamTodoStateMatch) return handleTeamTodoState(req, session, teamTodoStateMatch[1], Number(teamTodoStateMatch[2]));
+        const teamTodoDeleteMatch = pathname.match(/^\/t\/([^/]+)\/todos\/(\d+)\/delete$/);
+        if (teamTodoDeleteMatch) return handleTeamTodoDelete(req, session, teamTodoDeleteMatch[1], Number(teamTodoDeleteMatch[2]));
+        const teamApiTodoStateMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/state$/);
+        if (teamApiTodoStateMatch) return handleTeamApiTodoState(req, session, teamApiTodoStateMatch[1], Number(teamApiTodoStateMatch[2]));
+
+        // Team-scoped CRM POST routes
+        const teamCreateCompanyMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/companies$/);
+        if (teamCreateCompanyMatch) return handleTeamCreateCompany(req, session, teamCreateCompanyMatch[1]);
+        const teamCreateContactMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/contacts$/);
+        if (teamCreateContactMatch) return handleTeamCreateContact(req, session, teamCreateContactMatch[1]);
+        const teamCreateOpportunityMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/opportunities$/);
+        if (teamCreateOpportunityMatch) return handleTeamCreateOpportunity(req, session, teamCreateOpportunityMatch[1]);
+        const teamCreateActivityMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/activities$/);
+        if (teamCreateActivityMatch) return handleTeamCreateActivity(req, session, teamCreateActivityMatch[1]);
+
+        // Team-scoped tasks POST routes
+        const teamCreateTaskMatch = pathname.match(/^\/t\/([^/]+)\/api\/tasks$/);
+        if (teamCreateTaskMatch) return handleTeamCreateTask(req, session, teamCreateTaskMatch[1]);
+        const teamLinkThreadMatch = pathname.match(/^\/t\/([^/]+)\/api\/tasks\/(\d+)\/link$/);
+        if (teamLinkThreadMatch) return handleTeamLinkThreadToTask(req, session, teamLinkThreadMatch[1], Number(teamLinkThreadMatch[2]));
+
         if (pathname === "/api/assets/upload") return handleAssetUpload(req, session);
         if (pathname === "/ai/summary") return handleSummaryPost(req);
         if (pathname === "/ai/tasks") return handleAiTasksPost(req);
@@ -387,6 +768,43 @@ const server = Bun.serve({
       }
 
       if (req.method === "PATCH") {
+        // Team routes
+        const updateTeamMatch = pathname.match(/^\/api\/teams\/(\d+)$/);
+        if (updateTeamMatch) return handleUpdateTeam(req, session, Number(updateTeamMatch[1]));
+        const updateTeamMemberMatch = pathname.match(/^\/api\/teams\/(\d+)\/members\/([^/]+)$/);
+        if (updateTeamMemberMatch) {
+          return handleUpdateTeamMember(
+            req,
+            session,
+            Number(updateTeamMemberMatch[1]),
+            decodeURIComponent(updateTeamMemberMatch[2])
+          );
+        }
+
+        // Team-scoped PATCH routes
+        const teamUpdateChannelMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)$/);
+        if (teamUpdateChannelMatch) {
+          return handleTeamUpdateChannel(req, session, teamUpdateChannelMatch[1], Number(teamUpdateChannelMatch[2]));
+        }
+        const teamUpdateGroupMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)$/);
+        if (teamUpdateGroupMatch) {
+          return handleTeamUpdateGroup(req, session, teamUpdateGroupMatch[1], Number(teamUpdateGroupMatch[2]));
+        }
+
+        // Team-scoped CRM PATCH routes
+        const teamUpdateCrmCompanyMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/companies\/(\d+)$/);
+        if (teamUpdateCrmCompanyMatch) {
+          return handleTeamUpdateCompany(req, session, teamUpdateCrmCompanyMatch[1], Number(teamUpdateCrmCompanyMatch[2]));
+        }
+        const teamUpdateCrmContactMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/contacts\/(\d+)$/);
+        if (teamUpdateCrmContactMatch) {
+          return handleTeamUpdateContact(req, session, teamUpdateCrmContactMatch[1], Number(teamUpdateCrmContactMatch[2]));
+        }
+        const teamUpdateCrmOpportunityMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/opportunities\/(\d+)$/);
+        if (teamUpdateCrmOpportunityMatch) {
+          return handleTeamUpdateOpportunity(req, session, teamUpdateCrmOpportunityMatch[1], Number(teamUpdateCrmOpportunityMatch[2]));
+        }
+
         const updateChannelMatch = pathname.match(/^\/chat\/channels\/(\d+)$/);
         if (updateChannelMatch) return handleUpdateChannel(req, session, Number(updateChannelMatch[1]));
         const updateGroupMatch = pathname.match(/^\/chat\/groups\/(\d+)$/);
@@ -411,6 +829,91 @@ const server = Bun.serve({
       }
 
       if (req.method === "DELETE") {
+        // Team routes
+        const deleteTeamMatch = pathname.match(/^\/api\/teams\/(\d+)$/);
+        if (deleteTeamMatch) return handleDeleteTeam(session, Number(deleteTeamMatch[1]));
+        const removeTeamMemberMatch = pathname.match(/^\/api\/teams\/(\d+)\/members\/([^/]+)$/);
+        if (removeTeamMemberMatch) {
+          return handleRemoveTeamMember(
+            session,
+            Number(removeTeamMemberMatch[1]),
+            decodeURIComponent(removeTeamMemberMatch[2])
+          );
+        }
+        const deleteTeamInviteMatch = pathname.match(/^\/api\/teams\/(\d+)\/invitations\/(\d+)$/);
+        if (deleteTeamInviteMatch) {
+          return handleDeleteTeamInvitation(
+            session,
+            Number(deleteTeamInviteMatch[1]),
+            Number(deleteTeamInviteMatch[2])
+          );
+        }
+
+        // Team-scoped DELETE routes
+        const teamDeleteMessageMatch = pathname.match(/^\/t\/([^/]+)\/chat\/messages\/(\d+)$/);
+        if (teamDeleteMessageMatch) {
+          return handleTeamDeleteMessage(session, teamDeleteMessageMatch[1], Number(teamDeleteMessageMatch[2]));
+        }
+
+        const teamDeleteChannelMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)$/);
+        if (teamDeleteChannelMatch) {
+          return handleTeamDeleteChannel(session, teamDeleteChannelMatch[1], Number(teamDeleteChannelMatch[2]));
+        }
+
+        const teamRemoveChannelGroupMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/groups\/(\d+)$/);
+        if (teamRemoveChannelGroupMatch) {
+          return handleTeamRemoveChannelGroup(
+            session,
+            teamRemoveChannelGroupMatch[1],
+            Number(teamRemoveChannelGroupMatch[2]),
+            Number(teamRemoveChannelGroupMatch[3])
+          );
+        }
+
+        // Team-scoped group DELETE routes
+        const teamDeleteGroupMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)$/);
+        if (teamDeleteGroupMatch) {
+          return handleTeamDeleteGroup(session, teamDeleteGroupMatch[1], Number(teamDeleteGroupMatch[2]));
+        }
+        const teamRemoveGroupMemberMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/members\/([^/]+)$/);
+        if (teamRemoveGroupMemberMatch) {
+          return handleTeamRemoveGroupMember(
+            session,
+            teamRemoveGroupMemberMatch[1],
+            Number(teamRemoveGroupMemberMatch[2]),
+            decodeURIComponent(teamRemoveGroupMemberMatch[3])
+          );
+        }
+
+        // Team-scoped CRM DELETE routes
+        const teamDeleteCrmCompanyMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/companies\/(\d+)$/);
+        if (teamDeleteCrmCompanyMatch) {
+          return handleTeamDeleteCompany(session, teamDeleteCrmCompanyMatch[1], Number(teamDeleteCrmCompanyMatch[2]));
+        }
+        const teamDeleteCrmContactMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/contacts\/(\d+)$/);
+        if (teamDeleteCrmContactMatch) {
+          return handleTeamDeleteContact(session, teamDeleteCrmContactMatch[1], Number(teamDeleteCrmContactMatch[2]));
+        }
+        const teamDeleteCrmOpportunityMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/opportunities\/(\d+)$/);
+        if (teamDeleteCrmOpportunityMatch) {
+          return handleTeamDeleteOpportunity(session, teamDeleteCrmOpportunityMatch[1], Number(teamDeleteCrmOpportunityMatch[2]));
+        }
+        const teamDeleteCrmActivityMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/activities\/(\d+)$/);
+        if (teamDeleteCrmActivityMatch) {
+          return handleTeamDeleteActivity(session, teamDeleteCrmActivityMatch[1], Number(teamDeleteCrmActivityMatch[2]));
+        }
+
+        // Team-scoped tasks DELETE routes
+        const teamUnlinkThreadMatch = pathname.match(/^\/t\/([^/]+)\/api\/tasks\/(\d+)\/unlink\/(\d+)$/);
+        if (teamUnlinkThreadMatch) {
+          return handleTeamUnlinkThreadFromTask(
+            session,
+            teamUnlinkThreadMatch[1],
+            Number(teamUnlinkThreadMatch[2]),
+            Number(teamUnlinkThreadMatch[3])
+          );
+        }
+
         // Message delete (author or admin)
         const deleteMessageMatch = pathname.match(/^\/chat\/messages\/(\d+)$/);
         if (deleteMessageMatch) return handleDeleteMessage(session, Number(deleteMessageMatch[1]));

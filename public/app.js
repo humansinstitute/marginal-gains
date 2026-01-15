@@ -9,6 +9,7 @@ import { initSettings } from "./settings.js";
 import { initKanban } from "./kanban.js";
 import { initTaskModal } from "./taskModal.js";
 import { initOnboarding } from "./onboarding.js";
+import { initTeams } from "./teams.js";
 
 window.addEventListener("load", focusHeroInput);
 
@@ -19,6 +20,7 @@ initAuth();
 initTagInputs();
 initOnboarding();
 initChat();
-initSettings();
+initSettings().catch((err) => console.error("[Settings] Init error:", err));
 initKanban();
 initTaskModal();
+initTeams();

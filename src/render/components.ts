@@ -2,7 +2,7 @@ import { isAdmin } from "../config";
 
 import type { Session } from "../types";
 
-export type ActivePage = "settings" | "chat" | "tasks" | "crm";
+export type ActivePage = "teams" | "settings" | "team-settings" | "app-settings" | "chat" | "tasks" | "crm";
 
 export function renderPinModal() {
   const numpadButtons = [1, 2, 3, 4, 5, 6, 7, 8, 9, "clear", 0, "back"]
@@ -37,12 +37,41 @@ export function renderPinModal() {
 }
 
 export function renderAppMenu(session: Session | null, activePage: ActivePage) {
-  const settingsLink = session
-    ? `<li><a href="/settings" class="app-menu-item${activePage === "settings" ? " active" : ""}">Settings</a></li>`
+  // Team selector is first in the menu
+  const teamSelector = session ? renderTeamSelector(session) : "";
+
+  // Build team-scoped links if team is selected
+  const teamSlug = session?.currentTeamSlug;
+  const chatHref = teamSlug ? `/t/${teamSlug}/chat` : "/chat";
+  const tasksHref = teamSlug ? `/t/${teamSlug}/todo` : "/todo";
+  const teamConfigHref = teamSlug ? `/t/${teamSlug}/config` : null;
+
+  // CRM link - team-scoped for managers, global for admins
+  const crmHref = teamSlug ? `/t/${teamSlug}/crm` : "/crm";
+  // In team context, show to team managers (owner/manager role)
+  // Outside team context, show to admins only
+  const currentMembership = session?.teamMemberships?.find(
+    (m) => m.teamSlug === teamSlug
+  );
+  const isTeamManager = currentMembership?.role === "owner" || currentMembership?.role === "manager";
+  const canAccessCrm = session && (teamSlug ? isTeamManager : isAdmin(session.npub));
+  const crmLink = canAccessCrm
+    ? `<li><a href="${crmHref}" class="app-menu-item${activePage === "crm" ? " active" : ""}">CRM</a></li>`
     : "";
 
-  const crmLink = session && isAdmin(session.npub)
-    ? `<li><a href="/crm" class="app-menu-item${activePage === "crm" ? " active" : ""}">CRM</a></li>`
+  // Team settings link (only if in a team context)
+  const teamSettingsLink = session && teamConfigHref
+    ? `<li><a href="${teamConfigHref}" class="app-menu-item${activePage === "team-settings" ? " active" : ""}">Team Settings</a></li>`
+    : "";
+
+  // Personal settings link
+  const personalSettingsLink = session
+    ? `<li><a href="/settings" class="app-menu-item${activePage === "settings" ? " active" : ""}">Personal Settings</a></li>`
+    : "";
+
+  // App settings link (admin only)
+  const appSettingsLink = session && isAdmin(session.npub)
+    ? `<li><a href="/admin/settings" class="app-menu-item${activePage === "app-settings" ? " active" : ""}">App Settings</a></li>`
     : "";
 
   return `<nav class="app-menu" data-app-menu hidden>
@@ -52,12 +81,71 @@ export function renderAppMenu(session: Session | null, activePage: ActivePage) {
         <span class="app-menu-title">Menu</span>
         <button type="button" class="app-menu-close" data-app-menu-close>&times;</button>
       </div>
+      ${teamSelector}
       <ul class="app-menu-list">
-        ${settingsLink}
-        <li><a href="/chat" class="app-menu-item${activePage === "chat" ? " active" : ""}">Chat</a></li>
-        <li><a href="/todo" class="app-menu-item${activePage === "tasks" ? " active" : ""}">Tasks</a></li>
+        <li><a href="${chatHref}" class="app-menu-item${activePage === "chat" ? " active" : ""}">Chat</a></li>
+        <li><a href="${tasksHref}" class="app-menu-item${activePage === "tasks" ? " active" : ""}">Tasks</a></li>
         ${crmLink}
+        ${teamSettingsLink}
+      </ul>
+      <hr class="app-menu-divider" />
+      <ul class="app-menu-list">
+        ${personalSettingsLink}
+        ${appSettingsLink}
       </ul>
     </div>
   </nav>`;
+}
+
+/**
+ * Render the team selector dropdown (first item in menu)
+ * Shows current team and allows switching between teams
+ */
+function renderTeamSelector(session: Session) {
+  const currentTeam = session.currentTeamSlug
+    ? session.teamMemberships?.find((m) => m.teamSlug === session.currentTeamSlug)
+    : null;
+
+  const teamName = currentTeam?.displayName || "Select Team";
+  const hasMultipleTeams = (session.teamMemberships?.length || 0) > 1;
+
+  return `<div class="team-selector" data-team-selector>
+    <button type="button" class="team-selector-btn" data-team-selector-btn>
+      <span class="team-selector-icon">${currentTeam ? teamName.slice(0, 2).toUpperCase() : "?"}</span>
+      <span class="team-selector-name">${escapeHtml(teamName)}</span>
+      ${hasMultipleTeams ? `<span class="team-selector-arrow">&#9662;</span>` : ""}
+    </button>
+    <div class="team-selector-dropdown" data-team-dropdown hidden>
+      ${renderTeamDropdownItems(session)}
+      <div class="team-selector-divider"></div>
+      <a href="/teams?manage=1" class="team-selector-item team-selector-manage">Manage Teams</a>
+    </div>
+  </div>`;
+}
+
+function renderTeamDropdownItems(session: Session) {
+  if (!session.teamMemberships || session.teamMemberships.length === 0) {
+    return `<span class="team-selector-empty">No teams</span>`;
+  }
+
+  return session.teamMemberships
+    .map(
+      (team) => `<button type="button" class="team-selector-item${
+        team.teamSlug === session.currentTeamSlug ? " active" : ""
+      }" data-switch-team="${team.teamSlug}">
+      <span class="team-selector-icon">${team.displayName.slice(0, 2).toUpperCase()}</span>
+      <span>${escapeHtml(team.displayName)}</span>
+      ${team.teamSlug === session.currentTeamSlug ? `<span class="team-check">&#10003;</span>` : ""}
+    </button>`
+    )
+    .join("");
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }

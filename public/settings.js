@@ -1,3 +1,4 @@
+import { chatUrl, teamUrl } from "./api.js";
 import { initAppSettings } from "./appSettings.js";
 import { clearBunkerConnection, hasBunkerConnection } from "./auth.js";
 import { distributeKeysToAllPendingMembers } from "./chatCrypto.js";
@@ -26,6 +27,37 @@ let groupMembers = [];
 
 // Initialize settings page
 export async function initSettings() {
+  try {
+    // Handle Personal Settings page
+    if (window.__PERSONAL_SETTINGS_PAGE__) {
+      initAccountSection();
+      await initNotifications();
+      return;
+    }
+
+    // Handle App Settings page (admin only)
+    if (window.__APP_SETTINGS_PAGE__) {
+      await initAppSettings();
+      return;
+    }
+
+    // Handle Team Settings page
+    if (window.__TEAM_SETTINGS_PAGE__) {
+      // Wingman AI settings for team
+      await initWingmanSettings();
+
+      // Groups management for team
+      await Promise.all([fetchGroups(), fetchUsers()]);
+      renderGroups();
+      wireEventListeners();
+      return;
+    }
+  } catch (err) {
+    console.error("[Settings] Error during initialization:", err);
+    throw err;
+  }
+
+  // Legacy: Handle old combined settings page
   if (!window.__SETTINGS_PAGE__) return;
 
   // Account section is available to all users
@@ -95,7 +127,7 @@ function initAccountSection() {
 // Fetch all groups
 async function fetchGroups() {
   try {
-    const res = await fetch("/chat/groups");
+    const res = await fetch(teamUrl("/groups"));
     if (!res.ok) return;
     groups = await res.json();
   } catch (_err) {
@@ -106,7 +138,7 @@ async function fetchGroups() {
 // Fetch all users for autocomplete
 async function fetchUsers() {
   try {
-    const res = await fetch("/chat/users");
+    const res = await fetch(chatUrl("/users"));
     if (!res.ok) return;
     users = await res.json();
     updateUserSuggestions();
@@ -197,7 +229,7 @@ async function selectGroup(groupId) {
 // Fetch members for a group
 async function fetchGroupMembers(groupId) {
   try {
-    const res = await fetch(`/chat/groups/${groupId}/members`);
+    const res = await fetch(teamUrl(`/groups/${groupId}/members`));
     if (!res.ok) return;
     groupMembers = await res.json();
     renderMembers();
@@ -246,7 +278,7 @@ function renderMembers() {
 // Create a new group
 async function createGroup(name, description) {
   try {
-    const res = await fetch("/chat/groups", {
+    const res = await fetch(teamUrl("/groups"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, description }),
@@ -270,7 +302,7 @@ async function createGroup(name, description) {
 // Delete a group
 async function deleteGroup(groupId) {
   try {
-    const res = await fetch(`/chat/groups/${groupId}`, { method: "DELETE" });
+    const res = await fetch(teamUrl(`/groups/${groupId}`), { method: "DELETE" });
     if (res.ok) {
       groups = groups.filter((g) => g.id !== groupId);
       if (selectedGroupId === groupId) {
@@ -305,7 +337,7 @@ async function addMember(npub) {
   }
 
   try {
-    const res = await fetch(`/chat/groups/${selectedGroupId}/members`, {
+    const res = await fetch(teamUrl(`/groups/${selectedGroupId}/members`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ npubs: [npub] }),
@@ -343,7 +375,7 @@ async function removeMember(npub) {
   if (!selectedGroupId) return;
 
   try {
-    const res = await fetch(`/chat/groups/${selectedGroupId}/members/${encodeURIComponent(npub)}`, {
+    const res = await fetch(teamUrl(`/groups/${selectedGroupId}/members/${encodeURIComponent(npub)}`), {
       method: "DELETE",
     });
     if (res.ok) {

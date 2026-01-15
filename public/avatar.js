@@ -1,3 +1,4 @@
+import { chatUrl } from "./api.js";
 import { DEFAULT_RELAYS, PROFILE_CACHE_KEY } from "./constants.js";
 import { elements as el, hide, show } from "./dom.js";
 import { loadApplesauceLibs, loadNostrLibs } from "./nostr.js";
@@ -319,7 +320,7 @@ async function publishProfile(metadata) {
 
   // Save to server database for other users to see
   try {
-    await fetch("/chat/users", {
+    await fetch(chatUrl("/users"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -377,7 +378,7 @@ export const updateAvatar = async () => {
   // Save current user's profile to server for other users to see
   if (profile) {
     try {
-      await fetch("/chat/users", {
+      await fetch(chatUrl("/users"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
