@@ -1278,14 +1278,15 @@ function buildTeamPageState(
 function renderTeamContextSwitcher(userGroups: Group[], selectedGroup: Group | null, teamSlug: string, viewMode: ViewMode): string {
   if (userGroups.length === 0) return "";
 
+  const basePath = `/t/${teamSlug}/todo/${viewMode}`;
   const options = [
-    `<option value="">Personal</option>`,
+    `<option value="${basePath}" ${!selectedGroup ? "selected" : ""}>Personal</option>`,
     ...userGroups.map(
-      (g) => `<option value="${g.id}" ${selectedGroup?.id === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`
+      (g) => `<option value="${basePath}?group=${g.id}" ${selectedGroup?.id === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`
     ),
   ].join("");
 
-  return `<select class="context-switcher" data-context-switcher data-team-slug="${teamSlug}" data-view-mode="${viewMode}" title="Switch context">${options}</select>`;
+  return `<select class="context-switcher" data-context-switcher title="Switch context">${options}</select>`;
 }
 
 function renderTeamTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null, teamSlug: string, viewMode: ViewMode) {
