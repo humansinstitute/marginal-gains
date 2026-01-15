@@ -432,7 +432,7 @@ export class TeamDatabase {
 
   listMessages(channelId: number): Message[] {
     return this.db.query<Message, [number]>(
-      "SELECT * FROM messages WHERE channel_id = ? AND thread_root_id IS NULL ORDER BY created_at ASC"
+      "SELECT * FROM messages WHERE channel_id = ? ORDER BY created_at ASC"
     ).all(channelId);
   }
 
