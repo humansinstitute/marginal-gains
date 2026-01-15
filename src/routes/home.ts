@@ -1,9 +1,9 @@
-import { getGroup, getGroupsForUser } from "../db";
+import { getGroup, getGroupsForUser, listGroupMembers } from "../db";
 import { renderHomePage } from "../render/home";
 import { renderLandingPage } from "../render/landing";
-import { canManageGroupTodo, listOwnerTodos, listTodosForGroup } from "../services/todos";
+import { canManageGroupTodo, listAllUserAssignedTodos, listOwnerTodos, listTodosForGroup } from "../services/todos";
 
-import type { Group } from "../db";
+import type { Group, GroupMember } from "../db";
 import type { Session } from "../types";
 
 export function handleHome(session: Session | null) {
@@ -25,7 +25,9 @@ export function handleHome(session: Session | null) {
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-export function handleTodos(url: URL, session: Session | null) {
+export type ViewMode = "kanban" | "list";
+
+export function handleTodos(url: URL, session: Session | null, viewMode: ViewMode = "kanban") {
   const tagsParam = url.searchParams.get("tags");
   const filterTags = tagsParam ? tagsParam.split(",").map((t) => t.trim()).filter(Boolean) : [];
   const showArchive = url.searchParams.get("archive") === "1";
@@ -34,21 +36,37 @@ export function handleTodos(url: URL, session: Session | null) {
   const groupParam = url.searchParams.get("group");
   const groupId = groupParam ? Number(groupParam) : null;
 
+  // Parse view mode (all = all my tasks across boards)
+  const viewParam = url.searchParams.get("view");
+  const isAllTasksView = viewParam === "all";
+
+  // Parse "my tasks" filter for group boards
+  const mineFilter = url.searchParams.get("mine") === "1";
+
   let todos: ReturnType<typeof listOwnerTodos> = [];
   let userGroups: Group[] = [];
   let selectedGroup: Group | null = null;
   let canManage = true; // default for personal todos
+  let groupMembers: Array<GroupMember & { display_name: string | null; picture: string | null }> = [];
 
   if (session) {
     // Get user's groups for the dropdown
     userGroups = getGroupsForUser(session.npub);
 
-    if (groupId && Number.isInteger(groupId) && groupId > 0) {
+    if (isAllTasksView) {
+      // "All My Tasks" view - aggregate tasks assigned to user across all boards
+      todos = listAllUserAssignedTodos(session.npub, filterTags);
+      canManage = true; // User can manage their own assigned tasks
+    } else if (groupId && Number.isInteger(groupId) && groupId > 0) {
       // Viewing group todos
       selectedGroup = getGroup(groupId) ?? null;
       if (selectedGroup) {
-        todos = listTodosForGroup(groupId);
+        // Apply "my tasks" filter if set
+        const assigneeFilter = mineFilter ? session.npub : undefined;
+        todos = listTodosForGroup(groupId, filterTags, assigneeFilter);
         canManage = canManageGroupTodo(session.npub, groupId);
+        // Get group members for assignee dropdown
+        groupMembers = listGroupMembers(groupId);
       }
     } else {
       // Viewing personal todos
@@ -64,6 +82,20 @@ export function handleTodos(url: URL, session: Session | null) {
     userGroups,
     selectedGroup,
     canManage,
+    isAllTasksView,
+    mineFilter,
+    groupMembers,
+    viewMode,
   });
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+
+export function handleTodosRedirect(url: URL) {
+  // Redirect /todo to /todo/kanban, preserving query params
+  const newUrl = new URL(url);
+  newUrl.pathname = "/todo/kanban";
+  return new Response(null, {
+    status: 302,
+    headers: { Location: newUrl.pathname + newUrl.search },
+  });
 }

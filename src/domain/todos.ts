@@ -1,13 +1,14 @@
 import type { TodoPriority, TodoState } from "../types";
 
-export const TODO_STATES: TodoState[] = ["new", "ready", "in_progress", "done"];
+export const TODO_STATES: TodoState[] = ["new", "ready", "in_progress", "review", "done"];
 export const TODO_PRIORITIES: TodoPriority[] = ["rock", "pebble", "sand"];
 
 export const ALLOWED_STATE_TRANSITIONS: Record<TodoState, TodoState[]> = {
-  new: ["ready"],
-  ready: ["in_progress", "done"],
-  in_progress: ["done"],
-  done: ["ready"],
+  new: ["ready", "in_progress", "review", "done"],
+  ready: ["new", "in_progress", "review", "done"],
+  in_progress: ["ready", "review", "done"],
+  review: ["in_progress", "done"],
+  done: ["ready", "in_progress", "review"],
 };
 
 export function normalizePriority(input: string): TodoPriority {
@@ -32,6 +33,7 @@ export function isAllowedTransition(current: TodoState, next: TodoState) {
 
 export function formatStateLabel(state: TodoState) {
   if (state === "in_progress") return "In Progress";
+  if (state === "review") return "Review";
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
 

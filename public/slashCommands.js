@@ -14,6 +14,11 @@ let commands = [];
 let activeInput = null; // Track which input is active
 let activePopup = null; // Track which popup is active
 
+// Client-side only commands (handled in chat.js, not sent to server)
+const clientSideCommands = [
+  { name: "hang", description: "Start a hang.live video/voice chat room" },
+];
+
 /**
  * Initialize slash commands by fetching available commands from server
  */
@@ -26,6 +31,9 @@ export async function init() {
   } catch (_err) {
     console.error("[SlashCommands] Failed to fetch commands");
   }
+
+  // Add client-side only commands (always available)
+  commands = [...commands, ...clientSideCommands];
 }
 
 /**

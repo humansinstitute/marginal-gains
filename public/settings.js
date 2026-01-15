@@ -13,6 +13,7 @@ import {
   submitMigrationBatch,
   completeMigration,
 } from "./communityCrypto.js";
+import { formatUnixDate } from "./dateUtils.js";
 import { elements as el, hide, show, escapeHtml } from "./dom.js";
 import { initNotifications } from "./notifications.js";
 import { state } from "./state.js";
@@ -529,8 +530,7 @@ function renderInviteCodes() {
 
   container.innerHTML = inviteCodes
     .map((invite) => {
-      const expiresDate = new Date(invite.expiresAt * 1000);
-      const expiresStr = expiresDate.toLocaleDateString();
+      const expiresStr = formatUnixDate(invite.expiresAt);
       const useType = invite.singleUse ? "Single-use" : "Multi-use";
       const usedCount = invite.redeemedCount || 0;
 

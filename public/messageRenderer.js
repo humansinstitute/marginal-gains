@@ -1,5 +1,7 @@
 // Message rendering module
 import { escapeHtml } from "./dom.js";
+import { formatReplyTimestamp, formatSmartTimestamp } from "./dateUtils.js";
+import { renderQuickReactBar, renderReactionPills } from "./reactions.js";
 
 // Dependencies injected via init
 let getAuthorDisplayName = () => "Unknown";
@@ -15,16 +17,8 @@ export function init(deps) {
   if (deps.userCache) userCache = deps.userCache;
 }
 
-// Format timestamp as dd/mm/yy @ hh:mm
-export function formatReplyTimestamp(dateStr) {
-  const d = new Date(dateStr);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = String(d.getFullYear()).slice(-2);
-  const hours = String(d.getHours()).padStart(2, "0");
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  return `${day}/${month}/${year} @ ${hours}:${minutes}`;
-}
+// Re-export formatReplyTimestamp for backwards compatibility
+export { formatReplyTimestamp } from "./dateUtils.js";
 
 // Get icon for file type
 export function getFileIcon(ext) {
@@ -116,37 +110,49 @@ export function renderMessageMenu(message, { isThreadRoot = false, threadRootId 
 
 // Render compact message (with optional avatar)
 export function renderMessageCompact(message, { showAvatar = false, isThreadRoot = false, threadRootId = null } = {}) {
+  const ctx = getContext();
+  const currentUserNpub = ctx.session?.npub || "";
   const avatarHtml = showAvatar
     ? `<img class="chat-message-avatar" src="${escapeHtml(getAuthorAvatarUrl(message.author))}" alt="" loading="lazy" />`
     : "";
   const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
+  const reactionsHtml = renderReactionPills(message.reactions, message.id, currentUserNpub);
+  const quickReactHtml = renderQuickReactBar(message.id);
   return `<div class="chat-message${showAvatar ? " chat-message-with-avatar" : ""}" data-message-id="${message.id}">
     ${avatarHtml}
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
-        <time>${new Date(message.createdAt).toLocaleTimeString()}</time>
+        <time>${formatSmartTimestamp(message.createdAt)}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
+      ${reactionsHtml}
       ${menuHtml}
     </div>
+    ${quickReactHtml}
   </div>`;
 }
 
 // Render full message with avatar
 export function renderMessageFull(message, { isThreadRoot = false, threadRootId = null } = {}) {
+  const ctx = getContext();
+  const currentUserNpub = ctx.session?.npub || "";
   const avatarUrl = getAuthorAvatarUrl(message.author);
   const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
+  const reactionsHtml = renderReactionPills(message.reactions, message.id, currentUserNpub);
+  const quickReactHtml = renderQuickReactBar(message.id);
   return `<div class="chat-message chat-message-with-avatar" data-message-id="${message.id}">
     <img class="chat-thread-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
-        <time>${new Date(message.createdAt).toLocaleTimeString()}</time>
+        <time>${formatSmartTimestamp(message.createdAt)}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
+      ${reactionsHtml}
       ${menuHtml}
     </div>
+    ${quickReactHtml}
   </div>`;
 }
 

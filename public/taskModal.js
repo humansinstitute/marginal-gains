@@ -1,6 +1,7 @@
 import { show, hide } from "./dom.js";
 
 let currentTaskId = null;
+let currentTaskOwner = null;
 
 const el = {
   overlay: null,
@@ -10,11 +11,17 @@ const el = {
   priority: null,
   state: null,
   scheduled: null,
+  board: null,
+  groupId: null,
+  assignee: null,
+  assigneeLabel: null,
   tagsWrapper: null,
   tagsHidden: null,
   closeBtn: null,
   cancelBtn: null,
   deleteBtn: null,
+  linksSection: null,
+  linksList: null,
 };
 
 export function initTaskModal() {
@@ -25,11 +32,17 @@ export function initTaskModal() {
   el.priority = document.querySelector("[data-task-modal-priority]");
   el.state = document.querySelector("[data-task-modal-state]");
   el.scheduled = document.querySelector("[data-task-modal-scheduled]");
+  el.board = document.querySelector("[data-task-modal-board]");
+  el.groupId = document.querySelector("[data-task-modal-group-id]");
+  el.assignee = document.querySelector("[data-task-modal-assignee]");
+  el.assigneeLabel = document.querySelector("[data-task-modal-assignee-label]");
   el.tagsWrapper = document.querySelector("[data-task-modal-tags-wrapper]");
   el.tagsHidden = document.querySelector("[data-task-modal-tags-hidden]");
   el.closeBtn = document.querySelector("[data-task-modal-close]");
   el.cancelBtn = document.querySelector("[data-task-modal-cancel]");
   el.deleteBtn = document.querySelector("[data-task-modal-delete]");
+  el.linksSection = document.querySelector("[data-task-modal-links]");
+  el.linksList = document.querySelector("[data-task-modal-links-list]");
 
   if (!el.overlay) return;
 
@@ -45,6 +58,9 @@ export function initTaskModal() {
 
   // Form submit
   el.form?.addEventListener("submit", handleSubmit);
+
+  // Board change handler
+  el.board?.addEventListener("change", handleBoardChange);
 
   // Tag input handling
   initTagInput();
@@ -83,13 +99,15 @@ export function initTaskModal() {
   });
 }
 
-function openModalForTask(todoId, card) {
+async function openModalForTask(todoId, card) {
   currentTaskId = todoId;
 
   // Extract data from the card
   const title = card.querySelector(".kanban-card-title")?.textContent || "";
   const desc = card.querySelector(".kanban-card-desc")?.textContent || "";
   const state = card.dataset.todoState || "ready";
+  const assigned_to = card.dataset.assignedTo || "";
+  const group_id = card.dataset.groupId || "";
 
   // Get priority from badge
   const badge = card.querySelector(".badge");
@@ -99,15 +117,18 @@ function openModalForTask(todoId, card) {
   else if (badge?.classList.contains("priority-sand")) priority = "sand";
 
   // Get tags
-  const tagChips = card.querySelectorAll(".tag-chip");
+  const tagChips = card.querySelectorAll(".kanban-card-meta .tag-chip");
   const tags = Array.from(tagChips).map(chip => chip.textContent.trim()).join(",");
 
-  populateModal({ title, description: desc, priority, state, scheduled_for: "", tags });
+  populateModal({ title, description: desc, priority, state, scheduled_for: "", tags, assigned_to, group_id });
   show(el.overlay);
   el.title?.focus();
+
+  // Fetch and display task links
+  await fetchAndDisplayLinks(todoId);
 }
 
-function openModalFromListItem(todoId, details) {
+async function openModalFromListItem(todoId, details) {
   currentTaskId = todoId;
 
   // Extract data from the details element
@@ -120,19 +141,39 @@ function openModalFromListItem(todoId, details) {
   const state = editForm.querySelector("[name='state']")?.value || "ready";
   const scheduled_for = editForm.querySelector("[name='scheduled_for']")?.value || "";
   const tags = editForm.querySelector("[name='tags']")?.value || "";
+  const assigned_to = editForm.querySelector("[name='assigned_to']")?.value || "";
+  const group_id = editForm.querySelector("[name='group_id']")?.value || "";
 
-  populateModal({ title, description, priority, state, scheduled_for, tags });
+  populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id });
   show(el.overlay);
   el.title?.focus();
+
+  // Fetch and display task links
+  await fetchAndDisplayLinks(todoId);
 }
 
-function populateModal({ title, description, priority, state, scheduled_for, tags }) {
+function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id }) {
   if (el.title) el.title.value = title;
   if (el.description) el.description.value = description;
   if (el.priority) el.priority.value = priority;
   if (el.state) el.state.value = state;
   if (el.scheduled) el.scheduled.value = scheduled_for || "";
   if (el.tagsHidden) el.tagsHidden.value = tags || "";
+
+  // Set board selector and hidden group_id
+  if (el.board) el.board.value = group_id || "";
+  if (el.groupId) el.groupId.value = group_id || "";
+
+  // Update assignee field visibility and value based on board
+  updateAssigneeVisibility(group_id);
+  if (el.assignee) el.assignee.value = assigned_to || "";
+
+  // If switching to a group board, fetch members for assignee dropdown
+  if (group_id) {
+    fetchGroupMembers(group_id).then(() => {
+      if (el.assignee) el.assignee.value = assigned_to || "";
+    });
+  }
 
   // Update form action
   if (el.form) {
@@ -247,6 +288,208 @@ async function handleDelete() {
   form.action = `/todos/${currentTaskId}/delete`;
   document.body.appendChild(form);
   form.submit();
+}
+
+function handleBoardChange() {
+  const newGroupId = el.board?.value || "";
+
+  // Update hidden group_id field
+  if (el.groupId) el.groupId.value = newGroupId;
+
+  // Update assignee visibility
+  updateAssigneeVisibility(newGroupId);
+
+  // Clear assignee when changing boards (will be handled by backend based on rules)
+  if (el.assignee) el.assignee.value = "";
+
+  // Fetch group members if switching to a group
+  if (newGroupId) {
+    fetchGroupMembers(newGroupId);
+  }
+}
+
+function updateAssigneeVisibility(groupId) {
+  if (!el.assigneeLabel) return;
+
+  if (groupId) {
+    // Show assignee field for group boards
+    el.assigneeLabel.hidden = false;
+  } else {
+    // Hide assignee field for personal board (auto-assigns to owner)
+    el.assigneeLabel.hidden = true;
+  }
+}
+
+async function fetchGroupMembers(groupId) {
+  if (!el.assignee || !groupId) return;
+
+  try {
+    const res = await fetch(`/api/groups/${groupId}/members`);
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const members = data.members || [];
+
+    // Rebuild assignee dropdown options
+    const currentValue = el.assignee.value;
+    el.assignee.innerHTML = `<option value="">Unassigned</option>` +
+      members.map(m => {
+        const displayName = m.display_name || m.npub.slice(0, 12) + "...";
+        return `<option value="${m.npub}">${escapeHtml(displayName)}</option>`;
+      }).join("");
+
+    // Restore previous value if still valid
+    if (currentValue && members.some(m => m.npub === currentValue)) {
+      el.assignee.value = currentValue;
+    }
+  } catch (err) {
+    console.error("Failed to fetch group members:", err);
+  }
+}
+
+async function fetchAndDisplayLinks(todoId) {
+  if (!el.linksSection || !el.linksList) return;
+
+  // Clear previous links
+  el.linksList.innerHTML = "";
+
+  try {
+    const res = await fetch(`/api/tasks/${todoId}/all-links`);
+    if (!res.ok) {
+      el.linksSection.hidden = true;
+      return;
+    }
+
+    const data = await res.json();
+    const crmLinks = data.crm_links || [];
+    const threadLinks = data.thread_links || [];
+
+    if (crmLinks.length === 0 && threadLinks.length === 0) {
+      el.linksSection.hidden = true;
+      return;
+    }
+
+    el.linksSection.hidden = false;
+
+    // Render CRM links
+    crmLinks.forEach(link => {
+      const linkItem = createCrmLinkItem(link);
+      el.linksList.appendChild(linkItem);
+    });
+
+    // Render thread links
+    threadLinks.forEach(link => {
+      const linkItem = createThreadLinkItem(link);
+      el.linksList.appendChild(linkItem);
+    });
+  } catch (err) {
+    console.error("Failed to fetch task links:", err);
+    el.linksSection.hidden = true;
+  }
+}
+
+function createCrmLinkItem(link) {
+  const item = document.createElement("div");
+  item.className = "task-modal-link-item";
+
+  // Determine entity type and name
+  let entityType = "";
+  let entityName = "";
+  let entityUrl = "";
+
+  if (link.contact_id && link.contact_name) {
+    entityType = "Contact";
+    entityName = link.contact_name;
+    entityUrl = `/crm?view=contact&id=${link.contact_id}`;
+  } else if (link.company_id && link.company_name) {
+    entityType = "Company";
+    entityName = link.company_name;
+    entityUrl = `/crm?view=company&id=${link.company_id}`;
+  } else if (link.activity_id) {
+    entityType = "Activity";
+    entityName = link.activity_subject || link.activity_type || "Activity";
+    entityUrl = `/crm?view=activities`;
+  } else if (link.opportunity_id && link.opportunity_title) {
+    entityType = "Opportunity";
+    entityName = link.opportunity_title;
+    entityUrl = `/crm?view=opportunity&id=${link.opportunity_id}`;
+  }
+
+  item.innerHTML = `
+    <span class="task-modal-link-type">${escapeHtml(entityType)}</span>
+    <a href="${entityUrl}" target="_blank" class="task-modal-link-name">${escapeHtml(entityName)}</a>
+    <button type="button" class="task-modal-link-unlink" data-crm-link-id="${link.id}" title="Remove link">&times;</button>
+  `;
+
+  // Add unlink handler
+  item.querySelector(".task-modal-link-unlink")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await unlinkCrmFromTask(link.id);
+  });
+
+  return item;
+}
+
+function createThreadLinkItem(link) {
+  const item = document.createElement("div");
+  item.className = "task-modal-link-item";
+
+  // Get channel info for the link
+  const channelName = link.channel_name || "";
+  const messagePreview = link.body ? link.body.slice(0, 50) + (link.body.length > 50 ? "..." : "") : "Chat thread";
+  const channelUrl = channelName ? `/chat/channel/${channelName}#message-${link.message_id}` : `/chat`;
+
+  item.innerHTML = `
+    <span class="task-modal-link-type">Thread</span>
+    <a href="${channelUrl}" target="_blank" class="task-modal-link-name">${escapeHtml(messagePreview)}</a>
+    <button type="button" class="task-modal-link-unlink" data-thread-message-id="${link.message_id}" title="Remove link">&times;</button>
+  `;
+
+  // Add unlink handler
+  item.querySelector(".task-modal-link-unlink")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await unlinkThreadFromTask(link.message_id);
+  });
+
+  return item;
+}
+
+async function unlinkCrmFromTask(linkId) {
+  if (!currentTaskId) return;
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}/crm-links/${linkId}`, {
+      method: "DELETE",
+    });
+
+    if (res.ok) {
+      // Refresh links display
+      await fetchAndDisplayLinks(currentTaskId);
+    } else {
+      console.error("Failed to unlink CRM entity");
+    }
+  } catch (err) {
+    console.error("Error unlinking CRM entity:", err);
+  }
+}
+
+async function unlinkThreadFromTask(messageId) {
+  if (!currentTaskId) return;
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}/threads/${messageId}`, {
+      method: "DELETE",
+    });
+
+    if (res.ok) {
+      // Refresh links display
+      await fetchAndDisplayLinks(currentTaskId);
+    } else {
+      console.error("Failed to unlink thread");
+    }
+  } catch (err) {
+    console.error("Error unlinking thread:", err);
+  }
 }
 
 function escapeHtml(str) {

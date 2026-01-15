@@ -1,4 +1,4 @@
-export type TodoState = "new" | "ready" | "in_progress" | "done";
+export type TodoState = "new" | "ready" | "in_progress" | "review" | "done";
 export type TodoPriority = "rock" | "pebble" | "sand";
 
 /**
