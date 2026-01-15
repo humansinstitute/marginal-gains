@@ -175,9 +175,12 @@ function populateModal({ title, description, priority, state, scheduled_for, tag
     });
   }
 
-  // Update form action
+  // Update form action - use team-scoped URL if on team page
   if (el.form) {
-    el.form.action = `/todos/${currentTaskId}/update`;
+    const teamSlug = el.form.dataset.teamSlug;
+    el.form.action = teamSlug
+      ? `/t/${teamSlug}/todos/${currentTaskId}/update`
+      : `/todos/${currentTaskId}/update`;
   }
 
   // Render tag chips
@@ -282,10 +285,15 @@ async function handleDelete() {
 
   if (!confirm("Are you sure you want to delete this task?")) return;
 
-  // Create and submit a delete form
+  // Create and submit a delete form - use team-scoped URL if on team page
+  const teamSlug = el.form?.dataset.teamSlug;
+  const deleteUrl = teamSlug
+    ? `/t/${teamSlug}/todos/${currentTaskId}/delete`
+    : `/todos/${currentTaskId}/delete`;
+
   const form = document.createElement("form");
   form.method = "POST";
-  form.action = `/todos/${currentTaskId}/delete`;
+  form.action = deleteUrl;
   document.body.appendChild(form);
   form.submit();
 }
@@ -324,7 +332,12 @@ async function fetchGroupMembers(groupId) {
   if (!el.assignee || !groupId) return;
 
   try {
-    const res = await fetch(`/api/groups/${groupId}/members`);
+    // Use team-scoped URL if on team page
+    const teamSlug = el.form?.dataset.teamSlug;
+    const membersUrl = teamSlug
+      ? `/t/${teamSlug}/groups/${groupId}/members`
+      : `/chat/groups/${groupId}/members`;
+    const res = await fetch(membersUrl);
     if (!res.ok) return;
 
     const data = await res.json();
@@ -477,7 +490,12 @@ async function unlinkThreadFromTask(messageId) {
   if (!currentTaskId) return;
 
   try {
-    const res = await fetch(`/api/tasks/${currentTaskId}/threads/${messageId}`, {
+    // Team version uses different path structure: /t/{slug}/api/tasks/{id}/unlink/{messageId}
+    const teamSlug = el.form?.dataset.teamSlug;
+    const unlinkUrl = teamSlug
+      ? `/t/${teamSlug}/api/tasks/${currentTaskId}/unlink/${messageId}`
+      : `/api/tasks/${currentTaskId}/threads/${messageId}`;
+    const res = await fetch(unlinkUrl, {
       method: "DELETE",
     });
 
