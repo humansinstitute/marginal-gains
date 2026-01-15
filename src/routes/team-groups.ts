@@ -12,8 +12,8 @@ import { TeamDatabase } from "../team-db";
 import type { Session } from "../types";
 
 // Helper to create and validate team context
-function requireTeamContext(session: Session | null, teamSlug: string) {
-  return createTeamRouteContext(session, teamSlug);
+function requireTeamContext(session: Session | null, teamSlug: string, returnPath?: string) {
+  return createTeamRouteContext(session, teamSlug, returnPath);
 }
 
 // List all groups in the team
