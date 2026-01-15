@@ -1,3 +1,9 @@
+# git worktrees (local references)
+.worktrees/
+
+# data directory (team databases)
+data/
+
 # dependencies
 node_modules/
 
