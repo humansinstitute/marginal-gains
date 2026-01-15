@@ -18,3 +18,24 @@
 - For AI agent interactions (fetching tasks, posting summaries), follow `docs/agent_api_spec.md` for endpoints, payloads, and example curls.
 - For UI changes (structure, refresh flow, styling hooks), see `docs/ui.md` to quickly find component markup, state update patterns, and styling entry points.
 - **Debug Logs**: Client-side logs (NostrConnect, Bunker, Auth) are written to `tmp/logs/session.log`. Logs are cleared on each server start. Inspect with `cat tmp/logs/session.log` or `curl http://localhost:3000/api/debug/log`. Use this to debug Nostr Connect and bunker session issues.
+
+## Client-Side Reactivity Pattern
+
+For UI components needing reactive updates without page reloads (e.g., kanban board), use **Alpine.js + Dexie.js**:
+
+- **Alpine.js**: Lightweight reactive directives (`x-data`, `x-for`, `x-on`) for enhancing server-rendered HTML
+- **Dexie.js**: IndexedDB wrapper for browser-side state persistence
+
+**Important distinctions:**
+- Dexie.js = **browser-only** IndexedDB (client state cache)
+- `src/db.ts` = **server-side** SQLite (source of truth)
+- These are completely separate - Dexie does NOT modify server SQLite
+
+**File locations:**
+- `public/lib/` - Alpine.js, Dexie.js libraries
+- `public/db/` - Dexie schemas (browser IndexedDB)
+- `public/stores/` - Alpine stores with server sync logic
+
+**Pattern:** Server renders HTML → Alpine hydrates + populates IndexedDB → User actions update IndexedDB (optimistic) → Sync service pushes to `/api/*` endpoints → Server SQLite updated
+
+When building reactive components, follow this pattern rather than full page reloads.

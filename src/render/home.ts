@@ -85,7 +85,9 @@ ${renderHead()}
     ${renderPinModal()}
     ${renderTaskEditModal(pageState.groupId, pageState.groupMembers, pageState.userGroups)}
   </main>
-  ${renderSessionSeed(session, pageState.groupId)}
+  ${renderSessionSeed(session, pageState.groupId, pageState.activeTodos)}
+  ${renderKanbanStoreScript()}
+  <script src="/lib/alpine.min.js" defer></script>
   <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>`;
@@ -198,9 +200,10 @@ function renderWork(state: PageState) {
   const isList = state.viewMode === "list";
 
   // Only render the active view
+  // Kanban uses Alpine.js for reactive updates, list view uses server-rendered HTML
   const viewContent = isKanban
     ? `<div class="kanban-view" data-kanban-view>
-        ${renderKanbanBoard(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
+        ${renderKanbanBoardAlpine(state.groupId, state.canManage, state.isAllTasksView)}
       </div>`
     : `<div class="todo-list-view" data-list-view>
         ${renderTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
@@ -305,10 +308,209 @@ function renderProfileModal() {
   </div>`;
 }
 
-function renderSessionSeed(session: Session | null, groupId: number | null) {
+function renderSessionSeed(session: Session | null, groupId: number | null, todos: TodoDisplay[] = []) {
+  // Enrich todos with thread counts for client-side rendering
+  const todosWithThreads = todos.map(todo => ({
+    ...todo,
+    threadCount: getThreadLinkCount(todo.id),
+  }));
+
   return `<script>
     window.__NOSTR_SESSION__ = ${JSON.stringify(session ?? null)};
     window.__GROUP_ID__ = ${groupId ?? "null"};
+    window.__INITIAL_TODOS__ = ${JSON.stringify(todosWithThreads)};
+  </script>`;
+}
+
+// Inline kanban store script - must run before Alpine loads
+function renderKanbanStoreScript() {
+  return `<script>
+    // Helper functions
+    window.formatAvatarInitials = function(npub) {
+      if (!npub) return '...';
+      return npub.replace(/^npub1/, '').slice(0, 2).toUpperCase();
+    };
+    window.formatPriority = function(priority) {
+      var labels = { urgent: 'Urgent', high: 'High', medium: 'Medium', low: 'Low', rock: 'Rock', pebble: 'Pebble', sand: 'Sand' };
+      return labels[priority] || priority;
+    };
+
+    // Kanban store factory - initializes columns immediately, not in init()
+    window.createKanbanStore = function(initialTodos, groupId) {
+      // Pre-process todos into columns immediately (before Alpine parses x-for)
+      var cols = { 'new': [], ready: [], in_progress: [], review: [], done: [] };
+      (initialTodos || []).forEach(function(todo) {
+        // Ensure each todo has a valid id
+        if (todo && todo.id != null && cols[todo.state]) {
+          cols[todo.state].push(todo);
+        }
+      });
+      // Sort each column by position
+      ['new', 'ready', 'in_progress', 'review', 'done'].forEach(function(state) {
+        cols[state].sort(function(a, b) {
+          if (a.position == null && b.position == null) return 0;
+          if (a.position == null) return 1;
+          if (b.position == null) return -1;
+          return a.position - b.position;
+        });
+      });
+
+      console.log('[KanbanStore] Creating store with', (initialTodos || []).length, 'todos');
+
+      return {
+        columns: cols,
+        groupId: groupId,
+        loading: false,
+        syncing: false,
+        error: null,
+        draggedCard: null,
+        draggedFromColumn: null,
+
+        init: function() {
+          console.log('[KanbanStore] Initialized - columns:', {
+            'new': this.columns['new'].length,
+            ready: this.columns.ready.length,
+            in_progress: this.columns.in_progress.length,
+            review: this.columns.review.length,
+            done: this.columns.done.length
+          });
+        },
+
+        onDragStart: function(event, card, columnName) {
+          this.draggedCard = card;
+          this.draggedFromColumn = columnName;
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', card.id);
+          event.target.classList.add('dragging');
+        },
+
+        onDragEnd: function(event) {
+          event.target.classList.remove('dragging');
+          this.draggedCard = null;
+          this.draggedFromColumn = null;
+          document.querySelectorAll('.drop-target').forEach(function(el) { el.classList.remove('drop-target'); });
+          document.querySelectorAll('.drop-placeholder').forEach(function(el) { el.remove(); });
+        },
+
+        onDragOver: function(event, columnName) {
+          if (!this.draggedCard) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          var container = event.currentTarget;
+          container.classList.add('drop-target');
+
+          var cards = Array.from(container.querySelectorAll('.kanban-card:not(.dragging)'));
+          var afterCard = this.getCardAfterCursor(cards, event.clientY);
+          var placeholder = container.querySelector('.drop-placeholder');
+          if (!placeholder) {
+            placeholder = document.createElement('div');
+            placeholder.className = 'drop-placeholder';
+          }
+          if (afterCard) {
+            container.insertBefore(placeholder, afterCard);
+          } else {
+            container.appendChild(placeholder);
+          }
+        },
+
+        onDragLeave: function(event) {
+          var container = event.currentTarget;
+          if (!container.contains(event.relatedTarget)) {
+            container.classList.remove('drop-target');
+            var placeholder = container.querySelector('.drop-placeholder');
+            if (placeholder) placeholder.remove();
+          }
+        },
+
+        onDrop: async function(event, targetColumn) {
+          event.preventDefault();
+          var container = event.currentTarget;
+          container.classList.remove('drop-target');
+          if (!this.draggedCard) return;
+
+          var card = this.draggedCard;
+          var oldColumn = this.draggedFromColumn;
+          var newColumn = targetColumn;
+
+          var cards = Array.from(container.querySelectorAll('.kanban-card:not(.dragging)'));
+          var afterCard = this.getCardAfterCursor(cards, event.clientY);
+          var dropIndex = afterCard ? cards.indexOf(afterCard) : cards.length;
+          var position = this.calculatePosition(this.columns[newColumn], dropIndex);
+
+          container.querySelectorAll('.drop-placeholder').forEach(function(el) { el.remove(); });
+
+          // Check for no-op
+          if (oldColumn === newColumn) {
+            var currentIndex = this.columns[oldColumn].findIndex(function(c) { return c.id === card.id; });
+            var adjustedIndex = currentIndex < dropIndex ? dropIndex - 1 : dropIndex;
+            if (currentIndex === adjustedIndex || currentIndex === dropIndex) return;
+          }
+
+          // Optimistic UI update
+          var oldIndex = this.columns[oldColumn].findIndex(function(c) { return c.id === card.id; });
+          if (oldIndex > -1) this.columns[oldColumn].splice(oldIndex, 1);
+
+          card.state = newColumn;
+          card.position = position;
+
+          var insertIndex = oldColumn === newColumn && oldIndex < dropIndex ? dropIndex - 1 : dropIndex;
+          this.columns[newColumn].splice(insertIndex, 0, card);
+
+          // Sync to server
+          this.syncing = true;
+          try {
+            var body = { state: newColumn, position: position };
+            if (this.groupId) body.group_id = this.groupId;
+            var res = await fetch('/api/todos/' + card.id + '/state', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+            if (!res.ok) throw new Error('Sync failed');
+          } catch (err) {
+            console.error('[KanbanStore] Sync error:', err);
+            window.location.reload();
+          }
+          this.syncing = false;
+        },
+
+        getCardAfterCursor: function(cards, y) {
+          var closestCard = null;
+          var closestOffset = Number.NEGATIVE_INFINITY;
+          cards.forEach(function(card) {
+            var box = card.getBoundingClientRect();
+            var offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closestOffset) {
+              closestOffset = offset;
+              closestCard = card;
+            }
+          });
+          return closestCard;
+        },
+
+        calculatePosition: function(column, dropIndex) {
+          var BASE = 65536;
+          if (column.length === 0) return BASE;
+          var positions = column.map(function(c, i) { return c.position != null ? c.position : (i + 1) * BASE; });
+          if (dropIndex === 0) return Math.floor(positions[0] / 2);
+          if (dropIndex >= column.length) return positions[positions.length - 1] + BASE;
+          return Math.floor((positions[dropIndex - 1] + positions[dropIndex]) / 2);
+        },
+
+        getColumnCount: function(columnName) {
+          return this.columns[columnName] ? this.columns[columnName].length : 0;
+        },
+
+        isColumnEmpty: function(columnName) {
+          return !this.columns[columnName] || this.columns[columnName].length === 0;
+        },
+
+        getCardTags: function(card) {
+          if (!card || !card.tags) return [];
+          return card.tags.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t.length > 0; });
+        }
+      };
+    };
   </script>`;
 }
 
@@ -459,7 +661,8 @@ function renderTodoList(todos: TodoDisplay[], emptyMessage: string, groupId: num
   return `<ul class="todo-list">${todos.map((todo) => renderTodoItem(todo, groupId, canManage, isAllTasksView, currentUserNpub)).join("")}</ul>`;
 }
 
-function renderKanbanBoard(todos: TodoDisplay[], _emptyMessage: string, groupId: number | null, canManage: boolean, isAllTasksView = false, currentUserNpub: string | null = null) {
+// Legacy server-rendered kanban (kept as fallback, now using Alpine version)
+function _renderKanbanBoard(todos: TodoDisplay[], _emptyMessage: string, groupId: number | null, canManage: boolean, isAllTasksView = false, currentUserNpub: string | null = null) {
   const columns: { state: string; label: string; todos: TodoDisplay[] }[] = [
     { state: "new", label: "New", todos: [] },
     { state: "ready", label: "Ready", todos: [] },
@@ -489,6 +692,96 @@ function renderKanbanBoard(todos: TodoDisplay[], _emptyMessage: string, groupId:
     .join("");
 
   return `<div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""}>${columnHtml}</div>`;
+}
+
+function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isAllTasksView = false) {
+  const columns = [
+    { state: "new", label: "New" },
+    { state: "ready", label: "Ready" },
+    { state: "in_progress", label: "In Progress" },
+    { state: "review", label: "Review" },
+    { state: "done", label: "Done" },
+  ];
+
+  const columnHtml = columns.map(col => `
+    <div class="kanban-column" data-kanban-column="${col.state}">
+      <div class="kanban-column-header">
+        <h3>${col.label}</h3>
+        <span class="kanban-count" x-text="getColumnCount('${col.state}')"></span>
+      </div>
+      <div
+        class="kanban-cards"
+        data-kanban-cards="${col.state}"
+        ${canManage ? "" : 'data-readonly="true"'}
+        @dragover.prevent="onDragOver($event, '${col.state}')"
+        @dragleave="onDragLeave($event)"
+        @drop.prevent="onDrop($event, '${col.state}')"
+      >
+        <template x-for="card in columns['${col.state}']" :key="card.id">
+          <div
+            class="kanban-card"
+            draggable="${canManage ? "true" : "false"}"
+            :data-todo-id="card.id"
+            :data-todo-state="card.state"
+            :data-todo-position="card.position"
+            :data-group-id="card.group_id || ${groupId ?? "null"}"
+            :data-assigned-to="card.assigned_to || ${isAllTasksView ? "null" : "(card.group_id === null ? card.owner : null)"}"
+            @dragstart="onDragStart($event, card, '${col.state}')"
+            @dragend="onDragEnd($event)"
+          >
+            <div class="kanban-card-header">
+              <span class="kanban-card-title" x-text="card.title"></span>
+              <template x-if="card.assigned_to || ${isAllTasksView ? "false" : "(card.group_id === null)"}">
+                <span class="assignee-avatar" :data-assignee-npub="card.assigned_to || card.owner" title="Assigned">
+                  <img class="avatar-img" data-avatar-img hidden alt="" loading="lazy" />
+                  <span class="avatar-initials" x-text="formatAvatarInitials(card.assigned_to || card.owner)"></span>
+                </span>
+              </template>
+            </div>
+            <template x-if="card.description">
+              <p class="kanban-card-desc" x-text="card.description.slice(0, 100) + (card.description.length > 100 ? '...' : '')"></p>
+            </template>
+            <div class="kanban-card-meta">
+              ${isAllTasksView ? `<template x-if="card.group_name || card.group_id === null">
+                <span class="badge board-badge" x-text="card.group_name || 'Personal'"></span>
+              </template>` : ""}
+              <span class="badge" :class="'priority-' + card.priority" x-text="formatPriority(card.priority)"></span>
+              <template x-for="(tag, idx) in getCardTags(card)" :key="card.id + '-tag-' + idx">
+                <span class="tag-chip" x-text="tag"></span>
+              </template>
+              <template x-if="card.threadCount > 0">
+                <button type="button" class="thread-link-badge" :data-view-threads="card.id" title="View linked threads">
+                  &#128172; <span x-text="card.threadCount"></span>
+                </button>
+              </template>
+            </div>
+          </div>
+        </template>
+        <p x-show="isColumnEmpty('${col.state}')" class="kanban-empty">No tasks</p>
+      </div>
+    </div>`).join("");
+
+  return `
+    <div
+      class="kanban-board"
+      data-kanban-board
+      ${groupId ? `data-group-id="${groupId}"` : ""}
+      x-data="createKanbanStore(window.__INITIAL_TODOS__, ${groupId ?? "null"})"
+      x-init="init()"
+    >
+      <!-- Sync indicator -->
+      <div x-show="syncing" class="sync-indicator">Syncing...</div>
+
+      <!-- Error state -->
+      <template x-if="error">
+        <div class="kanban-error" x-text="error"></div>
+      </template>
+
+      <!-- Columns -->
+      <div class="kanban-columns-wrapper">
+        ${columnHtml}
+      </div>
+    </div>`;
 }
 
 function renderKanbanCard(todo: TodoDisplay, groupId: number | null, isAllTasksView = false, _currentUserNpub: string | null = null) {
@@ -530,7 +823,7 @@ function renderKanbanCard(todo: TodoDisplay, groupId: number | null, isAllTasksV
   const cardGroupId = todo.group_id ?? groupId;
 
   return `
-    <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}" ${cardGroupId ? `data-group-id="${cardGroupId}"` : ""} ${effectiveAssignee ? `data-assigned-to="${effectiveAssignee}"` : ""}>
+    <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}" ${todo.position !== null ? `data-todo-position="${todo.position}"` : ""} ${cardGroupId ? `data-group-id="${cardGroupId}"` : ""} ${effectiveAssignee ? `data-assigned-to="${effectiveAssignee}"` : ""}>
       <div class="kanban-card-header">
         <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
         ${assigneeHtml}

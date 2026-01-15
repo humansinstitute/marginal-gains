@@ -107,3 +107,39 @@ The debug logger is in `public/debugLog.js`. Server endpoint is `src/routes/debu
 ## Cryptography
 
 Use `nostr-tools` for all Nostr cryptography (key generation, event signing, verification). The `@noble/*` and `@scure/*` packages are transitive dependencies.
+
+## Client-Side Reactivity (Alpine.js + Dexie.js)
+
+For components requiring reactive UI updates without full page reloads (e.g., kanban board), we use:
+
+- **Alpine.js** (~17kb) - Lightweight reactive framework for enhancing server-rendered HTML
+- **Dexie.js** (~25kb) - IndexedDB wrapper for client-side state persistence
+
+### Architecture
+
+```
+Browser (IndexedDB/Dexie)          Server (SQLite)
+┌─────────────────────────┐        ┌─────────────────────────┐
+│  public/db/*.js         │        │  src/db.ts              │
+│  Local cache for fast   │──HTTP──│  Source of truth        │
+│  UI updates             │  API   │  (unchanged)            │
+└─────────────────────────┘        └─────────────────────────┘
+```
+
+**Key points:**
+- Dexie.js is **browser-only** (IndexedDB) - it does NOT touch server-side SQLite
+- Server SQLite (`src/db.ts`) remains the source of truth
+- Client syncs to server via existing `/api/*` endpoints
+- Enables: instant UI updates, offline support, cross-tab sync
+
+### File structure for reactive components:
+- `public/lib/` - Alpine.js and Dexie.js libraries
+- `public/db/` - Dexie database schemas (client-side only)
+- `public/stores/` - Alpine stores with sync logic
+
+### Pattern:
+1. Server renders initial HTML with data
+2. Alpine hydrates UI and populates local IndexedDB
+3. User actions update IndexedDB first (optimistic)
+4. Sync service pushes changes to server API
+5. On conflict/error, refresh from server

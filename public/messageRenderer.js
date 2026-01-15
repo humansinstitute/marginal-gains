@@ -1,6 +1,6 @@
 // Message rendering module
 import { escapeHtml } from "./dom.js";
-import { formatReplyTimestamp, formatLocalTime } from "./dateUtils.js";
+import { formatReplyTimestamp, formatSmartTimestamp } from "./dateUtils.js";
 import { renderQuickReactBar, renderReactionPills } from "./reactions.js";
 
 // Dependencies injected via init
@@ -123,7 +123,7 @@ export function renderMessageCompact(message, { showAvatar = false, isThreadRoot
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
-        <time>${formatLocalTime(message.createdAt)}</time>
+        <time>${formatSmartTimestamp(message.createdAt)}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
       ${reactionsHtml}
@@ -146,7 +146,7 @@ export function renderMessageFull(message, { isThreadRoot = false, threadRootId 
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
-        <time>${formatLocalTime(message.createdAt)}</time>
+        <time>${formatSmartTimestamp(message.createdAt)}</time>
       </div>
       <p class="chat-message-body">${renderMessageBody(message.body)}</p>
       ${reactionsHtml}

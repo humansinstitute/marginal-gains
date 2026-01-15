@@ -15,9 +15,12 @@ import {
   listUnscheduledTodos,
   moveTodoToBoard,
   transitionGroupTodo,
+  transitionGroupTodoWithPosition,
   transitionTodo,
+  transitionTodoWithPosition,
   updateGroupTodo,
   updateTodo,
+  updateTodoPosition,
   upsertSummary,
 } from "../db";
 import { isAllowedTransition, normalizePriority, normalizeState, TODO_PRIORITIES, TODO_STATES } from "../domain/todos";
@@ -169,6 +172,20 @@ export function transitionTodoState(owner: string, id: number, state: string) {
   return transitionTodo(id, owner, normalized);
 }
 
+export function transitionTodoStateWithPosition(owner: string, id: number, state: string, position: number | null) {
+  const normalized = normalizeStateInput(state);
+  const existing = listTodos(owner).find((todo) => todo.id === id);
+  if (!existing) return null;
+  // Allow same-state moves for reordering within a column
+  const sameState = existing.state === normalized;
+  if (!sameState && !isAllowedTransition(existing.state, normalized)) return null;
+  return transitionTodoWithPosition(id, owner, normalized, position);
+}
+
+export function setTodoPosition(id: number, position: number | null) {
+  return updateTodoPosition(id, position);
+}
+
 export function removeTodo(owner: string, id: number) {
   return deleteTodo(id, owner);
 }
@@ -194,6 +211,16 @@ export function transitionGroupTodoState(groupId: number, id: number, state: str
   if (!existing || existing.group_id !== groupId) return null;
   if (!isAllowedTransition(existing.state, normalized)) return null;
   return transitionGroupTodo(id, groupId, normalized);
+}
+
+export function transitionGroupTodoStateWithPosition(groupId: number, id: number, state: string, position: number | null) {
+  const normalized = normalizeStateInput(state);
+  const existing = getTodoById(id);
+  if (!existing || existing.group_id !== groupId) return null;
+  // Allow same-state moves for reordering within a column
+  const sameState = existing.state === normalized;
+  if (!sameState && !isAllowedTransition(existing.state, normalized)) return null;
+  return transitionGroupTodoWithPosition(id, groupId, normalized, position);
 }
 
 export function removeGroupTodo(groupId: number, id: number) {

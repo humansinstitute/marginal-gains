@@ -1,25 +1,28 @@
-import { refreshUI } from "./state.js";
+/**
+ * Kanban board utilities
+ * Note: Drag-drop is now handled by Alpine.js store (stores/kanbanStore.js)
+ * This file handles: context switcher, thread links, avatar loading
+ */
 
-let draggedCard = null;
 let userCache = null; // Cache users for avatar lookups
 
 export function initKanban() {
-  // Add kanban-active class if on kanban view (detected by presence of kanban-view element)
+  // Add kanban-active class if on kanban view
   const kanbanView = document.querySelector("[data-kanban-view]");
   if (kanbanView) {
     document.body.classList.add("kanban-active");
   }
 
-  // Context switcher (Personal / Group dropdown) - navigates to selected URL
+  // Context switcher (Personal / Group dropdown)
   initContextSwitcher();
 
-  // Initialize drag-drop for kanban cards
-  initDragDrop();
-
-  // Initialize thread link handlers
+  // Thread link handlers
   initThreadLinks();
 
-  // Load avatars for assignees
+  // Load avatars - use MutationObserver to handle Alpine-rendered content
+  initAvatarObserver();
+
+  // Also do initial load for server-rendered content (list view)
   loadAssigneeAvatars();
 }
 
@@ -27,7 +30,6 @@ function initContextSwitcher() {
   const switcher = document.querySelector("[data-context-switcher]");
   if (!switcher) return;
 
-  // Options now contain full URLs, so just navigate directly
   switcher.addEventListener("change", (e) => {
     const url = e.target.value;
     if (url) {
@@ -36,126 +38,10 @@ function initContextSwitcher() {
   });
 }
 
-function initDragDrop() {
-  const kanbanBoard = document.querySelector("[data-kanban-board]");
-  if (!kanbanBoard) return;
-
-  // Card drag events
-  kanbanBoard.addEventListener("dragstart", (e) => {
-    const card = e.target.closest("[data-todo-id]");
-    if (!card) return;
-
-    // Check if column is readonly
-    const column = card.closest("[data-kanban-cards]");
-    if (column && column.dataset.readonly === "true") {
-      e.preventDefault();
-      return;
-    }
-
-    draggedCard = card;
-    card.classList.add("dragging");
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", card.dataset.todoId);
-  });
-
-  kanbanBoard.addEventListener("dragend", (e) => {
-    const card = e.target.closest("[data-todo-id]");
-    if (card) card.classList.remove("dragging");
-    draggedCard = null;
-    // Remove all drop-target highlights
-    document.querySelectorAll(".drop-target").forEach((el) => el.classList.remove("drop-target"));
-  });
-
-  // Column drop events
-  kanbanBoard.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    const column = e.target.closest("[data-kanban-cards]");
-    if (column && column.dataset.readonly !== "true") {
-      e.dataTransfer.dropEffect = "move";
-      column.classList.add("drop-target");
-    }
-  });
-
-  kanbanBoard.addEventListener("dragleave", (e) => {
-    const column = e.target.closest("[data-kanban-cards]");
-    if (column && !column.contains(e.relatedTarget)) {
-      column.classList.remove("drop-target");
-    }
-  });
-
-  kanbanBoard.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    const column = e.target.closest("[data-kanban-cards]");
-    if (!column || !draggedCard) return;
-
-    // Check readonly
-    if (column.dataset.readonly === "true") return;
-
-    column.classList.remove("drop-target");
-
-    const todoId = draggedCard.dataset.todoId;
-    const newState = column.dataset.kanbanCards;
-    const oldState = draggedCard.dataset.todoState;
-
-    if (newState === oldState) return;
-
-    // Get group_id from card or global
-    const groupId = draggedCard.dataset.groupId || window.__GROUP_ID__ || null;
-
-    // Optimistically move the card
-    const emptyMessage = column.querySelector(".kanban-empty");
-    if (emptyMessage) emptyMessage.remove();
-    column.appendChild(draggedCard);
-    draggedCard.dataset.todoState = newState;
-
-    // Update the count badges
-    updateColumnCounts();
-
-    // Send update to server
-    try {
-      const body = { state: newState };
-      if (groupId) body.group_id = groupId;
-
-      const response = await fetch(`/api/todos/${todoId}/state`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to update task state");
-      }
-
-      // Refresh the page to get updated data
-      window.location.reload();
-    } catch (err) {
-      console.error("Error updating task state:", err);
-      // Revert on error - reload page to get correct state
-      window.location.reload();
-    }
-  });
-}
-
-function updateColumnCounts() {
-  document.querySelectorAll("[data-kanban-column]").forEach((col) => {
-    const cards = col.querySelectorAll("[data-todo-id]");
-    const countEl = col.querySelector(".kanban-count");
-    if (countEl) countEl.textContent = cards.length;
-
-    // Show/hide empty message
-    const cardsContainer = col.querySelector("[data-kanban-cards]");
-    const emptyMsg = cardsContainer.querySelector(".kanban-empty");
-    if (cards.length === 0 && !emptyMsg) {
-      cardsContainer.innerHTML = '<p class="kanban-empty">No tasks</p>';
-    }
-  });
-}
-
 // Thread links dropdown state
 let activeThreadDropdown = null;
 
 function initThreadLinks() {
-  // Use event delegation for thread badge clicks
   document.addEventListener("click", async (e) => {
     const badge = e.target.closest("[data-view-threads]");
     const threadLink = e.target.closest("[data-goto-thread]");
@@ -186,16 +72,13 @@ function initThreadLinks() {
 }
 
 async function toggleThreadDropdown(badge, todoId) {
-  // Close if clicking the same badge
   if (activeThreadDropdown && activeThreadDropdown.dataset.todoId === todoId) {
     closeThreadDropdown();
     return;
   }
 
-  // Close any existing dropdown
   closeThreadDropdown();
 
-  // Fetch threads for this task
   try {
     const res = await fetch(`/api/tasks/${todoId}/threads`);
     if (!res.ok) {
@@ -205,11 +88,8 @@ async function toggleThreadDropdown(badge, todoId) {
     const data = await res.json();
     const threads = data.threads || [];
 
-    if (threads.length === 0) {
-      return;
-    }
+    if (threads.length === 0) return;
 
-    // Create dropdown
     const dropdown = document.createElement("div");
     dropdown.className = "thread-links-dropdown";
     dropdown.dataset.todoId = todoId;
@@ -225,7 +105,6 @@ async function toggleThreadDropdown(badge, todoId) {
       })
       .join("");
 
-    // Position relative to badge
     const rect = badge.getBoundingClientRect();
     dropdown.style.position = "fixed";
     dropdown.style.top = `${rect.bottom + 4}px`;
@@ -252,12 +131,38 @@ function escapeHtml(str) {
   return str.replace(/[&<>"']/g, (c) => escapes[c]);
 }
 
-// Load avatars for all assignee elements from local user cache
+// Watch for Alpine-rendered cards and load their avatars
+function initAvatarObserver() {
+  const kanbanBoard = document.querySelector("[data-kanban-board]");
+  if (!kanbanBoard) return;
+
+  const observer = new MutationObserver((mutations) => {
+    let hasNewAvatars = false;
+    for (const mutation of mutations) {
+      if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === 1 && node.querySelector?.("[data-assignee-npub]")) {
+            hasNewAvatars = true;
+            break;
+          }
+        }
+      }
+      if (hasNewAvatars) break;
+    }
+    if (hasNewAvatars) {
+      loadAssigneeAvatars();
+    }
+  });
+
+  observer.observe(kanbanBoard, { childList: true, subtree: true });
+}
+
+// Load avatars for all assignee elements
 async function loadAssigneeAvatars() {
   const assigneeElements = document.querySelectorAll("[data-assignee-npub]");
   if (assigneeElements.length === 0) return;
 
-  // Fetch users from server cache (same source as chat app)
+  // Fetch users from server cache
   if (!userCache) {
     try {
       const res = await fetch("/chat/users");
@@ -282,14 +187,12 @@ async function loadAssigneeAvatars() {
 
     if (!img) return;
 
-    // Get avatar URL from user cache or fall back to RoboHash
     const avatarUrl = user?.picture || `https://robohash.org/${user?.pubkey || npub}.png?set=set3`;
 
     img.src = avatarUrl;
     img.hidden = false;
     if (initials) initials.hidden = true;
 
-    // Update title with display name if available
     const displayName = user?.display_name || user?.name;
     if (displayName) {
       el.title = displayName;
@@ -297,3 +200,5 @@ async function loadAssigneeAvatars() {
   });
 }
 
+// Export for use by Alpine store
+export { loadAssigneeAvatars };

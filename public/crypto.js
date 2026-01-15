@@ -14,6 +14,36 @@ export const ENCRYPTED_MESSAGE_KIND = 9420;
 const NONCE_LENGTH = 12;
 
 /**
+ * Safely encode Uint8Array to base64 string
+ * Avoids spread operator stack overflow and handles all byte values correctly
+ * @param {Uint8Array} bytes - Binary data
+ * @returns {string} Base64-encoded string
+ */
+function bytesToBase64(bytes) {
+  let binary = '';
+  const len = bytes.length;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Safely decode base64 string to Uint8Array
+ * @param {string} base64 - Base64-encoded string
+ * @returns {Uint8Array} Binary data
+ */
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
  * Load NIP-44 module from nostr-tools
  */
 export const loadNip44 = async () => {
@@ -35,7 +65,7 @@ export async function generateChannelKey() {
     ["encrypt", "decrypt"]
   );
   const rawKey = await crypto.subtle.exportKey("raw", key);
-  return btoa(String.fromCharCode(...new Uint8Array(rawKey)));
+  return bytesToBase64(new Uint8Array(rawKey));
 }
 
 /**
@@ -44,7 +74,7 @@ export async function generateChannelKey() {
  * @returns {Promise<CryptoKey>}
  */
 async function importKey(keyBase64) {
-  const keyBytes = Uint8Array.from(atob(keyBase64), c => c.charCodeAt(0));
+  const keyBytes = base64ToBytes(keyBase64);
   return crypto.subtle.importKey(
     "raw",
     keyBytes,
@@ -76,7 +106,7 @@ export async function encryptMessage(plaintext, keyBase64) {
   combined.set(nonce, 0);
   combined.set(new Uint8Array(ciphertext), nonce.length);
 
-  return btoa(String.fromCharCode(...combined));
+  return bytesToBase64(combined);
 }
 
 /**
@@ -88,7 +118,7 @@ export async function encryptMessage(plaintext, keyBase64) {
  */
 export async function decryptMessage(ciphertextBase64, keyBase64) {
   const key = await importKey(keyBase64);
-  const combined = Uint8Array.from(atob(ciphertextBase64), c => c.charCodeAt(0));
+  const combined = base64ToBytes(ciphertextBase64);
 
   const nonce = combined.slice(0, NONCE_LENGTH);
   const ciphertext = combined.slice(NONCE_LENGTH);
