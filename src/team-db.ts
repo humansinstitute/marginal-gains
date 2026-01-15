@@ -1289,6 +1289,50 @@ export class TeamDatabase {
     ).all();
   }
 
+  getOutstandingCrmTasks(): Array<Todo & {
+    link_id: number;
+    contact_id: number | null;
+    company_id: number | null;
+    activity_id: number | null;
+    opportunity_id: number | null;
+    contact_name: string | null;
+    company_name: string | null;
+    opportunity_title: string | null;
+  }> {
+    type CrmLinkedTask = Todo & {
+      link_id: number;
+      contact_id: number | null;
+      company_id: number | null;
+      activity_id: number | null;
+      opportunity_id: number | null;
+      contact_name: string | null;
+      company_name: string | null;
+      opportunity_title: string | null;
+    };
+    return this.db.query<CrmLinkedTask, []>(
+      `SELECT DISTINCT t.*, tcl.id as link_id,
+        tcl.contact_id, tcl.company_id, tcl.activity_id, tcl.opportunity_id,
+        con.name as contact_name,
+        com.name as company_name,
+        opp.title as opportunity_title
+       FROM todos t
+       JOIN task_crm_links tcl ON t.id = tcl.todo_id
+       LEFT JOIN crm_contacts con ON tcl.contact_id = con.id
+       LEFT JOIN crm_companies com ON tcl.company_id = com.id
+       LEFT JOIN crm_opportunities opp ON tcl.opportunity_id = opp.id
+       WHERE t.deleted = 0
+         AND t.state != 'done'
+       ORDER BY
+         CASE t.priority
+           WHEN 'rock' THEN 1
+           WHEN 'pebble' THEN 2
+           WHEN 'sand' THEN 3
+         END,
+         t.created_at DESC
+       LIMIT 20`
+    ).all();
+  }
+
   // ============================================================================
   // Wallet Transactions
   // ============================================================================

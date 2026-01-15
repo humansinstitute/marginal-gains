@@ -48,6 +48,7 @@ export function renderTeamCrmPage(session: Session | null, teamSlug: string, tea
   const opportunities = db.listCrmOpportunities();
   const activities = db.listCrmActivities().slice(0, 20);
   const pipelineSummary = db.getCrmPipelineSummary();
+  const outstandingTasks = db.getOutstandingCrmTasks();
 
   return `<!doctype html>
 <html lang="en">
@@ -55,7 +56,7 @@ ${renderHead()}
 <body class="chat-page">
   <main class="chat-app-shell">
     ${renderTeamCrmHeader(session, teamSlug)}
-    ${session ? renderCrmContent(companies, contacts, opportunities, activities, pipelineSummary) : renderAuthRequired()}
+    ${session ? renderCrmContent(companies, contacts, opportunities, activities, pipelineSummary, outstandingTasks) : renderAuthRequired()}
   </main>
   ${renderTeamSessionSeed(session, teamSlug)}
   <script type="module" src="/crm.js?v=6"></script>
