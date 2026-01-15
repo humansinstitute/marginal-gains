@@ -938,7 +938,7 @@ const latestWeekSummaryStmt = db.query<Summary>(
 const listChannelsStmt = db.query<Channel>(
   `SELECT * FROM channels
    WHERE owner_npub IS NULL
-   AND NOT EXISTS (SELECT 1 FROM dm_participants WHERE channel_id = id)
+   AND name NOT LIKE 'dm-%'
    ORDER BY created_at ASC`
 );
 const getChannelByIdStmt = db.query<Channel>(
@@ -1504,7 +1504,7 @@ const removeChannelGroupStmt = db.query("DELETE FROM channel_groups WHERE channe
 const listVisibleChannelsStmt = db.query<Channel>(
   `SELECT DISTINCT c.* FROM channels c
    WHERE c.owner_npub IS NULL
-   AND NOT EXISTS (SELECT 1 FROM dm_participants WHERE channel_id = c.id)
+   AND c.name NOT LIKE 'dm-%'
    AND (
      c.is_public = 1
      OR EXISTS (
