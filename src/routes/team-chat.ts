@@ -189,7 +189,7 @@ export function handleTeamGetMessages(
     }
   }
 
-  const messages = db.getChannelMessages(channelId);
+  const messages = db.listMessages(channelId);
   console.log(`[TeamChat] GetMessages: team=${teamSlug}, channel=${channelId}, user=${ctx.session.npub.slice(0, 15)}, messageCount=${messages.length}`);
   return jsonResponse(messages);
 }

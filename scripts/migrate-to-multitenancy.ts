@@ -16,6 +16,7 @@
  *
  * Options:
  *   --dry-run    Show what would be done without making changes
+ *   --source     Path to source database (default: marginal-gains.sqlite or DB_PATH env)
  *   --team-name  Custom team display name (default: "Marginal Gains")
  *   --team-slug  Custom team slug (default: "marginalgains")
  */
@@ -24,17 +25,20 @@ import { existsSync, mkdirSync, copyFileSync } from "fs";
 
 import { Database } from "bun:sqlite";
 
+import { initTeamSchema } from "../src/team-schema";
+
 // Parse command line arguments
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const teamNameIndex = args.indexOf("--team-name");
 const teamSlugIndex = args.indexOf("--team-slug");
+const sourceIndex = args.indexOf("--source");
 
 const TEAM_DISPLAY_NAME = teamNameIndex >= 0 ? args[teamNameIndex + 1] : "Marginal Gains";
 const TEAM_SLUG = teamSlugIndex >= 0 ? args[teamSlugIndex + 1] : "marginalgains";
 
 // Paths
-const LEGACY_DB_PATH = process.env.DB_PATH || "marginal-gains.sqlite";
+const LEGACY_DB_PATH = sourceIndex >= 0 ? args[sourceIndex + 1] : (process.env.DB_PATH || "marginal-gains.sqlite");
 const MASTER_DB_PATH = process.env.MASTER_DB_PATH || "data/master.sqlite";
 const TEAMS_DB_DIR = process.env.TEAMS_DB_DIR || "data/teams";
 const TEAM_DB_PATH = `${TEAMS_DB_DIR}/${TEAM_SLUG}.sqlite`;
@@ -188,6 +192,25 @@ function main() {
     }
   } else {
     log("  No legacy database to copy (fresh installation)");
+  }
+
+  // Step 5b: Run team schema migrations on copied database
+  log("Applying team schema migrations...");
+  if (!dryRun) {
+    if (existsSync(TEAM_DB_PATH)) {
+      const teamDb = new Database(TEAM_DB_PATH);
+      initTeamSchema(teamDb);
+      teamDb.close();
+      log("  Team schema migrations applied (added team_encryption, user_team_keys tables, etc.)");
+    } else {
+      // Create fresh team database with schema
+      const teamDb = new Database(TEAM_DB_PATH);
+      initTeamSchema(teamDb);
+      teamDb.close();
+      log("  Created fresh team database with full schema");
+    }
+  } else {
+    logDry("Apply team schema migrations (team_encryption, user_team_keys, invite_codes columns)");
   }
 
   // Step 6: Create team record
