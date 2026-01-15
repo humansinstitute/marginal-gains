@@ -191,6 +191,7 @@ import {
 } from "./routes/team-tasks";
 import {
   handleTeamTodos,
+  handleTeamTodosRedirect,
   handleTeamTodoCreate,
   handleTeamTodoUpdate,
   handleTeamTodoState,
@@ -441,9 +442,13 @@ const server = Bun.serve({
         const teamGroupMembersMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/members$/);
         if (teamGroupMembersMatch) return handleTeamListGroupMembers(session, teamGroupMembersMatch[1], Number(teamGroupMembersMatch[2]));
 
-        // Team-scoped tasks page
-        const teamTodosPageMatch = pathname.match(/^\/t\/([^/]+)\/todo$/);
-        if (teamTodosPageMatch) return handleTeamTodos(url, session, teamTodosPageMatch[1]);
+        // Team-scoped tasks page (with view mode routing)
+        const teamTodosRedirectMatch = pathname.match(/^\/t\/([^/]+)\/todo$/);
+        if (teamTodosRedirectMatch) return handleTeamTodosRedirect(url, teamTodosRedirectMatch[1]);
+        const teamTodosKanbanMatch = pathname.match(/^\/t\/([^/]+)\/todo\/kanban$/);
+        if (teamTodosKanbanMatch) return handleTeamTodos(url, session, teamTodosKanbanMatch[1], "kanban");
+        const teamTodosListMatch = pathname.match(/^\/t\/([^/]+)\/todo\/list$/);
+        if (teamTodosListMatch) return handleTeamTodos(url, session, teamTodosListMatch[1], "list");
 
         // Team-scoped CRM page
         const teamCrmPageMatch = pathname.match(/^\/t\/([^/]+)\/crm$/);
