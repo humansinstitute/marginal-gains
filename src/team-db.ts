@@ -279,6 +279,12 @@ export class TeamDatabase {
     return result;
   }
 
+  updateTodoPosition(id: number, position: number | null): Todo | null {
+    return this.db.query<Todo, [number | null, number]>(
+      "UPDATE todos SET position = ? WHERE id = ? AND deleted = 0 RETURNING *"
+    ).get(position, id) ?? null;
+  }
+
   assignAllTodosToOwner(npub: string): void {
     this.db.run("UPDATE todos SET owner = ? WHERE owner = ''", [npub]);
   }
