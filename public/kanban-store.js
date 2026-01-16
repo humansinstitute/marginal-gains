@@ -230,7 +230,6 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
             ? '/t/' + this.teamSlug + '/api/todos/' + card.id + '/state'
             : '/api/todos/' + card.id + '/state';
         }
-        console.log('[KanbanStore] Syncing:', { apiUrl: apiUrl, body: body, bodyJson: JSON.stringify(body) });
         var res = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

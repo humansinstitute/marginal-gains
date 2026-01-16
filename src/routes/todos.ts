@@ -147,9 +147,7 @@ export async function handleApiTodoState(req: Request, session: Session | null, 
   }
 
   try {
-    const bodyText = await req.text();
-    console.log("[handleApiTodoState] Received body:", bodyText, "for todo:", id);
-    const body = JSON.parse(bodyText);
+    const body = await req.json();
     const nextState = normalizeStateInput(String(body.state ?? "ready"));
     const groupId = body.group_id ? Number(body.group_id) : null;
     // Position is optional - only provided when reordering within column
@@ -179,9 +177,8 @@ export async function handleApiTodoState(req: Request, session: Session | null, 
     }
 
     return new Response(JSON.stringify({ success: true, state: nextState, position }), { status: 200, headers: jsonHeaders });
-  } catch (err) {
-    console.error("[handleApiTodoState] Error:", err);
-    return new Response(JSON.stringify({ error: "Invalid request body", details: String(err) }), { status: 400, headers: jsonHeaders });
+  } catch (_err) {
+    return new Response(JSON.stringify({ error: "Invalid request body" }), { status: 400, headers: jsonHeaders });
   }
 }
 
