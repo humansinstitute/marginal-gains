@@ -230,6 +230,7 @@ export async function handleTeamTodoUpdate(
       state: fields.state,
       scheduledFor: fields.scheduled_for,
       tags: fields.tags,
+      assignedTo: fields.assigned_to,
     });
   } else {
     db.updateTodo({
@@ -241,6 +242,7 @@ export async function handleTeamTodoUpdate(
       state: fields.state,
       scheduledFor: fields.scheduled_for,
       tags: fields.tags,
+      assignedTo: fields.assigned_to,
     });
   }
 

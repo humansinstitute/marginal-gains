@@ -186,8 +186,9 @@ export class TeamDatabase {
     state?: TodoState;
     tags?: string;
     scheduledFor?: string | null;
+    assignedTo?: string | null;
   }): Todo | null {
-    const { id, owner, title, description, priority, state, tags, scheduledFor } = params;
+    const { id, owner, title, description, priority, state, tags, scheduledFor, assignedTo } = params;
     const sets: string[] = [];
     const values: (string | number | null)[] = [];
 
@@ -197,6 +198,7 @@ export class TeamDatabase {
     if (state !== undefined) { sets.push("state = ?"); values.push(state); }
     if (tags !== undefined) { sets.push("tags = ?"); values.push(tags); }
     if (scheduledFor !== undefined) { sets.push("scheduled_for = ?"); values.push(scheduledFor); }
+    if (assignedTo !== undefined) { sets.push("assigned_to = ?"); values.push(assignedTo); }
 
     if (sets.length === 0) return this.getTodoById(id);
 
@@ -239,8 +241,9 @@ export class TeamDatabase {
     state?: TodoState;
     tags?: string;
     scheduledFor?: string | null;
+    assignedTo?: string | null;
   }): Todo | null {
-    const { id, groupId, title, description, priority, state, tags, scheduledFor } = params;
+    const { id, groupId, title, description, priority, state, tags, scheduledFor, assignedTo } = params;
     const sets: string[] = [];
     const values: (string | number | null)[] = [];
 
@@ -250,6 +253,7 @@ export class TeamDatabase {
     if (state !== undefined) { sets.push("state = ?"); values.push(state); }
     if (tags !== undefined) { sets.push("tags = ?"); values.push(tags); }
     if (scheduledFor !== undefined) { sets.push("scheduled_for = ?"); values.push(scheduledFor); }
+    if (assignedTo !== undefined) { sets.push("assigned_to = ?"); values.push(assignedTo); }
 
     if (sets.length === 0) return this.getTodoById(id);
 
