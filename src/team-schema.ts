@@ -66,6 +66,7 @@ export function initTeamSchema(db: Database): void {
   addColumn(db, "ALTER TABLE todos ADD COLUMN assigned_to TEXT DEFAULT NULL");
   addColumn(db, "ALTER TABLE todos ADD COLUMN position INTEGER DEFAULT NULL");
   addColumn(db, "ALTER TABLE todos ADD COLUMN parent_id INTEGER REFERENCES todos(id) ON DELETE SET NULL");
+  addColumn(db, "ALTER TABLE todos ADD COLUMN updated_at TEXT DEFAULT NULL");
   createIndex(db, "CREATE INDEX idx_todos_group_id ON todos(group_id)");
   createIndex(db, "CREATE INDEX idx_todos_assigned_to ON todos(assigned_to)");
   createIndex(db, "CREATE INDEX idx_todos_parent_id ON todos(parent_id)");

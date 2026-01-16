@@ -340,9 +340,7 @@ export async function handleTeamApiTodoState(
   }
 
   try {
-    const bodyText = await req.text();
-    console.log("[handleTeamApiTodoState] Received body:", bodyText, "for todo:", id, "team:", teamSlug);
-    const body = JSON.parse(bodyText);
+    const body = await req.json();
     const nextState = normalizeStateInput(String(body.state ?? "ready"));
     // Position is optional - only provided when reordering within column
     const position = typeof body.position === "number" ? body.position : null;
@@ -400,9 +398,8 @@ export async function handleTeamApiTodoState(
       status: 200,
       headers: jsonHeaders,
     });
-  } catch (err) {
-    console.error("[handleTeamApiTodoState] Error:", err);
-    return new Response(JSON.stringify({ error: "Invalid request body", details: String(err) }), {
+  } catch (_err) {
+    return new Response(JSON.stringify({ error: "Invalid request body" }), {
       status: 400,
       headers: jsonHeaders,
     });

@@ -624,6 +624,29 @@ function setupLiveUpdateHandlers() {
       showWingmanThinking(String(threadId));
     }
   });
+
+  // When new key requests arrive (someone joined via our invite)
+  // Auto-fulfill them in the background
+  onEvent("key_request:new", () => {
+    console.log("[Chat] Key request received, auto-fulfilling...");
+    autoFulfillPendingKeyRequests();
+  });
+
+  // When our key request is fulfilled (we received keys)
+  // Clear cached key and refetch
+  onEvent("key_request:fulfilled", async (data) => {
+    const { channelId } = data;
+    console.log("[Chat] Key request fulfilled for channel", channelId);
+    // Clear any cached key to force refetch
+    clearCachedChannelKey(String(channelId));
+    // Refetch the key
+    await fetchChannelKey(String(channelId));
+    // If we're viewing this channel, refresh messages
+    if (state.chat.selectedChannelId === String(channelId)) {
+      console.log("[Chat] Refreshing current channel after key received");
+      await fetchMessages(channelId);
+    }
+  });
 }
 
 /**
