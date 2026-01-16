@@ -137,6 +137,7 @@ export async function handleTeamTodoCreate(
   const title = String(form.get("title") ?? "");
   const tags = String(form.get("tags") ?? "");
   const groupId = parseGroupId(form.get("group_id"));
+  const parentId = parseGroupId(form.get("parent_id"));
 
   const db = new TeamDatabase(result.ctx.teamDb);
 
@@ -153,6 +154,30 @@ export async function handleTeamTodoCreate(
   const normalizedTitle = validateTodoTitle(title);
   if (!normalizedTitle) {
     return redirect(getRedirectUrl(teamSlug, groupId));
+  }
+
+  // If parent_id is provided, create as subtask
+  if (parentId) {
+    const parent = db.getTodoById(parentId);
+    if (!parent) {
+      // Redirect back instead of 404 to avoid breaking the UI
+      return redirect(getRedirectUrl(teamSlug, groupId));
+    }
+    if (!db.canHaveChildren(parent)) {
+      // Redirect back instead of 400 to avoid breaking the UI
+      return redirect(getRedirectUrl(teamSlug, groupId));
+    }
+    try {
+      db.addSubtask(normalizedTitle, parentId, result.ctx.session.npub);
+      // Sync parent state to match slowest subtask
+      db.updateParentStateFromSubtasks(parentId);
+    } catch (err) {
+      console.error("[TeamTodos] Error creating subtask:", err);
+    }
+    // Always redirect to the parent's context
+    const redirectUrl = getRedirectUrl(teamSlug, parent.group_id);
+    console.log("[TeamTodos] Subtask created, redirecting to:", redirectUrl);
+    return redirect(redirectUrl);
   }
 
   db.addTodo(normalizedTitle, result.ctx.session.npub, tags, groupId);
@@ -315,9 +340,10 @@ export async function handleTeamApiTodoState(
   }
 
   try {
-    const body = await req.json();
+    const bodyText = await req.text();
+    console.log("[handleTeamApiTodoState] Received body:", bodyText, "for todo:", id, "team:", teamSlug);
+    const body = JSON.parse(bodyText);
     const nextState = normalizeStateInput(String(body.state ?? "ready"));
-    const groupId = body.group_id ? Number(body.group_id) : null;
     // Position is optional - only provided when reordering within column
     const position = typeof body.position === "number" ? body.position : null;
 
@@ -332,19 +358,19 @@ export async function handleTeamApiTodoState(
       });
     }
 
-    if (!isAllowedTransition(existing.state, nextState)) {
-      return new Response(JSON.stringify({ error: "Invalid state transition" }), {
-        status: 400,
-        headers: jsonHeaders,
-      });
-    }
+    // Note: For kanban drag-drop, we allow any state transition (including backward moves
+    // like in_progress -> new). The strict state machine rules are for lifecycle buttons only.
+
+    // Use the todo's actual group_id from the database, not from the client
+    // This ensures subtasks (which inherit group_id from parent) work correctly
+    const actualGroupId = existing.group_id;
 
     let updated;
-    if (groupId && Number.isInteger(groupId) && groupId > 0) {
+    if (actualGroupId && Number.isInteger(actualGroupId) && actualGroupId > 0) {
       const membership = result.ctx.session.teamMemberships?.find(
         (m) => m.teamSlug === teamSlug
       );
-      if (!canManageTeamGroupTodo(db, result.ctx.session.npub, groupId, membership?.role)) {
+      if (!canManageTeamGroupTodo(db, result.ctx.session.npub, actualGroupId, membership?.role)) {
         return new Response(JSON.stringify({ error: "Forbidden" }), {
           status: 403,
           headers: jsonHeaders,
@@ -352,13 +378,15 @@ export async function handleTeamApiTodoState(
       }
       // Use position-aware function when position is provided
       updated = position !== null
-        ? db.transitionGroupTodoWithPosition(id, groupId, nextState, position)
-        : db.transitionGroupTodo(id, groupId, nextState);
+        ? db.transitionGroupTodoWithPosition(id, actualGroupId, nextState, position)
+        : db.transitionGroupTodo(id, actualGroupId, nextState);
     } else {
-      // Use position-aware function when position is provided
+      // For non-group todos, use the todo's actual owner (subtasks inherit owner from parent)
+      // This allows team members to update subtasks even if they didn't create the parent
+      const todoOwner = existing.owner || result.ctx.session.npub;
       updated = position !== null
-        ? db.transitionTodoWithPosition(id, result.ctx.session.npub, nextState, position)
-        : db.transitionTodo(id, result.ctx.session.npub, nextState);
+        ? db.transitionTodoWithPosition(id, todoOwner, nextState, position)
+        : db.transitionTodo(id, todoOwner, nextState);
     }
 
     if (!updated) {
@@ -372,8 +400,188 @@ export async function handleTeamApiTodoState(
       status: 200,
       headers: jsonHeaders,
     });
+  } catch (err) {
+    console.error("[handleTeamApiTodoState] Error:", err);
+    return new Response(JSON.stringify({ error: "Invalid request body", details: String(err) }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+}
+
+/**
+ * POST /t/:slug/api/todos/:id/position - JSON API for position-only updates (Summary card reordering)
+ */
+export async function handleTeamApiTodoPosition(
+  req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  try {
+    const body = await req.json();
+    const position = typeof body.position === "number" ? body.position : null;
+
+    if (position === null) {
+      return new Response(JSON.stringify({ error: "Position is required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+
+    const db = new TeamDatabase(result.ctx.teamDb);
+
+    // Verify the todo exists
+    const todo = db.getTodoById(id);
+    if (!todo) {
+      return new Response(JSON.stringify({ error: "Task not found" }), {
+        status: 404,
+        headers: jsonHeaders,
+      });
+    }
+
+    const updated = db.updateTodoPosition(id, position);
+    if (!updated) {
+      return new Response(JSON.stringify({ error: "Failed to update position" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+
+    return new Response(JSON.stringify({ success: true, position }), {
+      status: 200,
+      headers: jsonHeaders,
+    });
   } catch (_err) {
     return new Response(JSON.stringify({ error: "Invalid request body" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+}
+
+/**
+ * GET /t/:slug/api/todos/:id/subtasks - List subtasks and parent info
+ */
+export function handleTeamGetSubtasks(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const db = new TeamDatabase(result.ctx.teamDb);
+  const todo = db.getTodoById(id);
+
+  if (!todo) {
+    return new Response(JSON.stringify({ error: "Task not found" }), {
+      status: 404,
+      headers: jsonHeaders,
+    });
+  }
+
+  const subtasks = db.listSubtasks(id);
+  const canAddSubtask = db.canHaveChildren(todo);
+
+  // Get parent info if this is a subtask
+  let parent = null;
+  if (todo.parent_id) {
+    const parentTodo = db.getTodoById(todo.parent_id);
+    if (parentTodo) {
+      parent = { id: parentTodo.id, title: parentTodo.title };
+    }
+  }
+
+  return new Response(
+    JSON.stringify({
+      subtasks,
+      canAddSubtask,
+      parent,
+      hasSubtasks: subtasks.length > 0,
+    }),
+    { status: 200, headers: jsonHeaders }
+  );
+}
+
+/**
+ * POST /t/:slug/api/todos/:id/subtasks - Create a subtask
+ */
+export async function handleTeamCreateSubtask(
+  req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const db = new TeamDatabase(result.ctx.teamDb);
+  const parent = db.getTodoById(id);
+
+  if (!parent) {
+    return new Response(JSON.stringify({ error: "Parent task not found" }), {
+      status: 404,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Check 2-level max rule
+  if (!db.canHaveChildren(parent)) {
+    return new Response(
+      JSON.stringify({ error: "Subtasks cannot have children (2 levels max)" }),
+      { status: 400, headers: jsonHeaders }
+    );
+  }
+
+  try {
+    const body = await req.json();
+    const title = String(body.title ?? "").trim();
+
+    if (!title) {
+      return new Response(JSON.stringify({ error: "Title is required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+
+    const subtask = db.addSubtask(title, id, result.ctx.session.npub);
+
+    if (!subtask) {
+      return new Response(
+        JSON.stringify({ error: "Failed to create subtask" }),
+        { status: 500, headers: jsonHeaders }
+      );
+    }
+
+    // Sync parent state to match slowest subtask
+    const updatedParent = db.updateParentStateFromSubtasks(id);
+
+    return new Response(JSON.stringify({ success: true, subtask, parentState: updatedParent?.state }), {
+      status: 201,
+      headers: jsonHeaders,
+    });
+  } catch (_err) {
+    return new Response(JSON.stringify({ error: "Invalid request" }), {
       status: 400,
       headers: jsonHeaders,
     });

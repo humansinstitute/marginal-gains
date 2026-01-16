@@ -1,4 +1,11 @@
-import { getTodoById } from "../db";
+import {
+  addSubtask,
+  canHaveChildren,
+  getTodoById,
+  hasSubtasks,
+  listSubtasks,
+  updateParentStateFromSubtasks,
+} from "../db";
 import { redirect, unauthorized } from "../http";
 import {
   canManageGroupTodo,
@@ -6,6 +13,7 @@ import {
   quickAddTodo,
   removeGroupTodo,
   removeTodo,
+  setTodoPosition,
   transitionGroupTodoState,
   transitionGroupTodoStateWithPosition,
   transitionTodoState,
@@ -35,10 +43,27 @@ export async function handleTodoCreate(req: Request, session: Session | null) {
   const title = String(form.get("title") ?? "");
   const tags = String(form.get("tags") ?? "");
   const groupId = parseGroupId(form.get("group_id"));
+  const parentId = parseGroupId(form.get("parent_id"));
 
   // Check permission for group todo
   if (groupId && !canManageGroupTodo(session.npub, groupId)) {
     return new Response("Forbidden", { status: 403 });
+  }
+
+  // If parent_id is provided, create as subtask
+  if (parentId) {
+    const parent = getTodoById(parentId);
+    if (!parent) {
+      return new Response("Parent task not found", { status: 404 });
+    }
+    if (!canHaveChildren(parent)) {
+      return new Response("Subtasks cannot have children (2 levels max)", { status: 400 });
+    }
+    addSubtask(title, parentId, session.npub);
+    // Sync parent state to match slowest subtask
+    updateParentStateFromSubtasks(parentId);
+    // Redirect to the parent's context (group or personal)
+    return redirect(getRedirectUrl(parent.group_id));
   }
 
   quickAddTodo(session.npub, title, tags, groupId);
@@ -122,7 +147,9 @@ export async function handleApiTodoState(req: Request, session: Session | null, 
   }
 
   try {
-    const body = await req.json();
+    const bodyText = await req.text();
+    console.log("[handleApiTodoState] Received body:", bodyText, "for todo:", id);
+    const body = JSON.parse(bodyText);
     const nextState = normalizeStateInput(String(body.state ?? "ready"));
     const groupId = body.group_id ? Number(body.group_id) : null;
     // Position is optional - only provided when reordering within column
@@ -152,7 +179,184 @@ export async function handleApiTodoState(req: Request, session: Session | null, 
     }
 
     return new Response(JSON.stringify({ success: true, state: nextState, position }), { status: 200, headers: jsonHeaders });
+  } catch (err) {
+    console.error("[handleApiTodoState] Error:", err);
+    return new Response(JSON.stringify({ error: "Invalid request body", details: String(err) }), { status: 400, headers: jsonHeaders });
+  }
+}
+
+/**
+ * POST /api/todos/:id/position - JSON API for position-only updates (Summary card reordering)
+ */
+export async function handleApiTodoPosition(req: Request, session: Session | null, id: number) {
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: jsonHeaders });
+  }
+
+  try {
+    const body = await req.json();
+    const position = typeof body.position === "number" ? body.position : null;
+
+    if (position === null) {
+      return new Response(JSON.stringify({ error: "Position is required" }), { status: 400, headers: jsonHeaders });
+    }
+
+    // Verify the todo exists and belongs to the user
+    const todo = getTodoById(id);
+    if (!todo) {
+      return new Response(JSON.stringify({ error: "Task not found" }), { status: 404, headers: jsonHeaders });
+    }
+
+    // Check ownership - task must belong to the user
+    if (todo.owner !== session.npub) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: jsonHeaders });
+    }
+
+    const updated = setTodoPosition(id, position);
+    if (!updated) {
+      return new Response(JSON.stringify({ error: "Failed to update position" }), { status: 400, headers: jsonHeaders });
+    }
+
+    return new Response(JSON.stringify({ success: true, position }), { status: 200, headers: jsonHeaders });
   } catch (_err) {
     return new Response(JSON.stringify({ error: "Invalid request body" }), { status: 400, headers: jsonHeaders });
   }
+}
+
+// GET /api/todos/:id/subtasks - List subtasks and parent info
+export function handleGetSubtasks(
+  _req: Request,
+  session: Session | null,
+  id: number
+) {
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const todo = getTodoById(id);
+  if (!todo) {
+    return new Response(JSON.stringify({ error: "Task not found" }), {
+      status: 404,
+      headers: jsonHeaders,
+    });
+  }
+
+  const subtasks = listSubtasks(id);
+  const canAddSubtask = canHaveChildren(todo);
+
+  // Get parent info if this is a subtask
+  let parent = null;
+  if (todo.parent_id) {
+    const parentTodo = getTodoById(todo.parent_id);
+    if (parentTodo) {
+      parent = { id: parentTodo.id, title: parentTodo.title };
+    }
+  }
+
+  return new Response(
+    JSON.stringify({
+      subtasks,
+      canAddSubtask,
+      parent,
+      hasSubtasks: subtasks.length > 0,
+    }),
+    { status: 200, headers: jsonHeaders }
+  );
+}
+
+// POST /api/todos/:id/subtasks - Create a subtask
+export async function handleCreateSubtask(
+  req: Request,
+  session: Session | null,
+  id: number
+) {
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const parent = getTodoById(id);
+  if (!parent) {
+    return new Response(JSON.stringify({ error: "Parent task not found" }), {
+      status: 404,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Check 2-level max rule
+  if (!canHaveChildren(parent)) {
+    return new Response(
+      JSON.stringify({ error: "Subtasks cannot have children (2 levels max)" }),
+      { status: 400, headers: jsonHeaders }
+    );
+  }
+
+  // Check permission for group todo
+  if (parent.group_id && !canManageGroupTodo(session.npub, parent.group_id)) {
+    return new Response(JSON.stringify({ error: "Forbidden" }), {
+      status: 403,
+      headers: jsonHeaders,
+    });
+  }
+
+  try {
+    const body = await req.json();
+    const title = String(body.title ?? "").trim();
+
+    if (!title) {
+      return new Response(JSON.stringify({ error: "Title is required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+
+    const subtask = addSubtask(title, id, session.npub);
+
+    if (!subtask) {
+      return new Response(
+        JSON.stringify({ error: "Failed to create subtask" }),
+        { status: 500, headers: jsonHeaders }
+      );
+    }
+
+    // Sync parent state to match slowest subtask
+    const updatedParent = updateParentStateFromSubtasks(id);
+
+    return new Response(JSON.stringify({ success: true, subtask, parentState: updatedParent?.state }), {
+      status: 201,
+      headers: jsonHeaders,
+    });
+  } catch (_err) {
+    return new Response(JSON.stringify({ error: "Invalid request" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+}
+
+// GET /api/todos/:id/has-subtasks - Quick check if task has subtasks (for delete confirmation)
+export function handleHasSubtasks(
+  _req: Request,
+  session: Session | null,
+  id: number
+) {
+  if (!session) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const has = hasSubtasks(id);
+  const count = has ? listSubtasks(id).length : 0;
+
+  return new Response(JSON.stringify({ hasSubtasks: has, count }), {
+    status: 200,
+    headers: jsonHeaders,
+  });
 }

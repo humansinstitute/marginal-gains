@@ -63,6 +63,15 @@ export type TeamInvitation = {
   // Zero-knowledge encryption fields
   encrypted_team_key: string | null;
   creator_pubkey: string | null;
+  // Optional label for identifying invites
+  label: string | null;
+};
+
+export type InviteGroup = {
+  id: number;
+  invitation_id: number;
+  group_id: number;
+  created_at: number;
 };
 
 // ============================================================================
@@ -160,6 +169,22 @@ function initMasterSchema(db: Database): void {
   // creator_pubkey: Public key of the invite creator (needed for decryption)
   addColumn(db, "ALTER TABLE team_invitations ADD COLUMN encrypted_team_key TEXT DEFAULT NULL");
   addColumn(db, "ALTER TABLE team_invitations ADD COLUMN creator_pubkey TEXT DEFAULT NULL");
+
+  // Add label column for naming invite codes (e.g., "Workshop on 5th")
+  addColumn(db, "ALTER TABLE team_invitations ADD COLUMN label TEXT DEFAULT NULL");
+
+  // Invite groups - associates groups with invites for auto-joining
+  // When a user redeems an invite, they are added to these groups (which gives channel access)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS invite_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invitation_id INTEGER NOT NULL REFERENCES team_invitations(id) ON DELETE CASCADE,
+      group_id INTEGER NOT NULL,
+      created_at INTEGER DEFAULT (unixepoch()),
+      UNIQUE(invitation_id, group_id)
+    )
+  `);
+  db.run("CREATE INDEX IF NOT EXISTS idx_invite_groups_invitation ON invite_groups(invitation_id)");
 }
 
 /**

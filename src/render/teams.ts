@@ -10,6 +10,12 @@ import { getAppName, getFaviconUrl } from "../routes/app-settings";
 import type { Team, TeamMembership, TeamInvitation } from "../db-router";
 import type { Session, SessionTeamMembership } from "../types";
 
+// Group info for invite modal
+export type InviteGroupOption = {
+  id: number;
+  name: string;
+};
+
 // ============================================================================
 // Teams List Page
 // ============================================================================
@@ -181,7 +187,8 @@ export function renderTeamSettingsPage(
   team: Team,
   members: TeamMembership[],
   invitations: TeamInvitation[],
-  isOwner: boolean
+  isOwner: boolean,
+  groups: InviteGroupOption[] = []
 ): string {
   return `<!doctype html>
 <html lang="en">
@@ -189,7 +196,7 @@ ${renderHead(`${team.display_name} Settings`)}
 <body class="team-settings-page">
   <main class="team-settings-shell">
     ${renderTeamSettingsHeader(session, team)}
-    ${renderTeamSettingsContent(session, team, members, invitations, isOwner)}
+    ${renderTeamSettingsContent(session, team, members, invitations, isOwner, groups)}
   </main>
   ${renderTeamSettingsSessionSeed(session, team, isOwner)}
   <script type="module" src="/app.js?v=3"></script>
@@ -213,14 +220,15 @@ function renderTeamSettingsContent(
   team: Team,
   members: TeamMembership[],
   invitations: TeamInvitation[],
-  isOwner: boolean
+  isOwner: boolean,
+  groups: InviteGroupOption[] = []
 ) {
   return `<div class="team-settings-content">
     ${renderTeamInfoSection(team, isOwner)}
     ${renderTeamMembersSection(members, isOwner)}
     ${renderTeamInvitationsSection(invitations)}
     ${isOwner ? renderTeamDangerZone(team) : ""}
-    ${renderInviteModal()}
+    ${renderInviteModal(groups)}
   </div>`;
 }
 
@@ -324,9 +332,11 @@ function renderTeamInvitationsSection(invitations: TeamInvitation[]) {
     .map((inv) => {
       const expiresDate = new Date(inv.expires_at * 1000);
       const isExpired = expiresDate < new Date();
+      const labelDisplay = inv.label ? escapeHtml(inv.label) : `<span class="text-muted">No label</span>`;
       return `<tr class="${isExpired ? "expired" : ""}">
+        <td class="invite-label">${labelDisplay}</td>
         <td class="invite-role">${inv.role}</td>
-        <td class="invite-usage">${inv.single_use ? "Single use" : "Multi-use"} (${inv.redeemed_count} used)</td>
+        <td class="invite-usage">${inv.single_use ? "Single" : "Multi"} (${inv.redeemed_count})</td>
         <td class="invite-expires">${isExpired ? "Expired" : expiresDate.toLocaleDateString()}</td>
         <td class="invite-actions">
           <button type="button" class="ghost danger" data-delete-invite="${inv.id}">Delete</button>
@@ -343,6 +353,7 @@ function renderTeamInvitationsSection(invitations: TeamInvitation[]) {
     ${invitations.length === 0 ? `<p class="settings-empty">No active invitations</p>` : `<table class="team-invites-table">
       <thead>
         <tr>
+          <th>Label</th>
           <th>Role</th>
           <th>Usage</th>
           <th>Expires</th>
@@ -356,7 +367,20 @@ function renderTeamInvitationsSection(invitations: TeamInvitation[]) {
   </section>`;
 }
 
-function renderInviteModal() {
+function renderInviteModal(groups: InviteGroupOption[] = []) {
+  const groupCheckboxes = groups.length > 0 ? `
+        <fieldset class="invite-groups-fieldset">
+          <legend>Auto-join groups (optional)</legend>
+          <div class="invite-groups-list">
+            ${groups.map((g) => `
+              <label class="checkbox-label group-option">
+                <input type="checkbox" name="groupIds" value="${g.id}" />
+                <span class="group-name">${escapeHtml(g.name)}</span>
+              </label>
+            `).join("")}
+          </div>
+        </fieldset>` : "";
+
   return `<div class="teams-modal" data-invite-modal hidden>
     <div class="teams-modal-body">
       <header class="teams-modal-header">
@@ -364,6 +388,11 @@ function renderInviteModal() {
         <button type="button" class="ghost" data-close-modal>&times;</button>
       </header>
       <form class="teams-form" data-create-invite-form>
+        <label>
+          <span>Label (optional)</span>
+          <input type="text" name="label" placeholder="e.g. Workshop on 5th" />
+          <small class="form-hint">A name to help you identify this invite code.</small>
+        </label>
         <label>
           <span>Role for new members</span>
           <select name="role">
@@ -384,6 +413,7 @@ function renderInviteModal() {
           <input type="checkbox" name="singleUse" checked />
           <span>Single-use (can only be used once)</span>
         </label>
+        ${groupCheckboxes}
         <div class="teams-form-actions">
           <button type="button" class="ghost" data-close-modal>Cancel</button>
           <button type="submit" class="primary">Create</button>

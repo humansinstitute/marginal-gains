@@ -92,6 +92,18 @@ import {
 } from "./routes/groups";
 import { handleHome, handleTodos, handleTodosRedirect } from "./routes/home";
 import {
+  handleOnboardingPage,
+  handlePreviewInvite,
+  handleRedeemInvite as handleRedeemTeamInvite,
+  handleStoreInviteKeys,
+} from "./routes/invites";
+import {
+  handleListOwnKeyRequests,
+  handleListPendingKeyRequests,
+  handleFulfillKeyRequest,
+  handleRejectKeyRequest,
+} from "./routes/key-requests";
+import {
   handleGetPushStatus,
   handleGetVapidPublicKey,
   handlePushSubscribe,
@@ -198,6 +210,9 @@ import {
   handleTeamTodoState,
   handleTeamTodoDelete,
   handleTeamApiTodoState,
+  handleTeamApiTodoPosition,
+  handleTeamGetSubtasks,
+  handleTeamCreateSubtask,
 } from "./routes/team-todos";
 import {
   handleTeamsPage,
@@ -219,7 +234,17 @@ import {
   handleListTeamManagers,
   handleAddTeamManager,
 } from "./routes/teams";
-import { handleApiTodoState, handleTodoCreate, handleTodoDelete, handleTodoState, handleTodoUpdate } from "./routes/todos";
+import {
+  handleApiTodoPosition,
+  handleApiTodoState,
+  handleCreateSubtask,
+  handleGetSubtasks,
+  handleHasSubtasks,
+  handleTodoCreate,
+  handleTodoDelete,
+  handleTodoState,
+  handleTodoUpdate,
+} from "./routes/todos";
 import {
   handleWalletPage,
   handleWalletConnect,
@@ -426,7 +451,14 @@ const server = Bun.serve({
         const groupMembersMatch = pathname.match(/^\/chat\/groups\/(\d+)\/members$/);
         if (groupMembersMatch) return handleListGroupMembers(session, Number(groupMembersMatch[1]));
 
-        if (pathname === "/") return handleHome(session);
+        // Handle invite codes on home page - /?code={inviteCode}
+        if (pathname === "/") {
+          const inviteCode = url.searchParams.get("code");
+          if (inviteCode) {
+            return handleOnboardingPage(session, inviteCode);
+          }
+          return handleHome(session);
+        }
         if (pathname === "/todo") return requireAuth() || handleTodosRedirect(url);
         if (pathname === "/todo/kanban") return requireAuth() || handleTodos(url, session, "kanban");
         if (pathname === "/todo/list") return requireAuth() || handleTodos(url, session, "list");
@@ -450,6 +482,10 @@ const server = Bun.serve({
         if (teamTodosKanbanMatch) return handleTeamTodos(url, session, teamTodosKanbanMatch[1], "kanban");
         const teamTodosListMatch = pathname.match(/^\/t\/([^/]+)\/todo\/list$/);
         if (teamTodosListMatch) return handleTeamTodos(url, session, teamTodosListMatch[1], "list");
+
+        // Team-scoped subtask API routes (GET)
+        const teamSubtasksMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/subtasks$/);
+        if (teamSubtasksMatch) return handleTeamGetSubtasks(req, session, teamSubtasksMatch[1], Number(teamSubtasksMatch[2]));
 
         // Team-scoped CRM page
         const teamCrmPageMatch = pathname.match(/^\/t\/([^/]+)\/crm$/);
@@ -498,6 +534,12 @@ const server = Bun.serve({
         const teamThreadTasksMatch = pathname.match(/^\/t\/([^/]+)\/api\/threads\/(\d+)\/tasks$/);
         if (teamThreadTasksMatch) return handleTeamGetThreadTasks(session, teamThreadTasksMatch[1], Number(teamThreadTasksMatch[2]));
 
+        // Team-scoped key request routes
+        const teamKeyRequestsMatch = pathname.match(/^\/t\/([^/]+)\/api\/key-requests$/);
+        if (teamKeyRequestsMatch) return handleListOwnKeyRequests(session, teamKeyRequestsMatch[1]);
+        const teamKeyRequestsPendingMatch = pathname.match(/^\/t\/([^/]+)\/api\/key-requests\/pending$/);
+        if (teamKeyRequestsPendingMatch) return handleListPendingKeyRequests(session, teamKeyRequestsPendingMatch[1]);
+
         if (pathname === "/wallet") return requireAuth() || handleWalletPage(session);
 
         // Push notification routes
@@ -525,6 +567,12 @@ const server = Bun.serve({
         const opportunityTasksMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)\/tasks$/);
         if (opportunityTasksMatch) return handleGetOpportunityTasks(session, Number(opportunityTasksMatch[1]));
 
+        // Subtask routes
+        const subtasksMatch = pathname.match(/^\/api\/todos\/(\d+)\/subtasks$/);
+        if (subtasksMatch) return handleGetSubtasks(req, session, Number(subtasksMatch[1]));
+        const hasSubtasksMatch = pathname.match(/^\/api\/todos\/(\d+)\/has-subtasks$/);
+        if (hasSubtasksMatch) return handleHasSubtasks(req, session, Number(hasSubtasksMatch[1]));
+
         // Wingman routes
         if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
         if (pathname === "/api/wingman/costs") return handleGetWingmanCosts(session);
@@ -532,6 +580,9 @@ const server = Bun.serve({
 
         // App settings routes (admin only)
         if (pathname === "/api/app/settings") return handleGetAppSettings(session);
+
+        // Team invite preview (public - no auth required)
+        if (pathname === "/api/invites/preview") return handlePreviewInvite(url);
 
         // Community encryption routes
         if (pathname === "/api/community/status") return handleCommunityStatus(session);
@@ -676,6 +727,10 @@ const server = Bun.serve({
         if (teamTodoDeleteMatch) return handleTeamTodoDelete(req, session, teamTodoDeleteMatch[1], Number(teamTodoDeleteMatch[2]));
         const teamApiTodoStateMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/state$/);
         if (teamApiTodoStateMatch) return handleTeamApiTodoState(req, session, teamApiTodoStateMatch[1], Number(teamApiTodoStateMatch[2]));
+        const teamApiTodoPositionMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/position$/);
+        if (teamApiTodoPositionMatch) return handleTeamApiTodoPosition(req, session, teamApiTodoPositionMatch[1], Number(teamApiTodoPositionMatch[2]));
+        const teamCreateSubtaskMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/subtasks$/);
+        if (teamCreateSubtaskMatch) return handleTeamCreateSubtask(req, session, teamCreateSubtaskMatch[1], Number(teamCreateSubtaskMatch[2]));
 
         // Team-scoped CRM POST routes
         const teamCreateCompanyMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/companies$/);
@@ -693,6 +748,16 @@ const server = Bun.serve({
         const teamLinkThreadMatch = pathname.match(/^\/t\/([^/]+)\/api\/tasks\/(\d+)\/link$/);
         if (teamLinkThreadMatch) return handleTeamLinkThreadToTask(req, session, teamLinkThreadMatch[1], Number(teamLinkThreadMatch[2]));
 
+        // Team-scoped key request POST routes
+        const teamKeyRequestFulfillMatch = pathname.match(/^\/t\/([^/]+)\/api\/key-requests\/(\d+)\/fulfill$/);
+        if (teamKeyRequestFulfillMatch) {
+          return handleFulfillKeyRequest(req, session, teamKeyRequestFulfillMatch[1], Number(teamKeyRequestFulfillMatch[2]));
+        }
+        const teamKeyRequestRejectMatch = pathname.match(/^\/t\/([^/]+)\/api\/key-requests\/(\d+)\/reject$/);
+        if (teamKeyRequestRejectMatch) {
+          return handleRejectKeyRequest(req, session, teamKeyRequestRejectMatch[1], Number(teamKeyRequestRejectMatch[2]));
+        }
+
         if (pathname === "/api/assets/upload") return handleAssetUpload(req, session);
         if (pathname === "/ai/summary") return handleSummaryPost(req);
         if (pathname === "/ai/tasks") return handleAiTasksPost(req);
@@ -707,6 +772,14 @@ const server = Bun.serve({
         // API endpoint for Kanban drag-drop (JSON)
         const apiStateMatch = pathname.match(/^\/api\/todos\/(\d+)\/state$/);
         if (apiStateMatch) return handleApiTodoState(req, session, Number(apiStateMatch[1]));
+
+        // API endpoint for position-only updates (Summary card reordering)
+        const apiPositionMatch = pathname.match(/^\/api\/todos\/(\d+)\/position$/);
+        if (apiPositionMatch) return handleApiTodoPosition(req, session, Number(apiPositionMatch[1]));
+
+        // API endpoint for creating subtasks (JSON)
+        const createSubtaskMatch = pathname.match(/^\/api\/todos\/(\d+)\/subtasks$/);
+        if (createSubtaskMatch) return handleCreateSubtask(req, session, Number(createSubtaskMatch[1]));
 
         const deleteMatch = pathname.match(/^\/todos\/(\d+)\/delete$/);
         if (deleteMatch) return handleTodoDelete(req, session, Number(deleteMatch[1]));
@@ -756,6 +829,10 @@ const server = Bun.serve({
         if (pathname === "/api/invites/redeem") return handleRedeemInvite(req, session);
         if (pathname === "/api/community/migration/batch") return handleMigrationBatch(req, session);
         if (pathname === "/api/community/migration/complete") return handleCompleteMigration(session);
+
+        // Team invite redemption and key storage (new onboarding flow)
+        if (pathname === "/api/team-invites/redeem") return handleRedeemTeamInvite(req, session);
+        if (pathname === "/api/team-invites/keys") return handleStoreInviteKeys(req, session);
 
         // CRM routes (admin only)
         if (pathname === "/api/crm/companies") return handleCreateCompany(req, session);

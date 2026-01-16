@@ -86,7 +86,7 @@ ${renderHead()}
     ${renderTaskEditModal(pageState.groupId, pageState.groupMembers, pageState.userGroups)}
   </main>
   ${renderSessionSeed(session, pageState.groupId, pageState.activeTodos)}
-  ${renderKanbanStoreScript()}
+  <script src="/kanban-store.js"></script>
   <script src="/lib/alpine.min.js" defer></script>
   <script type="module" src="/app.js?v=3"></script>
 </body>
@@ -322,198 +322,6 @@ function renderSessionSeed(session: Session | null, groupId: number | null, todo
   </script>`;
 }
 
-// Inline kanban store script - must run before Alpine loads
-function renderKanbanStoreScript() {
-  return `<script>
-    // Helper functions
-    window.formatAvatarInitials = function(npub) {
-      if (!npub) return '...';
-      return npub.replace(/^npub1/, '').slice(0, 2).toUpperCase();
-    };
-    window.formatPriority = function(priority) {
-      var labels = { urgent: 'Urgent', high: 'High', medium: 'Medium', low: 'Low', rock: 'Rock', pebble: 'Pebble', sand: 'Sand' };
-      return labels[priority] || priority;
-    };
-
-    // Kanban store factory - initializes columns immediately, not in init()
-    window.createKanbanStore = function(initialTodos, groupId) {
-      // Pre-process todos into columns immediately (before Alpine parses x-for)
-      var cols = { 'new': [], ready: [], in_progress: [], review: [], done: [] };
-      (initialTodos || []).forEach(function(todo) {
-        // Ensure each todo has a valid id
-        if (todo && todo.id != null && cols[todo.state]) {
-          cols[todo.state].push(todo);
-        }
-      });
-      // Sort each column by position
-      ['new', 'ready', 'in_progress', 'review', 'done'].forEach(function(state) {
-        cols[state].sort(function(a, b) {
-          if (a.position == null && b.position == null) return 0;
-          if (a.position == null) return 1;
-          if (b.position == null) return -1;
-          return a.position - b.position;
-        });
-      });
-
-      console.log('[KanbanStore] Creating store with', (initialTodos || []).length, 'todos');
-
-      return {
-        columns: cols,
-        groupId: groupId,
-        loading: false,
-        syncing: false,
-        error: null,
-        draggedCard: null,
-        draggedFromColumn: null,
-
-        init: function() {
-          console.log('[KanbanStore] Initialized - columns:', {
-            'new': this.columns['new'].length,
-            ready: this.columns.ready.length,
-            in_progress: this.columns.in_progress.length,
-            review: this.columns.review.length,
-            done: this.columns.done.length
-          });
-        },
-
-        onDragStart: function(event, card, columnName) {
-          this.draggedCard = card;
-          this.draggedFromColumn = columnName;
-          event.dataTransfer.effectAllowed = 'move';
-          event.dataTransfer.setData('text/plain', card.id);
-          event.target.classList.add('dragging');
-        },
-
-        onDragEnd: function(event) {
-          event.target.classList.remove('dragging');
-          this.draggedCard = null;
-          this.draggedFromColumn = null;
-          document.querySelectorAll('.drop-target').forEach(function(el) { el.classList.remove('drop-target'); });
-          document.querySelectorAll('.drop-placeholder').forEach(function(el) { el.remove(); });
-        },
-
-        onDragOver: function(event, columnName) {
-          if (!this.draggedCard) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'move';
-          var container = event.currentTarget;
-          container.classList.add('drop-target');
-
-          var cards = Array.from(container.querySelectorAll('.kanban-card:not(.dragging)'));
-          var afterCard = this.getCardAfterCursor(cards, event.clientY);
-          var placeholder = container.querySelector('.drop-placeholder');
-          if (!placeholder) {
-            placeholder = document.createElement('div');
-            placeholder.className = 'drop-placeholder';
-          }
-          if (afterCard) {
-            container.insertBefore(placeholder, afterCard);
-          } else {
-            container.appendChild(placeholder);
-          }
-        },
-
-        onDragLeave: function(event) {
-          var container = event.currentTarget;
-          if (!container.contains(event.relatedTarget)) {
-            container.classList.remove('drop-target');
-            var placeholder = container.querySelector('.drop-placeholder');
-            if (placeholder) placeholder.remove();
-          }
-        },
-
-        onDrop: async function(event, targetColumn) {
-          event.preventDefault();
-          var container = event.currentTarget;
-          container.classList.remove('drop-target');
-          if (!this.draggedCard) return;
-
-          var card = this.draggedCard;
-          var oldColumn = this.draggedFromColumn;
-          var newColumn = targetColumn;
-
-          var cards = Array.from(container.querySelectorAll('.kanban-card:not(.dragging)'));
-          var afterCard = this.getCardAfterCursor(cards, event.clientY);
-          var dropIndex = afterCard ? cards.indexOf(afterCard) : cards.length;
-          var position = this.calculatePosition(this.columns[newColumn], dropIndex);
-
-          container.querySelectorAll('.drop-placeholder').forEach(function(el) { el.remove(); });
-
-          // Check for no-op
-          if (oldColumn === newColumn) {
-            var currentIndex = this.columns[oldColumn].findIndex(function(c) { return c.id === card.id; });
-            var adjustedIndex = currentIndex < dropIndex ? dropIndex - 1 : dropIndex;
-            if (currentIndex === adjustedIndex || currentIndex === dropIndex) return;
-          }
-
-          // Optimistic UI update
-          var oldIndex = this.columns[oldColumn].findIndex(function(c) { return c.id === card.id; });
-          if (oldIndex > -1) this.columns[oldColumn].splice(oldIndex, 1);
-
-          card.state = newColumn;
-          card.position = position;
-
-          var insertIndex = oldColumn === newColumn && oldIndex < dropIndex ? dropIndex - 1 : dropIndex;
-          this.columns[newColumn].splice(insertIndex, 0, card);
-
-          // Sync to server
-          this.syncing = true;
-          try {
-            var body = { state: newColumn, position: position };
-            if (this.groupId) body.group_id = this.groupId;
-            var res = await fetch('/api/todos/' + card.id + '/state', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body)
-            });
-            if (!res.ok) throw new Error('Sync failed');
-          } catch (err) {
-            console.error('[KanbanStore] Sync error:', err);
-            window.location.reload();
-          }
-          this.syncing = false;
-        },
-
-        getCardAfterCursor: function(cards, y) {
-          var closestCard = null;
-          var closestOffset = Number.NEGATIVE_INFINITY;
-          cards.forEach(function(card) {
-            var box = card.getBoundingClientRect();
-            var offset = y - box.top - box.height / 2;
-            if (offset < 0 && offset > closestOffset) {
-              closestOffset = offset;
-              closestCard = card;
-            }
-          });
-          return closestCard;
-        },
-
-        calculatePosition: function(column, dropIndex) {
-          var BASE = 65536;
-          if (column.length === 0) return BASE;
-          var positions = column.map(function(c, i) { return c.position != null ? c.position : (i + 1) * BASE; });
-          if (dropIndex === 0) return Math.floor(positions[0] / 2);
-          if (dropIndex >= column.length) return positions[positions.length - 1] + BASE;
-          return Math.floor((positions[dropIndex - 1] + positions[dropIndex]) / 2);
-        },
-
-        getColumnCount: function(columnName) {
-          return this.columns[columnName] ? this.columns[columnName].length : 0;
-        },
-
-        isColumnEmpty: function(columnName) {
-          return !this.columns[columnName] || this.columns[columnName].length === 0;
-        },
-
-        getCardTags: function(card) {
-          if (!card || !card.tags) return [];
-          return card.tags.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t.length > 0; });
-        }
-      };
-    };
-  </script>`;
-}
-
 function buildPageState(
   todos: TodoDisplay[],
   filterTags: string[],
@@ -528,8 +336,10 @@ function buildPageState(
   viewMode: ViewMode
 ): PageState {
   const groupId = selectedGroup?.id ?? null;
-  const activeTodos = todos.filter((t) => t.state !== "done");
-  const doneTodos = todos.filter((t) => t.state === "done");
+  // Active todos: everything except archived (done is still active, just completed)
+  const activeTodos = todos.filter((t) => t.state !== "archived");
+  // Archive section shows only archived tasks
+  const doneTodos = todos.filter((t) => t.state === "archived");
 
   // Build URLs with view mode route and group context preserved
   const viewPath = `/todo/${viewMode}`;
@@ -694,7 +504,54 @@ function _renderKanbanBoard(todos: TodoDisplay[], _emptyMessage: string, groupId
   return `<div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""}>${columnHtml}</div>`;
 }
 
-function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isAllTasksView = false) {
+function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isAllTasksView = false, teamSlug: string | null = null) {
+  // Summary column for parent tasks (reorderable within column)
+  const summaryColumn = `
+    <div class="kanban-column kanban-column-summary" data-kanban-column="summary" x-show="getColumnCount('summary') > 0">
+      <div class="kanban-column-header">
+        <h3>Summary Tasks</h3>
+        <span class="kanban-count" x-text="getColumnCount('summary')"></span>
+      </div>
+      <div
+        class="kanban-cards"
+        data-kanban-cards="summary"
+        @dragover.prevent="onDragOver($event, 'summary')"
+        @dragleave="onDragLeave($event)"
+        @drop.prevent="onDrop($event, 'summary')"
+      >
+        <template x-for="card in columns.summary" :key="card.id">
+          <div
+            class="kanban-card is-parent"
+            :class="'state-' + card.state"
+            draggable="true"
+            :data-todo-id="card.id"
+            :data-todo-state="card.state"
+            :data-group-id="card.group_id || ${groupId ?? "null"}"
+            @dragstart="onDragStart($event, card, 'summary')"
+            @dragend="onDragEnd($event)"
+            @click="window.openTaskModal && window.openTaskModal(card.id)"
+          >
+            <div class="kanban-card-header">
+              <span class="kanban-card-title" x-text="card.title"></span>
+              <template x-if="card.subtaskProgress">
+                <span class="subtask-progress" x-html="formatProgressSquares(card.subtaskProgress)"></span>
+              </template>
+            </div>
+            <template x-if="card.description">
+              <p class="kanban-card-desc" x-text="card.description.slice(0, 100) + (card.description.length > 100 ? '...' : '')"></p>
+            </template>
+            <div class="kanban-card-meta">
+              <span class="badge" :class="'priority-' + card.priority" x-text="formatPriority(card.priority)"></span>
+              <template x-for="(tag, idx) in getCardTags(card)" :key="card.id + '-tag-' + idx">
+                <span class="tag-chip" x-text="tag"></span>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>`;
+
+  // Regular workflow columns
   const columns = [
     { state: "new", label: "New" },
     { state: "ready", label: "Ready" },
@@ -720,16 +577,21 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
         <template x-for="card in columns['${col.state}']" :key="card.id">
           <div
             class="kanban-card"
-            draggable="${canManage ? "true" : "false"}"
+            :class="{ 'is-subtask': card.parent_id }"
+            ${canManage ? ':draggable="canDragCard(card)"' : 'draggable="false"'}
             :data-todo-id="card.id"
             :data-todo-state="card.state"
             :data-todo-position="card.position"
+            :data-parent-id="card.parent_id"
             :data-group-id="card.group_id || ${groupId ?? "null"}"
             :data-assigned-to="card.assigned_to || ${isAllTasksView ? "null" : "(card.group_id === null ? card.owner : null)"}"
             @dragstart="onDragStart($event, card, '${col.state}')"
             @dragend="onDragEnd($event)"
           >
             <div class="kanban-card-header">
+              <template x-if="card.parent_id">
+                <span class="subtask-prefix">&#8627;</span>
+              </template>
               <span class="kanban-card-title" x-text="card.title"></span>
               <template x-if="card.assigned_to || ${isAllTasksView ? "false" : "(card.group_id === null)"}">
                 <span class="assignee-avatar" :data-assignee-npub="card.assigned_to || card.owner" title="Assigned">
@@ -766,7 +628,8 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
       class="kanban-board"
       data-kanban-board
       ${groupId ? `data-group-id="${groupId}"` : ""}
-      x-data="createKanbanStore(window.__INITIAL_TODOS__, ${groupId ?? "null"})"
+      ${teamSlug ? `data-team-slug="${teamSlug}"` : ""}
+      x-data="createKanbanStore(window.__INITIAL_TODOS__, ${groupId ?? "null"}, ${teamSlug ? `'${teamSlug}'` : "null"})"
       x-init="init()"
     >
       <!-- Sync indicator -->
@@ -779,6 +642,7 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
 
       <!-- Columns -->
       <div class="kanban-columns-wrapper">
+        ${summaryColumn}
         ${columnHtml}
       </div>
     </div>`;
@@ -1055,11 +919,12 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
   return `<div class="task-modal-overlay" data-task-modal hidden>
     <div class="task-modal">
       <div class="task-modal-header">
-        <h2>Edit Task</h2>
+        <h2 data-task-modal-heading>Edit Task</h2>
         <button class="task-modal-close" type="button" data-task-modal-close aria-label="Close">&times;</button>
       </div>
       <form class="task-modal-form" method="post" data-task-modal-form>
         <input type="hidden" name="group_id" data-task-modal-group-id value="" />
+        <input type="hidden" name="parent_id" data-task-modal-parent-id value="" />
         <label>Board
           <select name="board" data-task-modal-board>
             ${boardOptions}
@@ -1086,6 +951,7 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
               <option value="in_progress">${formatStateLabel("in_progress")}</option>
               <option value="review">${formatStateLabel("review")}</option>
               <option value="done">${formatStateLabel("done")}</option>
+              <option value="archived">${formatStateLabel("archived")}</option>
             </select>
           </label>
         </div>
@@ -1107,8 +973,18 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
           <div class="task-modal-links-header">Links</div>
           <div class="task-modal-links-list" data-task-modal-links-list></div>
         </div>
+        <div class="task-modal-parent" data-task-modal-parent hidden>
+          <span class="task-modal-parent-label">Parent:</span>
+          <span class="task-modal-parent-title" data-task-modal-parent-title></span>
+        </div>
+        <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
+          <div class="task-modal-subtasks-header">Subtasks</div>
+          <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
+          <button type="button" class="task-modal-add-subtask" data-task-modal-add-subtask>+ Add Subtask</button>
+        </div>
         <div class="task-modal-actions">
           <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
+          <button type="button" class="task-modal-archive" data-task-modal-archive hidden>Archive</button>
           <div class="task-modal-actions-right">
             <button type="button" data-task-modal-cancel>Cancel</button>
             <button type="submit" class="primary">Save</button>
@@ -1164,10 +1040,10 @@ ${renderHead()}
     ${renderQrModal()}
     ${renderProfileModal()}
     ${renderPinModal()}
-    ${renderTeamTaskEditModal(pageState.groupId, [], userGroups, teamSlug)}
+    ${renderTeamTaskEditModal(pageState.groupId, teamSlug)}
   </main>
   ${renderTeamSessionSeed(session, pageState.groupId, teamSlug, pageState.activeTodos)}
-  ${renderKanbanStoreScript()}
+  <script src="/kanban-store.js"></script>
   <script src="/lib/alpine.min.js" defer></script>
   <script type="module" src="/app.js?v=3"></script>
 </body>
@@ -1237,8 +1113,10 @@ function buildTeamPageState(
   viewMode: ViewMode
 ): TeamPageState {
   const groupId = selectedGroup?.id ?? null;
-  const activeTodos = todos.filter((t) => t.state !== "done");
-  const doneTodos = todos.filter((t) => t.state === "done");
+  // Active todos: everything except archived (done is still active, just completed)
+  const activeTodos = todos.filter((t) => t.state !== "archived");
+  // Archive section shows only archived tasks
+  const doneTodos = todos.filter((t) => t.state === "archived");
 
   // Build URLs with team, group context, and view mode preserved
   const baseKanban = groupId ? `/t/${teamSlug}/todo/kanban?group=${groupId}` : `/t/${teamSlug}/todo/kanban`;
@@ -1332,7 +1210,7 @@ function renderTeamWork(state: TeamPageState) {
   // Only render the active view
   const viewContent = isKanban
     ? `<div class="kanban-view" data-kanban-view>
-        ${renderKanbanBoardAlpine(state.groupId, state.canManage, false)}
+        ${renderKanbanBoardAlpine(state.groupId, state.canManage, false, state.teamSlug)}
       </div>`
     : `<div class="todo-list-view" data-list-view>
         ${renderTeamTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.teamSlug)}
@@ -1497,6 +1375,7 @@ function renderTeamTodoItem(todo: Todo, groupId: number | null, canManage: boole
                 ${renderStateOption("new", todo.state)}
                 ${renderStateOption("ready", todo.state)}
                 ${renderStateOption("in_progress", todo.state)}
+                ${renderStateOption("review", todo.state)}
                 ${renderStateOption("done", todo.state)}
               </select>
             </label>
@@ -1545,15 +1424,15 @@ function renderTeamDeleteForm(id: number, groupId: number | null, teamSlug: stri
 }
 
 function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
-  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
   return `<div class="task-modal-overlay" data-task-modal hidden>
     <div class="task-modal">
       <div class="task-modal-header">
-        <h2>Edit Task</h2>
+        <h2 data-task-modal-heading>Edit Task</h2>
         <button class="task-modal-close" type="button" data-task-modal-close aria-label="Close">&times;</button>
       </div>
       <form class="task-modal-form" method="post" data-task-modal-form data-team-slug="${teamSlug}">
-        ${groupIdField}
+        <input type="hidden" name="group_id" data-task-modal-group-id value="${groupId ?? ""}" />
+        <input type="hidden" name="parent_id" data-task-modal-parent-id value="" />
         <label>Title
           <input name="title" data-task-modal-title required />
         </label>
@@ -1573,7 +1452,9 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
               <option value="new">${formatStateLabel("new")}</option>
               <option value="ready">${formatStateLabel("ready")}</option>
               <option value="in_progress">${formatStateLabel("in_progress")}</option>
+              <option value="review">${formatStateLabel("review")}</option>
               <option value="done">${formatStateLabel("done")}</option>
+              <option value="archived">${formatStateLabel("archived")}</option>
             </select>
           </label>
         </div>
@@ -1586,8 +1467,22 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
             <input type="hidden" name="tags" data-task-modal-tags-hidden value="" />
           </div>
         </label>
+        <div class="task-modal-links" data-task-modal-links hidden>
+          <div class="task-modal-links-header">Links</div>
+          <div class="task-modal-links-list" data-task-modal-links-list></div>
+        </div>
+        <div class="task-modal-parent" data-task-modal-parent hidden>
+          <span class="task-modal-parent-label">Parent:</span>
+          <span class="task-modal-parent-title" data-task-modal-parent-title></span>
+        </div>
+        <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
+          <div class="task-modal-subtasks-header">Subtasks</div>
+          <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
+          <button type="button" class="task-modal-add-subtask" data-task-modal-add-subtask>+ Add Subtask</button>
+        </div>
         <div class="task-modal-actions">
           <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
+          <button type="button" class="task-modal-archive" data-task-modal-archive hidden>Archive</button>
           <div class="task-modal-actions-right">
             <button type="button" data-task-modal-cancel>Cancel</button>
             <button type="submit" class="primary">Save</button>

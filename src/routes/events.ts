@@ -114,7 +114,7 @@ function listAllChannels(db: Database) {
 
 function listVisibleChannels(db: Database, npub: string) {
   return db
-    .query<ChannelRow, [string, string]>(
+    .query<ChannelRow, [string]>(
       `SELECT DISTINCT c.id, c.name, c.display_name, c.description, c.is_public, c.owner_npub, c.encrypted
        FROM channels c
        LEFT JOIN channel_groups cg ON c.id = cg.channel_id
@@ -124,7 +124,7 @@ function listVisibleChannels(db: Database, npub: string) {
          AND (c.is_public = 1 OR gm.npub = ?)
        ORDER BY c.id`
     )
-    .all(npub, npub);
+    .all(npub);
 }
 
 function listDmChannels(db: Database, npub: string) {

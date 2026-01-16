@@ -10,6 +10,7 @@
  */
 
 import { isAdmin } from "../config";
+import { getTeamDb } from "../db-router";
 import { jsonResponse, forbidden, unauthorized } from "../http";
 import {
   createTeam,
@@ -33,9 +34,12 @@ import {
   addTeamManager,
   listTeamManagers,
   isTeamSlugAvailable,
+  addInviteGroups,
 } from "../master-db";
 import { renderTeamsPage, renderTeamSettingsPage } from "../render/teams";
+import { TeamDatabase } from "../team-db";
 
+import type { InviteGroupOption } from "../render/teams";
 import type { Session } from "../types";
 
 // ============================================================================
@@ -49,7 +53,13 @@ import type { Session } from "../types";
  */
 export function handleTeamsPage(session: Session | null, url?: URL): Response {
   if (!session) {
-    return unauthorized();
+    // Build return path with query params
+    const returnPath = url ? `/teams${url.search}` : "/teams";
+    const encodedReturn = encodeURIComponent(returnPath);
+    return new Response(null, {
+      status: 302,
+      headers: { Location: `/?return=${encodedReturn}` },
+    });
   }
 
   const teams = getUserTeams(session.npub);
@@ -273,7 +283,11 @@ export function handleJoinTeamPage(session: Session | null, code: string): Respo
  */
 export function handleTeamSettingsPage(session: Session | null, teamSlug: string): Response {
   if (!session) {
-    return unauthorized();
+    const returnPath = encodeURIComponent(`/t/${teamSlug}/settings`);
+    return new Response(null, {
+      status: 302,
+      headers: { Location: `/?return=${returnPath}` },
+    });
   }
 
   const team = getTeamBySlug(teamSlug);
@@ -290,7 +304,22 @@ export function handleTeamSettingsPage(session: Session | null, teamSlug: string
   const invitations = getTeamInvitations(team.id);
   const isOwner = isUserTeamOwner(team.id, session.npub) || isAdmin(session.npub);
 
-  return new Response(renderTeamSettingsPage(session, team, members, invitations, isOwner), {
+  // Fetch groups for the invite modal
+  let groups: InviteGroupOption[] = [];
+  try {
+    const teamDb = new TeamDatabase(getTeamDb(teamSlug));
+    const allGroups = teamDb.listGroups();
+    console.log("[Teams] Settings page - found", allGroups.length, "groups for invite modal:", allGroups.map(g => g.name));
+    groups = allGroups.map((g) => ({
+      id: g.id,
+      name: g.name,
+    }));
+  } catch (err) {
+    console.log("[Teams] Settings page - error fetching groups:", err);
+    // Team DB might not exist yet, continue without groups
+  }
+
+  return new Response(renderTeamSettingsPage(session, team, members, invitations, isOwner, groups), {
     headers: { "Content-Type": "text/html" },
   });
 }
@@ -577,11 +606,15 @@ export async function handleCreateTeamInvitation(
   }
 
   const body = await req.json();
-  const { role, singleUse, expiresInHours } = body as {
+  console.log("[Teams] Create invite request body:", JSON.stringify(body));
+  const { role, singleUse, expiresInHours, groupIds, label } = body as {
     role?: "owner" | "manager" | "member";
     singleUse?: boolean;
     expiresInHours?: number;
+    groupIds?: number[];
+    label?: string;
   };
+  console.log("[Teams] Parsed groupIds:", groupIds, "label:", label);
 
   // Only owners can create owner/manager invites
   if ((role === "owner" || role === "manager") && !isAdmin(session.npub) && !isUserTeamOwner(team.id, session.npub)) {
@@ -593,12 +626,20 @@ export async function handleCreateTeamInvitation(
     session.npub,
     role || "member",
     singleUse !== false,
-    expiresInHours || 168
+    expiresInHours || 168,
+    label?.trim() || null
   );
 
-  // Construct the full invite URL
+  // Add groups to the invitation if provided
+  if (groupIds && groupIds.length > 0) {
+    addInviteGroups(invitation.id, groupIds);
+  }
+
+  // Construct the full invite URL - using new format with query string
+  // Always use HTTPS for invite URLs (server may be behind a reverse proxy)
   const url = new URL(req.url);
-  const inviteUrl = `${url.origin}/teams/join/${code}`;
+  const origin = url.origin.replace(/^http:/, "https:");
+  const inviteUrl = `${origin}/?code=${code}`;
 
   return jsonResponse({
     success: true,
