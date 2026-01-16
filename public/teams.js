@@ -8,6 +8,9 @@
  * - Team settings page
  */
 
+import { teamUrl } from "./api.js";
+import { fetchChannelKey } from "./chatCrypto.js";
+import { wrapKeyForUser } from "./crypto.js";
 import { state, setSession } from "./state.js";
 import { hashInviteCode, storeEncryptedKeyForInvite, redeemInviteForTeamKey } from "./teamCrypto.js";
 
@@ -484,11 +487,19 @@ function initInvitationManagement(team, isOwner) {
       e.preventDefault();
 
       const formData = new FormData(form);
+
+      // Get selected group IDs from checkboxes
+      const groupIds = formData.getAll("groupIds").map((id) => parseInt(id, 10));
+      console.log("[Teams] Form data - groupIds:", groupIds, "label:", formData.get("label"));
+
       const data = {
         role: formData.get("role"),
         expiresInHours: parseInt(formData.get("expiresInHours"), 10),
         singleUse: formData.get("singleUse") === "on",
+        label: formData.get("label") || null,
+        groupIds: groupIds.length > 0 ? groupIds : undefined,
       };
+      console.log("[Teams] Sending invite data:", data);
 
       try {
         const res = await fetch(`/api/teams/${team.id}/invitations`, {
@@ -619,6 +630,94 @@ function generateSlug(name) {
 }
 
 // ============================================================================
+// Key Request Auto-Fulfillment
+// ============================================================================
+
+/**
+ * Fetch pending key requests that this user should fulfill
+ * (requests from invites they created)
+ */
+async function fetchPendingKeyRequests() {
+  try {
+    const res = await fetch(teamUrl("/api/key-requests/pending"));
+    if (!res.ok) {
+      console.error("[Teams] Failed to fetch pending key requests:", res.status);
+      return [];
+    }
+    const data = await res.json();
+    return data.requests || [];
+  } catch (err) {
+    console.error("[Teams] Error fetching pending key requests:", err);
+    return [];
+  }
+}
+
+/**
+ * Fulfill a single key request with a wrapped encryption key
+ */
+async function fulfillKeyRequest(request) {
+  try {
+    // Get the channel key
+    const channelKey = await fetchChannelKey(String(request.channel_id));
+    if (!channelKey) {
+      console.warn(`[Teams] Cannot fulfill request ${request.id} - no channel key available`);
+      return false;
+    }
+
+    // Wrap the key for the requester
+    const wrappedKey = await wrapKeyForUser(channelKey, request.requester_pubkey);
+
+    // Submit to server
+    const res = await fetch(teamUrl(`/api/key-requests/${request.id}/fulfill`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ encryptedKey: wrappedKey, keyVersion: 1 }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      console.error(`[Teams] Failed to fulfill request ${request.id}:`, data.error);
+      return false;
+    }
+
+    console.log(`[Teams] Auto-fulfilled key request ${request.id} for channel ${request.channel_id}`);
+    return true;
+  } catch (err) {
+    console.error(`[Teams] Error fulfilling key request ${request.id}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Auto-fulfill all pending key requests from invites this user created
+ * Called on page load and when key_request:new SSE event received
+ */
+export async function autoFulfillPendingKeyRequests() {
+  if (!window.__TEAM_SLUG__) {
+    // Not in team context
+    return;
+  }
+
+  console.log("[Teams] Checking for pending key requests to auto-fulfill...");
+  const requests = await fetchPendingKeyRequests();
+
+  if (requests.length === 0) {
+    console.log("[Teams] No pending key requests");
+    return;
+  }
+
+  console.log(`[Teams] Found ${requests.length} pending key request(s)`);
+
+  let fulfilled = 0;
+  for (const request of requests) {
+    const success = await fulfillKeyRequest(request);
+    if (success) fulfilled++;
+  }
+
+  console.log(`[Teams] Auto-fulfilled ${fulfilled}/${requests.length} key requests`);
+}
+
+// ============================================================================
 // Initialize
 // ============================================================================
 
@@ -626,4 +725,7 @@ export function initTeams() {
   initTeamSelector();
   initTeamsPage();
   initTeamSettingsPage();
+
+  // Auto-fulfill pending key requests on page load (non-blocking)
+  autoFulfillPendingKeyRequests();
 }

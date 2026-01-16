@@ -14,6 +14,7 @@ import {
   listTodos,
   listUnscheduledTodos,
   moveTodoToBoard,
+  syncParentStateAfterSubtaskChange,
   transitionGroupTodo,
   transitionGroupTodoWithPosition,
   transitionTodo,
@@ -23,12 +24,25 @@ import {
   updateTodoPosition,
   upsertSummary,
 } from "../db";
-import { isAllowedTransition, normalizePriority, normalizeState, TODO_PRIORITIES, TODO_STATES } from "../domain/todos";
+import { isAllowedTransition, normalizePriority, normalizeState, shouldAutoArchive, TODO_PRIORITIES, TODO_STATES } from "../domain/todos";
 import { formatLocalDate } from "../utils/date";
 import { normalizeStateInput, validateTaskInput, validateTodoForm, validateTodoTitle } from "../validation";
 
+import type { TodoState } from "../types";
+
 export const TODO_STATE_OPTIONS = TODO_STATES;
 export const TODO_PRIORITY_OPTIONS = TODO_PRIORITIES;
+
+/**
+ * Apply auto-archive logic: if transitioning to 'done' and the task
+ * hasn't been updated in over 7 days, archive it instead.
+ */
+function applyAutoArchive(targetState: TodoState, updatedAt: string): TodoState {
+  if (targetState === "done" && shouldAutoArchive(updatedAt)) {
+    return "archived";
+  }
+  return targetState;
+}
 
 /**
  * Check if a user can manage todos in a group.
@@ -169,17 +183,30 @@ export function transitionTodoState(owner: string, id: number, state: string) {
   const existing = listTodos(owner).find((todo) => todo.id === id);
   if (!existing) return null;
   if (!isAllowedTransition(existing.state, normalized)) return null;
-  return transitionTodo(id, owner, normalized);
+
+  // Auto-archive: if moving to done and task is old enough, archive instead
+  const finalState = applyAutoArchive(normalized, existing.updated_at);
+
+  const result = transitionTodo(id, owner, finalState);
+  // If this is a subtask, sync the parent's state
+  if (result) syncParentStateAfterSubtaskChange(id);
+  return result;
 }
 
 export function transitionTodoStateWithPosition(owner: string, id: number, state: string, position: number | null) {
   const normalized = normalizeStateInput(state);
   const existing = listTodos(owner).find((todo) => todo.id === id);
   if (!existing) return null;
-  // Allow same-state moves for reordering within a column
-  const sameState = existing.state === normalized;
-  if (!sameState && !isAllowedTransition(existing.state, normalized)) return null;
-  return transitionTodoWithPosition(id, owner, normalized, position);
+  // For kanban drag-drop, allow any state transition (including backward moves)
+  // This enables dragging tasks to any column
+
+  // Auto-archive: if moving to done and task is old enough, archive instead
+  const finalState = applyAutoArchive(normalized, existing.updated_at);
+
+  const result = transitionTodoWithPosition(id, owner, finalState, position);
+  // If this is a subtask, sync the parent's state
+  if (result) syncParentStateAfterSubtaskChange(id);
+  return result;
 }
 
 export function setTodoPosition(id: number, position: number | null) {
@@ -210,17 +237,30 @@ export function transitionGroupTodoState(groupId: number, id: number, state: str
   const existing = getTodoById(id);
   if (!existing || existing.group_id !== groupId) return null;
   if (!isAllowedTransition(existing.state, normalized)) return null;
-  return transitionGroupTodo(id, groupId, normalized);
+
+  // Auto-archive: if moving to done and task is old enough, archive instead
+  const finalState = applyAutoArchive(normalized, existing.updated_at);
+
+  const result = transitionGroupTodo(id, groupId, finalState);
+  // If this is a subtask, sync the parent's state
+  if (result) syncParentStateAfterSubtaskChange(id);
+  return result;
 }
 
 export function transitionGroupTodoStateWithPosition(groupId: number, id: number, state: string, position: number | null) {
   const normalized = normalizeStateInput(state);
   const existing = getTodoById(id);
   if (!existing || existing.group_id !== groupId) return null;
-  // Allow same-state moves for reordering within a column
-  const sameState = existing.state === normalized;
-  if (!sameState && !isAllowedTransition(existing.state, normalized)) return null;
-  return transitionGroupTodoWithPosition(id, groupId, normalized, position);
+  // For kanban drag-drop, allow any state transition (including backward moves)
+  // This enables dragging tasks to any column
+
+  // Auto-archive: if moving to done and task is old enough, archive instead
+  const finalState = applyAutoArchive(normalized, existing.updated_at);
+
+  const result = transitionGroupTodoWithPosition(id, groupId, finalState, position);
+  // If this is a subtask, sync the parent's state
+  if (result) syncParentStateAfterSubtaskChange(id);
+  return result;
 }
 
 export function removeGroupTodo(groupId: number, id: number) {

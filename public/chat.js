@@ -30,9 +30,12 @@ import {
   channelNeedsEncryption,
   usesCommunityEncryption,
   setupAllDmEncryption,
+  fetchChannelKey,
+  clearCachedChannelKey,
 } from "./chatCrypto.js";
 import { checkEncryptionSupport } from "./crypto.js";
 import { fetchCommunityKey, getCommunityStatus } from "./communityCrypto.js";
+import { autoFulfillPendingKeyRequests } from "./teams.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();

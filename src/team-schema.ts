@@ -65,8 +65,10 @@ export function initTeamSchema(db: Database): void {
   addColumn(db, "ALTER TABLE todos ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE");
   addColumn(db, "ALTER TABLE todos ADD COLUMN assigned_to TEXT DEFAULT NULL");
   addColumn(db, "ALTER TABLE todos ADD COLUMN position INTEGER DEFAULT NULL");
+  addColumn(db, "ALTER TABLE todos ADD COLUMN parent_id INTEGER REFERENCES todos(id) ON DELETE SET NULL");
   createIndex(db, "CREATE INDEX idx_todos_group_id ON todos(group_id)");
   createIndex(db, "CREATE INDEX idx_todos_assigned_to ON todos(assigned_to)");
+  createIndex(db, "CREATE INDEX idx_todos_parent_id ON todos(parent_id)");
 
   // AI Summaries
   db.run(`
@@ -441,6 +443,32 @@ export function initTeamSchema(db: Database): void {
       UNIQUE(invite_id, user_npub)
     )
   `);
+
+  // ============================================================================
+  // Key Requests - For distributing encryption keys to new members
+  // ============================================================================
+  // When a user joins via invite and is added to private groups, they need
+  // encryption keys for those channels. Key requests are created automatically
+  // and fulfilled by the invite creator (manager) when their client is online.
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS key_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      requester_npub TEXT NOT NULL,
+      requester_pubkey TEXT NOT NULL,
+      target_npub TEXT NOT NULL,
+      invite_code_hash TEXT,
+      group_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending',
+      fulfilled_by TEXT,
+      fulfilled_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(channel_id, requester_npub)
+    )
+  `);
+  createIndex(db, "CREATE INDEX idx_key_requests_target ON key_requests(target_npub, status)");
+  createIndex(db, "CREATE INDEX idx_key_requests_requester ON key_requests(requester_npub)");
 
   // ============================================================================
   // CRM Tables

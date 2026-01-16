@@ -1,6 +1,6 @@
 /**
  * Kanban board utilities
- * Note: Drag-drop is now handled by Alpine.js store (stores/kanbanStore.js)
+ * Note: Drag-drop is handled by Alpine.js store (kanban-store.js)
  * This file handles: context switcher, thread links, avatar loading
  */
 

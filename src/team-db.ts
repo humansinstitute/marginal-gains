@@ -76,6 +76,21 @@ export type {
   WingmanCost,
 } from "./db";
 
+// KeyRequest type - for distributing encryption keys to new members
+export type KeyRequest = {
+  id: number;
+  channel_id: number;
+  requester_npub: string;
+  requester_pubkey: string;
+  target_npub: string;
+  invite_code_hash: string | null;
+  group_id: number | null;
+  status: "pending" | "fulfilled" | "rejected";
+  fulfilled_by: string | null;
+  fulfilled_at: string | null;
+  created_at: string;
+};
+
 export class TeamDatabase {
   constructor(private db: Database) {}
 
@@ -193,16 +208,22 @@ export class TeamDatabase {
 
   transitionTodo(id: number, owner: string, state: TodoState): Todo | null {
     const done = state === "done" ? 1 : 0;
-    return this.db.query<Todo, [string, number, number, string]>(
+    const result = this.db.query<Todo, [string, number, number, string]>(
       "UPDATE todos SET state = ?, done = ? WHERE id = ? AND owner = ? RETURNING *"
     ).get(state, done, id, owner) ?? null;
+    // Sync parent state if this is a subtask
+    if (result) this.syncParentStateAfterSubtaskChange(id);
+    return result;
   }
 
   transitionTodoWithPosition(id: number, owner: string, state: TodoState, position: number | null): Todo | null {
     const done = state === "done" ? 1 : 0;
-    return this.db.query<Todo, [string, number, number | null, number, string]>(
+    const result = this.db.query<Todo, [string, number, number | null, number, string]>(
       "UPDATE todos SET state = ?, done = ?, position = ? WHERE id = ? AND owner = ? RETURNING *"
     ).get(state, done, position, id, owner) ?? null;
+    // Sync parent state if this is a subtask
+    if (result) this.syncParentStateAfterSubtaskChange(id);
+    return result;
   }
 
   deleteGroupTodo(id: number, groupId: number): void {
@@ -240,20 +261,128 @@ export class TeamDatabase {
 
   transitionGroupTodo(id: number, groupId: number, state: TodoState): Todo | null {
     const done = state === "done" ? 1 : 0;
-    return this.db.query<Todo, [string, number, number, number]>(
+    const result = this.db.query<Todo, [string, number, number, number]>(
       "UPDATE todos SET state = ?, done = ? WHERE id = ? AND group_id = ? RETURNING *"
     ).get(state, done, id, groupId) ?? null;
+    // Sync parent state if this is a subtask
+    if (result) this.syncParentStateAfterSubtaskChange(id);
+    return result;
   }
 
   transitionGroupTodoWithPosition(id: number, groupId: number, state: TodoState, position: number | null): Todo | null {
     const done = state === "done" ? 1 : 0;
-    return this.db.query<Todo, [string, number, number | null, number, number]>(
+    const result = this.db.query<Todo, [string, number, number | null, number, number]>(
       "UPDATE todos SET state = ?, done = ?, position = ? WHERE id = ? AND group_id = ? RETURNING *"
     ).get(state, done, position, id, groupId) ?? null;
+    // Sync parent state if this is a subtask
+    if (result) this.syncParentStateAfterSubtaskChange(id);
+    return result;
   }
 
   assignAllTodosToOwner(npub: string): void {
     this.db.run("UPDATE todos SET owner = ? WHERE owner = ''", [npub]);
+  }
+
+  // ============================================================================
+  // Subtasks
+  // ============================================================================
+
+  listSubtasks(parentId: number): Todo[] {
+    return this.db.query<Todo, [number]>(
+      "SELECT * FROM todos WHERE parent_id = ? AND deleted = 0 ORDER BY position ASC, created_at DESC"
+    ).all(parentId);
+  }
+
+  hasSubtasks(todoId: number): boolean {
+    const result = this.db.query<{ count: number }, [number]>(
+      "SELECT COUNT(*) as count FROM todos WHERE parent_id = ? AND deleted = 0"
+    ).get(todoId);
+    return (result?.count ?? 0) > 0;
+  }
+
+  canHaveChildren(todo: Todo): boolean {
+    // Can only add children if not already a subtask (2 levels max)
+    return todo.parent_id === null;
+  }
+
+  addSubtask(title: string, parentId: number, assignedTo: string | null = null): Todo | null {
+    // Inherit group_id and owner from parent
+    return this.db.query<Todo, [string, string | null, number]>(
+      `INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id, assigned_to, parent_id)
+       SELECT ?, '', 'sand', 'new', 0, owner, '', group_id, ?, ?
+       FROM todos WHERE id = ?
+       RETURNING *`
+    ).get(title, assignedTo, parentId, parentId) ?? null;
+  }
+
+  orphanSubtasks(parentId: number): void {
+    this.db.run("UPDATE todos SET parent_id = NULL WHERE parent_id = ?", [parentId]);
+  }
+
+  getSubtaskProgress(parentId: number): { total: number; done: number; inProgress: number } {
+    const subtasks = this.listSubtasks(parentId);
+    return {
+      total: subtasks.length,
+      done: subtasks.filter((s) => s.state === "done").length,
+      inProgress: subtasks.filter((s) => s.state === "in_progress" || s.state === "review").length,
+    };
+  }
+
+  // State ordering for parent computation (lower = earlier in workflow)
+  private static STATE_ORDER: Record<string, number> = {
+    new: 0,
+    ready: 1,
+    in_progress: 2,
+    review: 3,
+    done: 4,
+  };
+
+  private static STATE_BY_ORDER: string[] = ["new", "ready", "in_progress", "review", "done"];
+
+  /**
+   * Compute the state a parent should have based on its subtasks.
+   * Parent state = minimum (slowest/earliest) state of all subtasks.
+   */
+  computeParentState(parentId: number): string | null {
+    const subtasks = this.listSubtasks(parentId);
+    if (subtasks.length === 0) return null;
+
+    let minOrder = TeamDatabase.STATE_ORDER.done;
+    for (const subtask of subtasks) {
+      const order = TeamDatabase.STATE_ORDER[subtask.state] ?? 0;
+      if (order < minOrder) {
+        minOrder = order;
+      }
+    }
+    return TeamDatabase.STATE_BY_ORDER[minOrder];
+  }
+
+  /**
+   * Update a parent task's state to match its slowest subtask.
+   */
+  updateParentStateFromSubtasks(parentId: number): Todo | null {
+    const parent = this.getTodoById(parentId);
+    if (!parent) return null;
+
+    const computedState = this.computeParentState(parentId);
+    if (!computedState) return parent;
+
+    if (parent.state === computedState) return parent;
+
+    return this.db.query<Todo, [string, string, number]>(
+      `UPDATE todos SET state = ?, done = (? = 'done'), updated_at = datetime('now')
+       WHERE id = ? AND deleted = 0 RETURNING *`
+    ).get(computedState, computedState, parentId) ?? null;
+  }
+
+  /**
+   * After changing a subtask's state, update its parent's state if needed.
+   */
+  syncParentStateAfterSubtaskChange(subtaskId: number): Todo | null {
+    const subtask = this.getTodoById(subtaskId);
+    if (!subtask || !subtask.parent_id) return null;
+
+    return this.updateParentStateFromSubtasks(subtask.parent_id);
   }
 
   // ============================================================================
@@ -1532,5 +1661,122 @@ export class TeamDatabase {
    */
   hasUserTeamKey(userPubkey: string): boolean {
     return this.getUserTeamKey(userPubkey) !== null;
+  }
+
+  // ============================================================================
+  // Key Requests
+  // ============================================================================
+
+  /**
+   * Create a key request for a user who needs encryption keys
+   */
+  createKeyRequest(params: {
+    channelId: number;
+    requesterNpub: string;
+    requesterPubkey: string;
+    targetNpub: string;
+    inviteCodeHash?: string;
+    groupId?: number;
+  }): KeyRequest | null {
+    try {
+      this.db.run(
+        `INSERT OR IGNORE INTO key_requests
+         (channel_id, requester_npub, requester_pubkey, target_npub, invite_code_hash, group_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          params.channelId,
+          params.requesterNpub,
+          params.requesterPubkey,
+          params.targetNpub,
+          params.inviteCodeHash || null,
+          params.groupId || null,
+        ]
+      );
+      return this.db.query<KeyRequest, [number, string]>(
+        "SELECT * FROM key_requests WHERE channel_id = ? AND requester_npub = ?"
+      ).get(params.channelId, params.requesterNpub) ?? null;
+    } catch (err) {
+      console.error("[TeamDB] Error creating key request:", err);
+      return null;
+    }
+  }
+
+  /**
+   * Get a key request by ID
+   */
+  getKeyRequest(id: number): KeyRequest | null {
+    return this.db.query<KeyRequest, [number]>(
+      "SELECT * FROM key_requests WHERE id = ?"
+    ).get(id) ?? null;
+  }
+
+  /**
+   * List pending key requests for a target (manager) to fulfill
+   */
+  listPendingKeyRequests(targetNpub: string): KeyRequest[] {
+    return this.db.query<KeyRequest, [string]>(
+      `SELECT * FROM key_requests
+       WHERE target_npub = ? AND status = 'pending'
+       ORDER BY created_at ASC`
+    ).all(targetNpub);
+  }
+
+  /**
+   * List key requests made by a user
+   */
+  listKeyRequestsByRequester(requesterNpub: string): KeyRequest[] {
+    return this.db.query<KeyRequest, [string]>(
+      `SELECT * FROM key_requests
+       WHERE requester_npub = ?
+       ORDER BY created_at DESC`
+    ).all(requesterNpub);
+  }
+
+  /**
+   * List pending key requests for a specific channel
+   */
+  listPendingKeyRequestsForChannel(channelId: number): KeyRequest[] {
+    return this.db.query<KeyRequest, [number]>(
+      `SELECT * FROM key_requests
+       WHERE channel_id = ? AND status = 'pending'
+       ORDER BY created_at ASC`
+    ).all(channelId);
+  }
+
+  /**
+   * Mark a key request as fulfilled
+   */
+  fulfillKeyRequest(id: number, fulfilledBy: string): boolean {
+    const result = this.db.run(
+      `UPDATE key_requests
+       SET status = 'fulfilled', fulfilled_by = ?, fulfilled_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status = 'pending'`,
+      [fulfilledBy, id]
+    );
+    return result.changes > 0;
+  }
+
+  /**
+   * Mark a key request as rejected
+   */
+  rejectKeyRequest(id: number): boolean {
+    const result = this.db.run(
+      `UPDATE key_requests
+       SET status = 'rejected'
+       WHERE id = ? AND status = 'pending'`,
+      [id]
+    );
+    return result.changes > 0;
+  }
+
+  /**
+   * Delete key requests for a user (when removing from team)
+   */
+  deleteKeyRequestsForUser(npub: string): number {
+    const result = this.db.run(
+      "DELETE FROM key_requests WHERE requester_npub = ?",
+      [npub]
+    );
+    return result.changes;
   }
 }

@@ -17,6 +17,7 @@ export type Todo = {
   group_id: number | null;
   assigned_to: string | null;
   position: number | null;
+  parent_id: number | null;
 };
 
 export type TodoWithBoard = Todo & {
@@ -344,6 +345,7 @@ addColumn("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
 addColumn("ALTER TABLE todos ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE");
 addColumn("ALTER TABLE todos ADD COLUMN assigned_to TEXT DEFAULT NULL");
 addColumn("ALTER TABLE todos ADD COLUMN position INTEGER DEFAULT NULL");
+addColumn("ALTER TABLE todos ADD COLUMN parent_id INTEGER REFERENCES todos(id) ON DELETE SET NULL");
 
 // Index for efficient group todo queries
 try {
@@ -357,6 +359,15 @@ try {
 // Index for efficient assigned_to queries (All My Tasks view)
 try {
   db.run("CREATE INDEX idx_todos_assigned_to ON todos(assigned_to)");
+} catch (error) {
+  if (!(error instanceof Error) || !error.message.includes("already exists")) {
+    throw error;
+  }
+}
+
+// Index for efficient parent/child queries
+try {
+  db.run("CREATE INDEX idx_todos_parent_id ON todos(parent_id)");
 } catch (error) {
   if (!(error instanceof Error) || !error.message.includes("already exists")) {
     throw error;
@@ -840,6 +851,27 @@ const insertFullStmt = db.query<Todo>(
 const deleteStmt = db.query("UPDATE todos SET deleted = 1 WHERE id = ? AND owner = ?");
 const deleteGroupTodoStmt = db.query("UPDATE todos SET deleted = 1 WHERE id = ? AND group_id = ?");
 const getTodoByIdStmt = db.query<Todo>("SELECT * FROM todos WHERE id = ? AND deleted = 0");
+
+// Subtask queries
+const listSubtasksStmt = db.query<Todo>(
+  "SELECT * FROM todos WHERE parent_id = ? AND deleted = 0 ORDER BY position ASC, created_at DESC"
+);
+const countSubtasksStmt = db.query<{ count: number }>(
+  "SELECT COUNT(*) as count FROM todos WHERE parent_id = ? AND deleted = 0"
+);
+const insertSubtaskStmt = db.query<Todo>(
+  `INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id, assigned_to, parent_id)
+   SELECT ?, '', 'sand', 'new', 0, owner, '', group_id, ?, ?
+   FROM todos WHERE id = ?
+   RETURNING *`
+);
+const setParentStmt = db.query<Todo>(
+  "UPDATE todos SET parent_id = ? WHERE id = ? RETURNING *"
+);
+const orphanSubtasksStmt = db.query(
+  "UPDATE todos SET parent_id = NULL WHERE parent_id = ?"
+);
+
 const updateStmt = db.query<Todo>(
   `UPDATE todos
    SET
@@ -1212,6 +1244,127 @@ export function transitionGroupTodoWithPosition(id: number, groupId: number, sta
 export function assignAllTodosToOwner(npub: string) {
   if (!npub) return;
   db.run("UPDATE todos SET owner = ? WHERE owner = '' OR owner IS NULL", npub);
+}
+
+// Subtask helper functions
+export function listSubtasks(parentId: number): Todo[] {
+  return listSubtasksStmt.all(parentId);
+}
+
+export function hasSubtasks(todoId: number): boolean {
+  const result = countSubtasksStmt.get(todoId);
+  return result ? result.count > 0 : false;
+}
+
+export function isSubtask(todo: Todo): boolean {
+  return todo.parent_id !== null;
+}
+
+export function canHaveChildren(todo: Todo): boolean {
+  // Can only add children if not already a subtask (2 levels max)
+  return todo.parent_id === null;
+}
+
+export function addSubtask(
+  title: string,
+  parentId: number,
+  assignedTo: string | null = null
+): Todo | null {
+  if (!title.trim()) return null;
+  // insertSubtaskStmt: title, assigned_to, parent_id, parent_id (for SELECT)
+  const todo = insertSubtaskStmt.get(title.trim(), assignedTo, parentId, parentId);
+  return todo ?? null;
+}
+
+export function setTodoParent(
+  todoId: number,
+  parentId: number | null
+): Todo | null {
+  const todo = setParentStmt.get(parentId, todoId);
+  return todo ?? null;
+}
+
+export function orphanSubtasks(parentId: number): void {
+  orphanSubtasksStmt.run(parentId);
+}
+
+export function getSubtaskProgress(parentId: number): {
+  total: number;
+  done: number;
+  inProgress: number;
+} {
+  const subtasks = listSubtasks(parentId);
+  return {
+    total: subtasks.length,
+    done: subtasks.filter((s) => s.state === "done").length,
+    inProgress: subtasks.filter(
+      (s) => s.state === "in_progress" || s.state === "review"
+    ).length,
+  };
+}
+
+// State ordering for parent computation (lower = earlier in workflow)
+const STATE_ORDER: Record<TodoState, number> = {
+  new: 0,
+  ready: 1,
+  in_progress: 2,
+  review: 3,
+  done: 4,
+  archived: 5,
+};
+
+const STATE_BY_ORDER: TodoState[] = ["new", "ready", "in_progress", "review", "done", "archived"];
+
+/**
+ * Compute the state a parent should have based on its subtasks.
+ * Parent state = minimum (slowest/earliest) state of all subtasks.
+ * Returns null if no subtasks exist.
+ */
+export function computeParentState(parentId: number): TodoState | null {
+  const subtasks = listSubtasks(parentId);
+  if (subtasks.length === 0) return null;
+
+  let minOrder = STATE_ORDER.done; // Start with highest
+  for (const subtask of subtasks) {
+    const order = STATE_ORDER[subtask.state] ?? 0;
+    if (order < minOrder) {
+      minOrder = order;
+    }
+  }
+  return STATE_BY_ORDER[minOrder];
+}
+
+/**
+ * Update a parent task's state to match its slowest subtask.
+ * Called after subtask state changes.
+ */
+export function updateParentStateFromSubtasks(parentId: number): Todo | null {
+  const parent = getTodoById(parentId);
+  if (!parent) return null;
+
+  const computedState = computeParentState(parentId);
+  if (!computedState) return parent; // No subtasks, keep current state
+
+  // Only update if state is different
+  if (parent.state === computedState) return parent;
+
+  // Update parent state directly (bypassing owner check since this is internal)
+  const updated = db.query<Todo, [TodoState, TodoState, number]>(
+    `UPDATE todos SET state = ?, done = (? = 'done'), updated_at = datetime('now')
+     WHERE id = ? AND deleted = 0 RETURNING *`
+  ).get(computedState, computedState, parentId);
+
+  return updated ?? null;
+}
+
+/**
+ * After changing a subtask's state, update its parent's state if needed.
+ */
+export function syncParentStateAfterSubtaskChange(subtaskId: number): Todo | null {
+  const subtask = getTodoById(subtaskId);
+  if (!subtask || !subtask.parent_id) return null;
+
+  return updateParentStateFromSubtasks(subtask.parent_id);
 }
 
 export function upsertSummary({

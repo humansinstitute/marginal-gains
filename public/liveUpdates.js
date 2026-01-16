@@ -50,6 +50,8 @@ const eventHandlers = {
   "sync:init": [],
   "connection:change": [],
   "wingman:thinking": [],
+  "key_request:new": [],
+  "key_request:fulfilled": [],
 };
 
 /**
@@ -213,6 +215,28 @@ export async function connect() {
       emitEvent("wingman:thinking", data);
     } catch (err) {
       console.error("[LiveUpdates] Error handling wingman:thinking:", err);
+    }
+  });
+
+  // Handle new key request (someone joined via your invite)
+  eventSource.addEventListener("key_request:new", (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log("[LiveUpdates] New key request:", data);
+      emitEvent("key_request:new", data);
+    } catch (err) {
+      console.error("[LiveUpdates] Error handling key_request:new:", err);
+    }
+  });
+
+  // Handle key request fulfilled (you received keys)
+  eventSource.addEventListener("key_request:fulfilled", (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log("[LiveUpdates] Key request fulfilled:", data);
+      emitEvent("key_request:fulfilled", data);
+    } catch (err) {
+      console.error("[LiveUpdates] Error handling key_request:fulfilled:", err);
     }
   });
 }

@@ -2,10 +2,13 @@ import { show, hide } from "./dom.js";
 
 let currentTaskId = null;
 let currentTaskOwner = null;
+let isCreateMode = false;
+let createParentId = null;
 
 const el = {
   overlay: null,
   form: null,
+  heading: null,
   title: null,
   description: null,
   priority: null,
@@ -13,6 +16,7 @@ const el = {
   scheduled: null,
   board: null,
   groupId: null,
+  parentId: null,
   assignee: null,
   assigneeLabel: null,
   tagsWrapper: null,
@@ -20,13 +24,21 @@ const el = {
   closeBtn: null,
   cancelBtn: null,
   deleteBtn: null,
+  archiveBtn: null,
   linksSection: null,
   linksList: null,
+  // Subtask elements
+  parentSection: null,
+  parentTitle: null,
+  subtasksSection: null,
+  subtasksList: null,
+  addSubtaskBtn: null,
 };
 
 export function initTaskModal() {
   el.overlay = document.querySelector("[data-task-modal]");
   el.form = document.querySelector("[data-task-modal-form]");
+  el.heading = document.querySelector("[data-task-modal-heading]");
   el.title = document.querySelector("[data-task-modal-title]");
   el.description = document.querySelector("[data-task-modal-description]");
   el.priority = document.querySelector("[data-task-modal-priority]");
@@ -34,6 +46,7 @@ export function initTaskModal() {
   el.scheduled = document.querySelector("[data-task-modal-scheduled]");
   el.board = document.querySelector("[data-task-modal-board]");
   el.groupId = document.querySelector("[data-task-modal-group-id]");
+  el.parentId = document.querySelector("[data-task-modal-parent-id]");
   el.assignee = document.querySelector("[data-task-modal-assignee]");
   el.assigneeLabel = document.querySelector("[data-task-modal-assignee-label]");
   el.tagsWrapper = document.querySelector("[data-task-modal-tags-wrapper]");
@@ -41,8 +54,15 @@ export function initTaskModal() {
   el.closeBtn = document.querySelector("[data-task-modal-close]");
   el.cancelBtn = document.querySelector("[data-task-modal-cancel]");
   el.deleteBtn = document.querySelector("[data-task-modal-delete]");
+  el.archiveBtn = document.querySelector("[data-task-modal-archive]");
   el.linksSection = document.querySelector("[data-task-modal-links]");
   el.linksList = document.querySelector("[data-task-modal-links-list]");
+  // Subtask elements
+  el.parentSection = document.querySelector("[data-task-modal-parent]");
+  el.parentTitle = document.querySelector("[data-task-modal-parent-title]");
+  el.subtasksSection = document.querySelector("[data-task-modal-subtasks]");
+  el.subtasksList = document.querySelector("[data-task-modal-subtasks-list]");
+  el.addSubtaskBtn = document.querySelector("[data-task-modal-add-subtask]");
 
   if (!el.overlay) return;
 
@@ -55,6 +75,12 @@ export function initTaskModal() {
 
   // Delete handler
   el.deleteBtn?.addEventListener("click", handleDelete);
+
+  // Archive handler
+  el.archiveBtn?.addEventListener("click", handleArchive);
+
+  // Add subtask handler
+  el.addSubtaskBtn?.addEventListener("click", handleAddSubtask);
 
   // Form submit
   el.form?.addEventListener("submit", handleSubmit);
@@ -97,15 +123,110 @@ export function initTaskModal() {
       closeModal();
     }
   });
+
 }
 
+/**
+ * Open the modal in create mode
+ * @param {Object} options - Optional settings
+ * @param {number|null} options.parentId - Parent task ID for creating subtasks
+ * @param {string} options.parentTitle - Parent task title (for display)
+ * @param {string} options.groupId - Group ID to pre-select
+ */
+function openModalForCreate(options = {}) {
+  isCreateMode = true;
+  currentTaskId = null;
+  createParentId = options.parentId || null;
+
+  // Update heading
+  if (el.heading) {
+    el.heading.textContent = createParentId ? "New Subtask" : "New Task";
+  }
+
+  // Clear form fields
+  if (el.title) el.title.value = "";
+  if (el.description) el.description.value = "";
+  if (el.priority) el.priority.value = "sand";
+  if (el.state) el.state.value = "new";
+  if (el.scheduled) el.scheduled.value = "";
+  if (el.tagsHidden) el.tagsHidden.value = "";
+  if (el.assignee) el.assignee.value = "";
+  if (el.parentId) el.parentId.value = createParentId || "";
+
+  // Set group_id from options or current context
+  const currentGroupId = options.groupId || document.querySelector("[data-kanban-board]")?.dataset.groupId || "";
+  if (el.board) el.board.value = currentGroupId;
+  if (el.groupId) el.groupId.value = currentGroupId;
+
+  // Update assignee visibility
+  updateAssigneeVisibility(currentGroupId);
+  if (currentGroupId) {
+    fetchGroupMembers(currentGroupId);
+  }
+
+  // Clear tag chips
+  renderTagChips("");
+
+  // Set form action for create - use team-scoped URL if on team page
+  if (el.form) {
+    const teamSlug = el.form.dataset.teamSlug;
+    el.form.action = teamSlug ? `/t/${teamSlug}/todos` : "/todos";
+  }
+
+  // Hide edit-only sections
+  if (el.deleteBtn) el.deleteBtn.hidden = true;
+  if (el.archiveBtn) el.archiveBtn.hidden = true;
+  if (el.linksSection) el.linksSection.hidden = true;
+  if (el.subtasksSection) el.subtasksSection.hidden = true;
+
+  // Show parent info if creating a subtask
+  if (el.parentSection) {
+    if (createParentId && options.parentTitle) {
+      el.parentSection.hidden = false;
+      if (el.parentTitle) el.parentTitle.textContent = options.parentTitle;
+    } else {
+      el.parentSection.hidden = true;
+    }
+  }
+
+  show(el.overlay);
+  el.title?.focus();
+}
+
+// Export for external use (e.g., from Add Subtask button)
+window.openTaskModalForCreate = openModalForCreate;
+
 async function openModalForTask(todoId, card) {
+  isCreateMode = false;
   currentTaskId = todoId;
+  createParentId = null;
+
+  // Update heading
+  if (el.heading) {
+    el.heading.textContent = "Edit Task";
+  }
+
+  // Show edit-only elements
+  if (el.deleteBtn) el.deleteBtn.hidden = false;
 
   // Extract data from the card
   const title = card.querySelector(".kanban-card-title")?.textContent || "";
   const desc = card.querySelector(".kanban-card-desc")?.textContent || "";
-  const state = card.dataset.todoState || "ready";
+
+  // Get state - prefer data attribute, but fallback to column if blank/invalid
+  // (after drag-drop, Alpine may not have updated the attribute yet)
+  const validStates = ["new", "ready", "in_progress", "review", "done", "archived"];
+  let state = card.dataset.todoState || "";
+  if (!validStates.includes(state)) {
+    // Try to determine state from card's column position
+    const column = card.closest("[data-kanban-column]");
+    if (column) {
+      state = column.dataset.kanbanColumn || "ready";
+    } else {
+      state = "ready";
+    }
+  }
+
   const assigned_to = card.dataset.assignedTo || "";
   const group_id = card.dataset.groupId || "";
 
@@ -126,10 +247,23 @@ async function openModalForTask(todoId, card) {
 
   // Fetch and display task links
   await fetchAndDisplayLinks(todoId);
+
+  // Fetch and display subtasks
+  await fetchAndDisplaySubtasks(todoId);
 }
 
 async function openModalFromListItem(todoId, details) {
+  isCreateMode = false;
   currentTaskId = todoId;
+  createParentId = null;
+
+  // Update heading
+  if (el.heading) {
+    el.heading.textContent = "Edit Task";
+  }
+
+  // Show edit-only elements
+  if (el.deleteBtn) el.deleteBtn.hidden = false;
 
   // Extract data from the details element
   const editForm = details.querySelector(".edit-form");
@@ -150,6 +284,9 @@ async function openModalFromListItem(todoId, details) {
 
   // Fetch and display task links
   await fetchAndDisplayLinks(todoId);
+
+  // Fetch and display subtasks
+  await fetchAndDisplaySubtasks(todoId);
 }
 
 function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id }) {
@@ -159,6 +296,11 @@ function populateModal({ title, description, priority, state, scheduled_for, tag
   if (el.state) el.state.value = state;
   if (el.scheduled) el.scheduled.value = scheduled_for || "";
   if (el.tagsHidden) el.tagsHidden.value = tags || "";
+
+  // Show archive button only for tasks in 'done' state
+  if (el.archiveBtn) {
+    el.archiveBtn.hidden = state !== "done";
+  }
 
   // Set board selector and hidden group_id
   if (el.board) el.board.value = group_id || "";
@@ -271,10 +413,23 @@ function closeModal() {
 
 async function handleSubmit(e) {
   e.preventDefault();
-  if (!currentTaskId || !el.form) return;
+  if (!el.form) return;
+
+  // In edit mode, require a task ID
+  if (!isCreateMode && !currentTaskId) return;
 
   // Sync tags before submit
   syncTagsHidden();
+
+  // Debug: log form details before submit
+  console.log('[TaskModal] Submitting form:', {
+    action: el.form.action,
+    method: el.form.method,
+    isCreateMode,
+    parentId: el.parentId?.value,
+    groupId: el.groupId?.value,
+    title: el.title?.value
+  });
 
   // Submit the form normally (will redirect)
   el.form.submit();
@@ -283,10 +438,33 @@ async function handleSubmit(e) {
 async function handleDelete() {
   if (!currentTaskId) return;
 
-  if (!confirm("Are you sure you want to delete this task?")) return;
-
-  // Create and submit a delete form - use team-scoped URL if on team page
+  // Check if this task has subtasks - use team-scoped URL if on team page
   const teamSlug = el.form?.dataset.teamSlug;
+  const subtasksUrl = teamSlug
+    ? `/t/${teamSlug}/api/todos/${currentTaskId}/subtasks`
+    : `/api/todos/${currentTaskId}/subtasks`;
+
+  try {
+    const res = await fetch(subtasksUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.subtasks && data.subtasks.length > 0) {
+        const message = `This task has ${data.subtasks.length} subtask(s).\n\n` +
+          `Deleting it will convert them to regular tasks.\n\n` +
+          `Are you sure you want to delete this parent task?`;
+        if (!confirm(message)) return;
+      } else {
+        if (!confirm("Are you sure you want to delete this task?")) return;
+      }
+    } else {
+      if (!confirm("Are you sure you want to delete this task?")) return;
+    }
+  } catch (err) {
+    // Fallback to simple confirm if API fails
+    if (!confirm("Are you sure you want to delete this task?")) return;
+  }
+
+  // Create and submit a delete form
   const deleteUrl = teamSlug
     ? `/t/${teamSlug}/todos/${currentTaskId}/delete`
     : `/todos/${currentTaskId}/delete`;
@@ -296,6 +474,37 @@ async function handleDelete() {
   form.action = deleteUrl;
   document.body.appendChild(form);
   form.submit();
+}
+
+async function handleArchive() {
+  if (!currentTaskId) return;
+
+  if (!confirm("Are you sure you want to archive this task?")) return;
+
+  // Archive by transitioning to 'archived' state via API
+  const teamSlug = el.form?.dataset.teamSlug;
+  const stateUrl = teamSlug
+    ? `/t/${teamSlug}/api/todos/${currentTaskId}/state`
+    : `/api/todos/${currentTaskId}/state`;
+
+  try {
+    const res = await fetch(stateUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "archived" }),
+    });
+
+    if (res.ok) {
+      // Reload page to reflect the change
+      window.location.reload();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to archive task");
+    }
+  } catch (err) {
+    console.error("Error archiving task:", err);
+    alert("Failed to archive task");
+  }
 }
 
 function handleBoardChange() {
@@ -513,4 +722,115 @@ async function unlinkThreadFromTask(messageId) {
 function escapeHtml(str) {
   const escapes = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   return str.replace(/[&<>"']/g, (c) => escapes[c]);
+}
+
+// ==================== Subtask Functions ====================
+
+async function fetchAndDisplaySubtasks(todoId) {
+  // Hide both sections initially
+  if (el.parentSection) el.parentSection.hidden = true;
+  if (el.subtasksSection) el.subtasksSection.hidden = true;
+
+  try {
+    // Use team-scoped URL if on team page
+    const teamSlug = el.form?.dataset.teamSlug;
+    const url = teamSlug
+      ? `/t/${teamSlug}/api/todos/${todoId}/subtasks`
+      : `/api/todos/${todoId}/subtasks`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error("[TaskModal] Failed to fetch subtasks:", res.status);
+      return;
+    }
+
+    const data = await res.json();
+
+    // If this is a subtask, show parent info
+    if (data.parent) {
+      if (el.parentSection) el.parentSection.hidden = false;
+      if (el.parentTitle) el.parentTitle.textContent = data.parent.title;
+      // Hide add subtask button for subtasks (2-level max)
+      if (el.addSubtaskBtn) el.addSubtaskBtn.hidden = true;
+      return;
+    }
+
+    // If this can have children, show subtasks section
+    if (data.canAddSubtask || (data.subtasks && data.subtasks.length > 0)) {
+      if (el.subtasksSection) el.subtasksSection.hidden = false;
+      if (el.addSubtaskBtn) el.addSubtaskBtn.hidden = !data.canAddSubtask;
+      renderSubtasksList(data.subtasks || []);
+    }
+  } catch (err) {
+    console.error("[TaskModal] Failed to fetch subtasks:", err);
+  }
+}
+
+function renderSubtasksList(subtasks) {
+  if (!el.subtasksList) return;
+
+  if (subtasks.length === 0) {
+    el.subtasksList.innerHTML = '<div class="subtask-empty">No subtasks yet</div>';
+    return;
+  }
+
+  el.subtasksList.innerHTML = subtasks.map((s) => `
+    <div class="subtask-item" data-subtask-id="${s.id}">
+      <span class="subtask-item-state state-${s.state}">${formatState(s.state)}</span>
+      <span class="subtask-item-title">${escapeHtml(s.title)}</span>
+    </div>
+  `).join("");
+
+  // Make subtasks clickable to open their modal
+  el.subtasksList.querySelectorAll("[data-subtask-id]").forEach((item) => {
+    item.addEventListener("click", () => {
+      const subtaskId = item.dataset.subtaskId;
+      closeModal();
+      // Small delay to allow modal to close before reopening
+      setTimeout(() => openModalForTaskById(subtaskId), 100);
+    });
+  });
+}
+
+function formatState(state) {
+  const labels = {
+    new: "New",
+    ready: "Ready",
+    in_progress: "In Progress",
+    review: "Review",
+    done: "Done",
+    archived: "Archived",
+  };
+  return labels[state] || state;
+}
+
+function handleAddSubtask() {
+  if (!currentTaskId) return;
+
+  // Get current task info before closing modal
+  const parentId = currentTaskId;
+  const parentTitle = el.title?.value || "Parent Task";
+  const groupId = el.groupId?.value || "";
+
+  // Close current modal and open create modal for subtask
+  closeModal();
+
+  // Small delay to let modal close animation complete
+  setTimeout(() => {
+    openModalForCreate({
+      parentId: Number(parentId),
+      parentTitle,
+      groupId,
+    });
+  }, 100);
+}
+
+async function openModalForTaskById(taskId) {
+  // Find the card on the page
+  const card = document.querySelector(`[data-todo-id="${taskId}"]`);
+  if (card) {
+    openModalForTask(taskId, card);
+  } else {
+    // Card not visible - reload page to see it
+    window.location.reload();
+  }
 }

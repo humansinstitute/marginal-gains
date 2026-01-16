@@ -13,7 +13,7 @@ export function handlePersonalSettings(session: Session | null) {
   if (!session) {
     return new Response(null, {
       status: 302,
-      headers: { Location: "/" },
+      headers: { Location: "/?return=%2Fsettings" },
     });
   }
 
@@ -28,7 +28,7 @@ export function handleAppSettingsPage(session: Session | null) {
   if (!session) {
     return new Response(null, {
       status: 302,
-      headers: { Location: "/" },
+      headers: { Location: "/?return=%2Fadmin%2Fsettings" },
     });
   }
 
@@ -46,9 +46,10 @@ export function handleAppSettingsPage(session: Session | null) {
  */
 export function handleTeamConfigPage(session: Session | null, teamSlug: string) {
   if (!session) {
+    const returnPath = encodeURIComponent(`/t/${teamSlug}/config`);
     return new Response(null, {
       status: 302,
-      headers: { Location: "/" },
+      headers: { Location: `/?return=${returnPath}` },
     });
   }
 

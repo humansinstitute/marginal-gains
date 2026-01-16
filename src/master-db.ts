@@ -292,7 +292,8 @@ export function createTeamInvitation(
   createdBy: string,
   role: "owner" | "manager" | "member" = "member",
   singleUse = true,
-  expiresInHours = 168 // 7 days
+  expiresInHours = 168, // 7 days
+  label: string | null = null
 ): { code: string; invitation: TeamInvitation } {
   const db = getMasterDb();
 
@@ -301,12 +302,12 @@ export function createTeamInvitation(
   const codeHash = createHash("sha256").update(code).digest("hex");
   const expiresAt = Math.floor(Date.now() / 1000) + expiresInHours * 3600;
 
-  console.log("[Teams] Creating invitation with role:", role);
+  console.log("[Teams] Creating invitation with role:", role, "label:", label);
   const stmt = db.prepare(`
-    INSERT INTO team_invitations (team_id, code_hash, role, single_use, expires_at, created_by)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO team_invitations (team_id, code_hash, role, single_use, expires_at, created_by, label)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run(teamId, codeHash, role, singleUse ? 1 : 0, expiresAt, createdBy);
+  stmt.run(teamId, codeHash, role, singleUse ? 1 : 0, expiresAt, createdBy, label);
 
   const invitation = getTeamInvitationByHash(codeHash);
   if (!invitation) throw new Error("Failed to create invitation");
@@ -414,6 +415,70 @@ export function cleanupExpiredInvitations(): number {
   const now = Math.floor(Date.now() / 1000);
   const stmt = db.prepare("DELETE FROM team_invitations WHERE expires_at < ?");
   const result = stmt.run(now);
+  return result.changes;
+}
+
+// ============================================================================
+// Invite Group Operations
+// ============================================================================
+
+/**
+ * Add groups to an invitation
+ * When redeemed, user will be added to these groups (giving channel access)
+ */
+export function addInviteGroups(
+  invitationId: number,
+  groupIds: number[]
+): void {
+  const db = getMasterDb();
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO invite_groups (invitation_id, group_id)
+    VALUES (?, ?)
+  `);
+
+  for (const groupId of groupIds) {
+    stmt.run(invitationId, groupId);
+  }
+}
+
+/**
+ * Get groups associated with an invitation
+ */
+export function getInviteGroups(invitationId: number): Array<{
+  id: number;
+  invitation_id: number;
+  group_id: number;
+  created_at: number;
+}> {
+  const db = getMasterDb();
+  const stmt = db.prepare<
+    { id: number; invitation_id: number; group_id: number; created_at: number },
+    [number]
+  >("SELECT * FROM invite_groups WHERE invitation_id = ?");
+  return stmt.all(invitationId);
+}
+
+/**
+ * Get groups associated with an invitation by code
+ */
+export function getInviteGroupsByCode(code: string): Array<{
+  id: number;
+  invitation_id: number;
+  group_id: number;
+  created_at: number;
+}> {
+  const invitation = getTeamInvitationByCode(code);
+  if (!invitation) return [];
+  return getInviteGroups(invitation.id);
+}
+
+/**
+ * Delete all groups from an invitation
+ */
+export function deleteInviteGroups(invitationId: number): number {
+  const db = getMasterDb();
+  const stmt = db.prepare("DELETE FROM invite_groups WHERE invitation_id = ?");
+  const result = stmt.run(invitationId);
   return result.changes;
 }
 

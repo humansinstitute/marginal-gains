@@ -778,6 +778,96 @@ summary::-webkit-details-marker {
   color: #b91c1c;
   font-size: 0.9rem;
 }
+.auth-switch {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 0.9rem;
+}
+.link-btn:hover {
+  color: var(--text);
+}
+.auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  color: #666;
+}
+
+/* Invite Hero */
+.invite-hero {
+  text-align: center;
+  padding: 2rem 1rem;
+  margin-bottom: 1rem;
+}
+.invite-team-icon {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, var(--accent) 0%, #9b5de5 100%);
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 auto 1rem;
+  box-shadow: 0 8px 24px rgba(107, 58, 107, 0.3);
+}
+.invite-hero h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 400;
+  color: #666;
+}
+.invite-team-name {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.invite-team-desc {
+  margin: 0 0 1rem;
+  color: #555;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.invite-groups {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+.invite-group-badge {
+  display: inline-block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.85rem;
+  margin: 0.2rem;
+}
+.invite-role {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+.npub-badge {
+  font-family: monospace;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.85rem;
+}
+
 .qr-modal-overlay {
   position: fixed;
   inset: 0;
@@ -3251,6 +3341,97 @@ body.chat-page {
   opacity: 0.5;
   transform: rotate(3deg);
 }
+
+/* Summary Tasks column - special styling for parent tasks column */
+.kanban-column-summary {
+  background: var(--surface-alt, #f0f4f8);
+}
+
+.kanban-column-summary .kanban-column-header h3 {
+  color: inherit;
+}
+
+.kanban-column-summary .kanban-cards {
+  cursor: default;
+}
+
+/* Parent task card - purple top border */
+.kanban-card.is-parent {
+  border-top: 3px solid #9333ea;
+  cursor: pointer;
+}
+
+/* Parent card state colors */
+.kanban-card.is-parent.state-done {
+  border-top-color: #22c55e;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, var(--surface) 100%);
+}
+.kanban-card.is-parent.state-review {
+  border-top-color: #f59e0b;
+}
+.kanban-card.is-parent.state-in_progress {
+  border-top-color: #3b82f6;
+}
+.kanban-card.is-parent.state-ready {
+  border-top-color: #8b5cf6;
+}
+.kanban-card.is-parent.state-new {
+  border-top-color: #6b7280;
+}
+.kanban-card.is-parent.state-archived {
+  border-top-color: #9ca3af;
+  opacity: 0.7;
+}
+
+/* Subtask card - indented appearance */
+.kanban-card.is-subtask {
+  margin-left: 0.75rem;
+  border-left: 2px solid var(--muted);
+}
+
+/* Subtask prefix indicator */
+.subtask-prefix {
+  color: var(--muted);
+  margin-right: 0.25rem;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+/* Progress squares for parent cards */
+.subtask-progress {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+}
+
+.progress-square {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.progress-square.new {
+  background: #6b7280; /* Grey for new */
+}
+
+.progress-square.ready {
+  background: #ec4899; /* Pink for ready */
+}
+
+.progress-square.in-progress {
+  background: #f97316; /* Orange for in_progress */
+}
+
+.progress-square.review {
+  background: #9333ea; /* Purple for review */
+}
+
+.progress-square.done {
+  background: #22c55e; /* Green for done */
+}
+
 .drop-placeholder {
   height: 60px;
   background: var(--accent-lighter, #e0f0ff);
@@ -3361,19 +3542,19 @@ body.chat-page {
 
 /* Kanban column state colors */
 [data-kanban-column="new"] .kanban-column-header {
-  border-bottom-color: #94a3b8;
+  border-bottom-color: #6b7280; /* Grey */
 }
 [data-kanban-column="ready"] .kanban-column-header {
-  border-bottom-color: #f472b6;
+  border-bottom-color: #ec4899; /* Pink */
 }
 [data-kanban-column="in_progress"] .kanban-column-header {
-  border-bottom-color: #a78bfa;
+  border-bottom-color: #f97316; /* Orange */
 }
 [data-kanban-column="review"] .kanban-column-header {
-  border-bottom-color: #fbbf24;
+  border-bottom-color: #9333ea; /* Purple */
 }
 [data-kanban-column="done"] .kanban-column-header {
-  border-bottom-color: #4ade80;
+  border-bottom-color: #22c55e; /* Green */
 }
 
 /* ========== Task Edit Modal ========== */
@@ -3496,7 +3677,19 @@ body.chat-page {
 .task-modal-delete:hover {
   background: #fef2f2;
 }
-.task-modal-actions button[type="button"]:not(.task-modal-delete) {
+.task-modal-archive {
+  background: none;
+  border: 1px solid #6b7280;
+  color: #6b7280;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.task-modal-archive:hover {
+  background: #f3f4f6;
+}
+.task-modal-actions button[type="button"]:not(.task-modal-delete):not(.task-modal-archive) {
   background: var(--bg);
   border: 1px solid var(--border);
   padding: 0.5rem 1rem;
@@ -3577,6 +3770,104 @@ body.chat-page {
 .task-modal-link-unlink:hover {
   opacity: 1;
   color: #ef4444;
+}
+
+/* Task modal subtasks section */
+.task-modal-subtasks {
+  border-top: 1px solid var(--border);
+  padding: 1rem 1.25rem;
+}
+.task-modal-subtasks-header {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+.task-modal-subtasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.subtask-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.subtask-item:hover {
+  background: var(--surface);
+}
+.subtask-item-state {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.subtask-item-state.state-new,
+.subtask-item-state.state-ready {
+  color: var(--muted);
+}
+.subtask-item-state.state-in_progress,
+.subtask-item-state.state-review {
+  color: #f97316;
+  border-color: #f97316;
+}
+.subtask-item-state.state-done {
+  color: #9333ea;
+  border-color: #9333ea;
+}
+.subtask-item-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-modal-add-subtask {
+  margin-top: 0.75rem;
+  width: 100%;
+  color: var(--accent, #0066cc);
+  background: none;
+  border: 1px dashed var(--accent, #0066cc);
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.15s;
+}
+.task-modal-add-subtask:hover {
+  background: var(--bg);
+}
+
+/* Parent task indicator when editing a subtask */
+.task-modal-parent {
+  background: var(--bg);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.task-modal-parent-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.task-modal-parent-title {
+  color: #9333ea;
+  font-weight: 500;
 }
 
 /* ========== Task-Thread Linking Styles ========== */
@@ -4290,6 +4581,10 @@ body.teams-page {
 .form-hint {
   font-size: 0.75rem;
   color: var(--text-muted, #6b7280);
+}
+.text-muted {
+  color: var(--text-muted, #6b7280);
+  font-style: italic;
 }
 .teams-form-actions {
   display: flex;
