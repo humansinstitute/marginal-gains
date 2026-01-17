@@ -9,6 +9,8 @@
 
 import { createHash } from "crypto";
 
+import { nip19 } from "nostr-tools";
+
 import { getTeamDb } from "../db-router";
 import { jsonResponse, unauthorized } from "../http";
 import {
@@ -202,6 +204,19 @@ export async function handleRedeemInvite(
       // Hash the invite code for tracking
       const codeHash = createHash("sha256").update(code).digest("hex").slice(0, 16);
 
+      // Get hex pubkey - use session.pubkey if available, otherwise decode from npub
+      let requesterPubkey = session.pubkey || "";
+      if (!requesterPubkey && session.npub) {
+        try {
+          const decoded = nip19.decode(session.npub);
+          if (decoded.type === "npub") {
+            requesterPubkey = decoded.data;
+          }
+        } catch (e) {
+          console.warn("[Invites] Failed to decode npub:", e);
+        }
+      }
+
       for (const ig of inviteGroupsList) {
         console.log(`[Invites] Adding user ${session.npub.slice(0, 12)}... to group ${ig.group_id}`);
         teamDb.addGroupMember(ig.group_id, session.npub);
@@ -212,7 +227,7 @@ export async function handleRedeemInvite(
           const created = teamDb.createKeyRequest({
             channelId: channel.id,
             requesterNpub: session.npub,
-            requesterPubkey: session.pubkey || "",
+            requesterPubkey,
             targetNpub: invitation.created_by,
             inviteCodeHash: codeHash,
             groupId: ig.group_id,

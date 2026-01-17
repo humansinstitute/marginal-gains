@@ -145,9 +145,9 @@ export async function handleFulfillKeyRequest(
       return jsonResponse({ error: `Request already ${keyRequest.status}` }, 400);
     }
 
-    // Store the wrapped key for the requester
+    // Store the wrapped key for the requester (using hex pubkey, not npub)
     teamDb.storeUserChannelKey(
-      keyRequest.requester_npub,
+      keyRequest.requester_pubkey,
       keyRequest.channel_id,
       encryptedKey,
       keyVersion
