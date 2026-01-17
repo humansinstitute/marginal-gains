@@ -246,6 +246,11 @@ export async function handleTeamTodoUpdate(
     });
   }
 
+  // Propagate tags to children if this is a parent task
+  if (db.hasSubtasks(id)) {
+    db.propagateTagsToChildren(id, fields.tags);
+  }
+
   return redirect(getRedirectUrl(teamSlug, groupId));
 }
 

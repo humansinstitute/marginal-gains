@@ -871,6 +871,9 @@ const setParentStmt = db.query<Todo>(
 const orphanSubtasksStmt = db.query(
   "UPDATE todos SET parent_id = NULL WHERE parent_id = ?"
 );
+const propagateTagsStmt = db.query(
+  "UPDATE todos SET tags = ? WHERE parent_id = ? AND deleted = 0"
+);
 
 const updateStmt = db.query<Todo>(
   `UPDATE todos
@@ -1263,6 +1266,14 @@ export function isSubtask(todo: Todo): boolean {
 export function canHaveChildren(todo: Todo): boolean {
   // Can only add children if not already a subtask (2 levels max)
   return todo.parent_id === null;
+}
+
+/**
+ * Propagate tags from a parent task to all its children.
+ * Call this after updating a parent task's tags.
+ */
+export function propagateTagsToChildren(parentId: number, tags: string): void {
+  propagateTagsStmt.run(tags, parentId);
 }
 
 export function addSubtask(

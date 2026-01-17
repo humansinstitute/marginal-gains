@@ -7,6 +7,7 @@ import {
   getGroup,
   getLatestSummaries,
   getTodoById,
+  hasSubtasks,
   listAllAssignedTodos,
   listGroupMembers,
   listGroupTodos,
@@ -14,6 +15,7 @@ import {
   listTodos,
   listUnscheduledTodos,
   moveTodoToBoard,
+  propagateTagsToChildren,
   syncParentStateAfterSubtaskChange,
   transitionGroupTodo,
   transitionGroupTodoWithPosition,
@@ -175,7 +177,12 @@ export function updateTodoFromForm(owner: string, id: number, form: FormData) {
     assigned_to: form.get("assigned_to"),
   });
   if (!fields) return null;
-  return updateTodo(id, owner, fields);
+  const result = updateTodo(id, owner, fields);
+  // Propagate tags to children if this is a parent task
+  if (result && hasSubtasks(id)) {
+    propagateTagsToChildren(id, fields.tags);
+  }
+  return result;
 }
 
 export function transitionTodoState(owner: string, id: number, state: string) {
@@ -229,7 +236,12 @@ export function updateGroupTodoFromForm(groupId: number, id: number, form: FormD
     assigned_to: form.get("assigned_to"),
   });
   if (!fields) return null;
-  return updateGroupTodo(id, groupId, fields);
+  const result = updateGroupTodo(id, groupId, fields);
+  // Propagate tags to children if this is a parent task
+  if (result && hasSubtasks(id)) {
+    propagateTagsToChildren(id, fields.tags);
+  }
+  return result;
 }
 
 export function transitionGroupTodoState(groupId: number, id: number, state: string) {
