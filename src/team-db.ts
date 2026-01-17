@@ -315,6 +315,14 @@ export class TeamDatabase {
     return todo.parent_id === null;
   }
 
+  /**
+   * Propagate tags from a parent task to all its children.
+   * Call this after updating a parent task's tags.
+   */
+  propagateTagsToChildren(parentId: number, tags: string): void {
+    this.db.run("UPDATE todos SET tags = ? WHERE parent_id = ? AND deleted = 0", [tags, parentId]);
+  }
+
   addSubtask(title: string, parentId: number, assignedTo: string | null = null): Todo | null {
     // Inherit group_id and owner from parent
     return this.db.query<Todo, [string, string | null, number]>(
