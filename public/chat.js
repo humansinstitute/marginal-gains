@@ -57,6 +57,35 @@ let threadExpanded = false;
 // Track if we should scroll to bottom (only on initial load or explicit action)
 let shouldScrollToBottom = false;
 
+// Touch movement threshold for distinguishing taps from scrolls (in pixels)
+const TOUCH_MOVE_THRESHOLD = 10;
+
+// Helper to wire touch-aware click handlers that ignore scroll gestures
+function wireTouchAwareHandler(element, handler) {
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  element.addEventListener("click", handler);
+
+  element.addEventListener("touchstart", (e) => {
+    const touch = e.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+  }, { passive: true });
+
+  element.addEventListener("touchend", (e) => {
+    const touch = e.changedTouches[0];
+    const deltaX = Math.abs(touch.clientX - touchStartX);
+    const deltaY = Math.abs(touch.clientY - touchStartY);
+
+    // Only trigger if finger didn't move much (tap, not scroll)
+    if (deltaX < TOUCH_MOVE_THRESHOLD && deltaY < TOUCH_MOVE_THRESHOLD) {
+      e.preventDefault();
+      handler(e);
+    }
+  });
+}
+
 // Pinned messages state for current channel
 let pinnedMessages = [];
 let canPinMessages = false;
@@ -1758,11 +1787,7 @@ function wireAlpineThreadHandlers() {
       const threadId = thread.dataset.threadId;
       openThread(threadId, messages, byParent);
     };
-    replySection.addEventListener("click", handler);
-    replySection.addEventListener("touchend", (e) => {
-      e.preventDefault();
-      handler(e);
-    });
+    wireTouchAwareHandler(replySection, handler);
   });
 }
 
@@ -1855,11 +1880,7 @@ function renderThreads() {
       const threadId = thread.dataset.threadId;
       openThread(threadId, messages, byParent);
     };
-    replySection.addEventListener("click", handler);
-    replySection.addEventListener("touchend", (e) => {
-      e.preventDefault();
-      handler(e);
-    });
+    wireTouchAwareHandler(replySection, handler);
   });
 }
 

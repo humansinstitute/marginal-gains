@@ -937,6 +937,11 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
         <label>Description
           <textarea name="description" data-task-modal-description rows="8"></textarea>
         </label>
+        <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
+          <div class="task-modal-subtasks-header">Subtasks</div>
+          <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
+          <button type="button" class="task-modal-add-subtask" data-task-modal-add-subtask>+ Add Subtask</button>
+        </div>
         <div class="task-modal-row">
           <label>Priority
             <select name="priority" data-task-modal-priority>
@@ -977,11 +982,6 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
         <div class="task-modal-parent" data-task-modal-parent hidden>
           <span class="task-modal-parent-label">Parent:</span>
           <span class="task-modal-parent-title" data-task-modal-parent-title></span>
-        </div>
-        <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
-          <div class="task-modal-subtasks-header">Subtasks</div>
-          <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
-          <button type="button" class="task-modal-add-subtask" data-task-modal-add-subtask>+ Add Subtask</button>
         </div>
         <div class="task-modal-actions">
           <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
@@ -1457,6 +1457,11 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
         <label>Description
           <textarea name="description" data-task-modal-description rows="8"></textarea>
         </label>
+        <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
+          <div class="task-modal-subtasks-header">Subtasks</div>
+          <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
+          <button type="button" class="task-modal-add-subtask" data-task-modal-add-subtask>+ Add Subtask</button>
+        </div>
         <div class="task-modal-row">
           <label>Priority
             <select name="priority" data-task-modal-priority>
@@ -1492,11 +1497,6 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
         <div class="task-modal-parent" data-task-modal-parent hidden>
           <span class="task-modal-parent-label">Parent:</span>
           <span class="task-modal-parent-title" data-task-modal-parent-title></span>
-        </div>
-        <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
-          <div class="task-modal-subtasks-header">Subtasks</div>
-          <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
-          <button type="button" class="task-modal-add-subtask" data-task-modal-add-subtask>+ Add Subtask</button>
         </div>
         <div class="task-modal-actions">
           <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
