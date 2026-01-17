@@ -12,6 +12,8 @@ import { renderChatPage } from "../render/chat";
 import { broadcast } from "../services/events";
 import { TeamDatabase } from "../team-db";
 
+import { getTeamBranding } from "./app-settings";
+
 import type { TeamContextResult } from "../context";
 import type { DeepLink, Session } from "../types";
 
@@ -64,7 +66,8 @@ export function handleTeamChatPage(
     needsOnboarding = !hasCommunityKey;
   }
 
-  const page = renderChatPage(ctx.session, deepLink, needsOnboarding, teamSlug);
+  const branding = getTeamBranding(teamSlug);
+  const page = renderChatPage(ctx.session, deepLink, needsOnboarding, teamSlug, branding);
   return new Response(page, {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });

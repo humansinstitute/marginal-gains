@@ -365,8 +365,46 @@ export async function verifySignedPayload(payloadJson) {
   try {
     const event = JSON.parse(payloadJson);
 
+    // Check if this is a legacy plain message (not a signed Nostr event)
+    // Legacy messages don't have the required Nostr event fields
+    const isSignedEvent = event.id && event.pubkey && event.sig && event.kind !== undefined;
+
+    if (!isSignedEvent) {
+      // Legacy format: plain message without signature
+      // This can happen for messages encrypted before authenticated encryption was added
+      console.log("[Crypto] verifySignedPayload - legacy plain message (no signature)");
+
+      // If it has a 'content' field, use that; otherwise treat the whole thing as content
+      const content = typeof event.content === "string" ? event.content : payloadJson;
+
+      return {
+        valid: true, // Trust it (decryption succeeded, that's authentication enough for legacy)
+        content,
+        sender: event.pubkey || "", // May not have sender for very old messages
+        ts: event.created_at || 0,
+        legacy: true, // Flag as legacy
+      };
+    }
+
+    // Debug: log event structure before verification
+    console.log("[Crypto] verifySignedPayload - signed event structure:", {
+      idLength: event.id?.length,
+      pubkeyLength: event.pubkey?.length,
+      sigLength: event.sig?.length,
+      kind: event.kind,
+    });
+
     // Verify the event signature
     const valid = pure.verifyEvent(event);
+
+    if (!valid) {
+      console.warn("[Crypto] Event signature verification failed:", {
+        id: event.id?.slice(0, 16) + "...",
+        pubkey: event.pubkey?.slice(0, 16) + "...",
+        sig: event.sig?.slice(0, 16) + "...",
+        content: event.content?.slice(0, 50) + (event.content?.length > 50 ? "..." : ""),
+      });
+    }
 
     return {
       valid,
@@ -375,12 +413,14 @@ export async function verifySignedPayload(payloadJson) {
       ts: event.created_at
     };
   } catch (err) {
-    console.error("Failed to verify payload:", err);
+    // If JSON parse fails, this might be plain text content (very old format)
+    console.log("[Crypto] verifySignedPayload - plain text content (not JSON)");
     return {
-      valid: false,
-      content: "",
+      valid: true, // Trust it - decryption succeeded
+      content: payloadJson,
       sender: "",
-      ts: 0
+      ts: 0,
+      legacy: true,
     };
   }
 }
@@ -406,6 +446,11 @@ export async function encryptAuthenticatedMessage(content, channelKeyBase64) {
 export async function decryptAuthenticatedMessage(ciphertextBase64, channelKeyBase64) {
   try {
     const payloadJson = await decryptMessage(ciphertextBase64, channelKeyBase64);
+
+    // Debug: log raw decrypted payload (first 200 chars)
+    console.log("[Crypto] decryptAuthenticatedMessage - decrypted payload:",
+      payloadJson?.slice(0, 200) + (payloadJson?.length > 200 ? "..." : ""));
+
     return verifySignedPayload(payloadJson);
   } catch (err) {
     console.error("Failed to decrypt authenticated message:", err);

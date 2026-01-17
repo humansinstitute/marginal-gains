@@ -29,6 +29,7 @@ backups/
 
 # uploads (user-generated content)
 uploads/
+public/uploads/
 
 # runtime/logs
 *.log

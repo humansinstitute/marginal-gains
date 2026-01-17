@@ -6,6 +6,7 @@ import { escapeHtml } from "../utils/html";
 import { renderAppMenu, renderPinModal } from "./components";
 
 import type { Group, GroupMember, Todo } from "../db";
+import type { TeamBranding } from "../routes/app-settings";
 import type { ViewMode } from "../routes/home";
 import type { Session, TodoPriority, TodoState } from "../types";
 
@@ -999,6 +1000,7 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
 
 type TeamRenderArgs = RenderArgs & {
   teamSlug: string;
+  branding?: TeamBranding;
 };
 
 type TeamPageState = PageState & {
@@ -1020,16 +1022,17 @@ export function renderTeamTodosPage({
   canManage = true,
   teamSlug,
   viewMode = "kanban",
+  branding,
 }: TeamRenderArgs) {
   const filteredTodos = filterTodos(todos, filterTags);
   const pageState = buildTeamPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage, teamSlug, viewMode);
 
   return `<!doctype html>
 <html lang="en">
-${renderHead()}
+${renderTeamHead(branding)}
 <body class="tasks-page">
   <main class="tasks-app-shell">
-    ${renderTeamHeader(session, teamSlug)}
+    ${renderTeamHeader(session, teamSlug, branding)}
     <div class="tasks-content" data-tasks-content>
       <div class="tasks-content-inner">
         ${renderTeamHero(session, pageState.groupId, pageState.canManage, teamSlug)}
@@ -1050,9 +1053,25 @@ ${renderHead()}
 </html>`;
 }
 
-function renderTeamHeader(session: Session | null, teamSlug: string) {
-  const appName = getAppName();
-  const faviconUrl = getFaviconUrl() || "/favicon.png";
+function renderTeamHead(branding?: TeamBranding) {
+  const appName = branding?.name || getAppName();
+  const faviconUrl = branding?.iconUrl || getFaviconUrl() || "/favicon.png";
+  return `<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>Tasks - ${appName}</title>
+  <meta name="theme-color" content="#6b3a6b" />
+  <meta name="application-name" content="${appName}" />
+  <link rel="icon" type="image/png" href="${faviconUrl}" />
+  <link rel="apple-touch-icon" href="${faviconUrl}" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/app.css?v=3" />
+</head>`;
+}
+
+function renderTeamHeader(session: Session | null, teamSlug: string, branding?: TeamBranding) {
+  const appName = branding?.name || getAppName();
+  const faviconUrl = branding?.iconUrl || getFaviconUrl() || "/favicon.png";
   return `<header class="tasks-page-header">
     <div class="header-left">
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
@@ -1062,7 +1081,6 @@ function renderTeamHeader(session: Session | null, teamSlug: string) {
         <img src="${faviconUrl}" alt="" class="app-logo" />
       </a>
       <h1 class="app-title">${appName}</h1>
-      <span class="team-badge">${escapeHtml(teamSlug)}</span>
     </div>
     <div class="header-right">
       <div class="session-controls" data-session-controls ${session ? "" : "hidden"}>

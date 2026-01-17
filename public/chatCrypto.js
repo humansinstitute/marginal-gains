@@ -316,15 +316,32 @@ export async function encryptMessageForChannel(content, channelId) {
   try {
     let key;
 
+    // Debug: log which path we're taking
+    const channelEncrypted = isChannelEncrypted(channelId);
+    const personalChannel = isPersonalChannel(channelId);
+    const communityEncrypted = usesCommunityEncryption(channelId);
+
+    console.log("[ChatCrypto] encryptMessageForChannel debug:", {
+      channelId,
+      isChannelEncrypted: channelEncrypted,
+      isPersonalChannel: personalChannel,
+      usesCommunityEncryption: communityEncrypted,
+      channelNeedsEncryption: channelEncrypted || personalChannel || communityEncrypted,
+    });
+
     // Check if this is a per-channel encrypted channel (private/DM)
-    if (isChannelEncrypted(channelId)) {
+    if (channelEncrypted) {
+      console.log("[ChatCrypto] Fetching per-channel key...");
       key = await fetchChannelKey(channelId);
+      console.log("[ChatCrypto] Per-channel key result:", key ? "found" : "NOT FOUND");
     }
     // Personal "Note to self" uses per-channel key (encrypted to self)
-    else if (isPersonalChannel(channelId)) {
+    else if (personalChannel) {
+      console.log("[ChatCrypto] Fetching personal channel key...");
       key = await fetchChannelKey(channelId);
       // If no key exists yet, set up encryption for personal channel
       if (!key) {
+        console.log("[ChatCrypto] No personal key, setting up...");
         const setup = await setupPersonalChannelEncryption(channelId);
         if (setup) {
           key = await fetchChannelKey(channelId);
@@ -332,12 +349,14 @@ export async function encryptMessageForChannel(content, channelId) {
       }
     }
     // Otherwise check for community/team encryption (public channels)
-    else if (usesCommunityEncryption(channelId)) {
+    else if (communityEncrypted) {
+      console.log("[ChatCrypto] Fetching team/community key...");
       key = await fetchPublicChannelKey();
+      console.log("[ChatCrypto] Team/community key result:", key ? "found" : "NOT FOUND");
     }
 
     if (!key) {
-      console.error("[ChatCrypto] No key available for encryption");
+      console.error("[ChatCrypto] No key available for encryption - none of the paths returned a key");
       return null;
     }
 
@@ -391,12 +410,25 @@ export async function decryptMessageFromChannel(ciphertext, channelId) {
  * @returns {boolean}
  */
 export function isChannelEncrypted(channelId) {
+  // Normalize to string for comparison (state stores string IDs)
+  const idStr = String(channelId);
+
   // Check regular channels
-  const channel = state.chat.channels.find((c) => c.id === channelId);
+  const channel = state.chat.channels.find((c) => c.id === idStr);
+
+  // Debug logging
+  console.log("[ChatCrypto] isChannelEncrypted check:", {
+    channelId,
+    idStr,
+    channelFound: !!channel,
+    channelEncrypted: channel?.encrypted,
+    allChannelIds: state.chat.channels.map(c => c.id),
+  });
+
   if (channel?.encrypted) return true;
 
   // Check DM channels
-  const dm = state.chat.dmChannels.find((c) => c.id === channelId);
+  const dm = state.chat.dmChannels.find((c) => c.id === idStr);
   if (dm?.encrypted) return true;
 
   return false;
@@ -418,23 +450,45 @@ export function isInTeamContext() {
  * @returns {boolean}
  */
 export function usesCommunityEncryption(channelId) {
+  // Normalize to string for comparison
+  const idStr = String(channelId);
+
   // Check if team or community encryption is active (user has appropriate key)
   let hasKey = false;
-  if (isInTeamContext()) {
+  const inTeamContext = isInTeamContext();
+  if (inTeamContext) {
     hasKey = !!getCachedTeamKey(state.session.currentTeamSlug);
   } else {
     hasKey = !!getCachedCommunityKey();
   }
 
+  console.log("[ChatCrypto] usesCommunityEncryption check:", {
+    channelId,
+    idStr,
+    inTeamContext,
+    teamSlug: state.session?.currentTeamSlug,
+    hasTeamKey: inTeamContext ? !!getCachedTeamKey(state.session?.currentTeamSlug) : "N/A",
+    hasCommunityKey: !inTeamContext ? !!getCachedCommunityKey() : "N/A",
+    hasKey,
+  });
+
   if (!hasKey) return false;
 
   // Personal channels use self-encryption, not community/team encryption
-  if (state.chat.personalChannel?.id === channelId) {
+  if (String(state.chat.personalChannel?.id) === idStr) {
     return false;
   }
 
   // Public channels use community/team encryption when available
-  const channel = state.chat.channels.find((c) => c.id === channelId);
+  const channel = state.chat.channels.find((c) => c.id === idStr);
+
+  console.log("[ChatCrypto] usesCommunityEncryption channel check:", {
+    channelFound: !!channel,
+    channelPrivate: channel?.private,
+    channelEncrypted: channel?.encrypted,
+    willReturnTrue: channel && !channel.private && !channel.encrypted,
+  });
+
   if (channel && !channel.private && !channel.encrypted) {
     return true;
   }
@@ -479,7 +533,19 @@ export function isPersonalChannel(channelId) {
  * @returns {boolean}
  */
 export function channelNeedsEncryption(channelId) {
-  return isChannelEncrypted(channelId) || usesCommunityEncryption(channelId) || isPersonalChannel(channelId);
+  const channelEncrypted = isChannelEncrypted(channelId);
+  const communityEncrypted = usesCommunityEncryption(channelId);
+  const personalChannel = isPersonalChannel(channelId);
+
+  console.log("[ChatCrypto] channelNeedsEncryption:", {
+    channelId,
+    isChannelEncrypted: channelEncrypted,
+    usesCommunityEncryption: communityEncrypted,
+    isPersonalChannel: personalChannel,
+    result: channelEncrypted || communityEncrypted || personalChannel,
+  });
+
+  return channelEncrypted || communityEncrypted || personalChannel;
 }
 
 /**
@@ -499,11 +565,26 @@ export async function processMessagesForDisplay(messages, channelId) {
   const isPersonal = isPersonalChannel(channelId);
   const isCommunityEncrypted = usesCommunityEncryption(channelId);
 
+  console.log("[ChatCrypto] processMessagesForDisplay debug:", {
+    channelId,
+    messageCount: messages.length,
+    encryptedCount: messages.filter(m => m.encrypted).length,
+    isPerChannelEncrypted,
+    isPersonal,
+    isCommunityEncrypted,
+  });
+
   if (isPerChannelEncrypted || isPersonal) {
+    console.log("[ChatCrypto] Fetching per-channel/personal key for decryption...");
     key = await fetchChannelKey(channelId);
   } else if (isCommunityEncrypted) {
+    console.log("[ChatCrypto] Fetching team/community key for decryption...");
     key = await fetchPublicChannelKey();
+  } else {
+    console.warn("[ChatCrypto] No encryption type matched! Messages are encrypted but no key path available");
   }
+
+  console.log("[ChatCrypto] Key fetch result:", key ? "found" : "NOT FOUND");
 
   if (!key) {
     // Return messages with placeholder for encrypted content

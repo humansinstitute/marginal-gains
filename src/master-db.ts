@@ -241,6 +241,7 @@ export function getUserTeams(userNpub: string): SessionTeamMembership[] {
     teamId: row.team_id,
     teamSlug: row.team_slug,
     displayName: row.team_display_name,
+    iconUrl: row.team_icon_url,
     role: row.role as "owner" | "manager" | "member",
   }));
 }

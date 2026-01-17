@@ -12,6 +12,7 @@ import { escapeHtml } from "../utils/html";
 
 import { renderAppMenu, renderPinModal } from "./components";
 
+import type { TeamBranding } from "../routes/app-settings";
 import type { Session } from "../types";
 import type { Database } from "bun:sqlite";
 
@@ -41,7 +42,7 @@ ${renderHead()}
  * Render the CRM page in a team context
  * Uses the team's database instead of the global database
  */
-export function renderTeamCrmPage(session: Session | null, teamSlug: string, teamDb: Database) {
+export function renderTeamCrmPage(session: Session | null, teamSlug: string, teamDb: Database, branding?: TeamBranding) {
   const db = new TeamDatabase(teamDb);
   const companies = db.listCrmCompanies();
   const contacts = db.listCrmContacts();
@@ -52,10 +53,10 @@ export function renderTeamCrmPage(session: Session | null, teamSlug: string, tea
 
   return `<!doctype html>
 <html lang="en">
-${renderHead()}
+${renderTeamHead(branding)}
 <body class="chat-page">
   <main class="chat-app-shell">
-    ${renderTeamCrmHeader(session, teamSlug)}
+    ${renderTeamCrmHeader(session, teamSlug, branding)}
     ${session ? renderCrmContent(companies, contacts, opportunities, activities, pipelineSummary, outstandingTasks) : renderAuthRequired()}
   </main>
   ${renderTeamSessionSeed(session, teamSlug)}
@@ -96,9 +97,23 @@ function renderCrmHeader(session: Session | null) {
   </header>`;
 }
 
-function renderTeamCrmHeader(session: Session | null, teamSlug: string) {
-  const appName = getAppName();
-  const faviconUrl = getFaviconUrl() || "/favicon.png";
+function renderTeamHead(branding?: TeamBranding) {
+  const appName = branding?.name || getAppName();
+  const faviconUrl = branding?.iconUrl || getFaviconUrl() || "/favicon.png";
+  return `<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>CRM - ${appName}</title>
+  <meta name="theme-color" content="#6b3a6b" />
+  <link rel="icon" type="image/png" href="${faviconUrl}" />
+  <link rel="stylesheet" href="/app.css?v=4" />
+  <link rel="stylesheet" href="/crm.css?v=6" />
+</head>`;
+}
+
+function renderTeamCrmHeader(session: Session | null, teamSlug: string, branding?: TeamBranding) {
+  const appName = branding?.name || getAppName();
+  const faviconUrl = branding?.iconUrl || getFaviconUrl() || "/favicon.png";
   return `<header class="chat-page-header">
     <div class="header-left">
       <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
@@ -108,7 +123,6 @@ function renderTeamCrmHeader(session: Session | null, teamSlug: string) {
         <img src="${faviconUrl}" alt="" class="app-logo" />
       </a>
       <h1 class="app-title">${appName}</h1>
-      <span class="team-badge">${escapeHtml(teamSlug)}</span>
     </div>
     <div class="header-right">
       ${session ? renderAvatarMenu(session) : ""}

@@ -77,7 +77,7 @@ export function handleListPendingKeyRequests(
     // Enrich with channel and requester info
     const enriched = requests.map((req) => {
       const channel = teamDb.getChannel(req.channel_id);
-      const user = teamDb.getUser(req.requester_npub);
+      const user = teamDb.getUserByNpub(req.requester_npub);
       return {
         ...req,
         channel_name: channel?.name || `Channel ${req.channel_id}`,
