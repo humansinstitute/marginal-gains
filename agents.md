@@ -3,7 +3,28 @@
 - My preference is for you to answer quickly. Do the research you need but dont get carried away doing long tasks
 - If you have multiple steps aska. question to ensure you keep on track. 
 - Install deps with `bun install`, then run `bun dev --hot` for hot reloads while editing. Use `bun start` when you want the production-like server.
-- Primary files: `src/server.ts` (Bun server, HTML rendering, inline client script) and `src/db.ts` (SQLite helpers). Static assets live in `public/`. The SQLite file `do-the-other-stuff.sqlite` is created automatically; reset with `bun run reset-db` if needed.
+- Primary files: `src/server.ts` (Bun server, HTML rendering, inline client script) and `src/db.ts` (SQLite helpers). Static assets live in `public/`. The SQLite file is created automatically; reset with `bun run reset-db` if needed.
+
+## Dual Database Architecture - CRITICAL
+
+**Personal tasks and Team tasks use DIFFERENT code paths:**
+
+| What | Personal | Team |
+|------|----------|------|
+| Database | `src/db.ts` | `src/team-db.ts` (TeamDatabase class) |
+| Schema | `src/db.ts` (inline) | `src/team-schema.ts` |
+| Routes | `src/routes/todos.ts` | `src/routes/team-todos.ts` |
+| Services | `src/services/todos.ts` | (inline in team routes) |
+| DB Files | `marginal-gains.sqlite` | `data/teams/<slug>.sqlite` |
+
+**When adding/fixing todo features, you MUST update BOTH paths!**
+
+Common bugs from forgetting this:
+- Missing columns in team schema (e.g., `updated_at`)
+- Missing methods in TeamDatabase class (e.g., `updateTodoPosition`)
+- Missing parameters in team update methods (e.g., `assignedTo`)
+
+The `db-router.ts` manages team database connections with LRU caching.
 - For current layout and where logic lives, see `docs/structure.md` (routes, services, rendering, config).
 - When mutating client-side state in the inline script, call `refreshUI()` so the login controls, hero input, and other UI panels redraw correctly.
 - Keep the existing routes and forms intact (`/todos`, `/todos/:id/update`, `/todos/:id/state`, `/todos/:id/delete`, `/auth/login`, `/auth/logout`) to avoid breaking submissions.
