@@ -8,6 +8,7 @@ export type SessionTeamMembership = {
   teamId: number;
   teamSlug: string;
   displayName: string;
+  iconUrl?: string | null;
   role: "owner" | "manager" | "member";
 };
 

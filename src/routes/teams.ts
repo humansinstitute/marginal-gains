@@ -38,6 +38,7 @@ import {
 } from "../master-db";
 import { renderTeamsPage, renderTeamSettingsPage } from "../render/teams";
 import { TeamDatabase } from "../team-db";
+import { isValidImage, processImageFromFile } from "../utils/images";
 
 import type { InviteGroupOption } from "../render/teams";
 import type { Session } from "../types";
@@ -731,4 +732,99 @@ export async function handleAddTeamManager(
   }
 
   return jsonResponse({ success: true });
+}
+
+// ============================================================================
+// Team Icon Upload
+// ============================================================================
+
+/** Max icon file size: 5MB */
+const MAX_ICON_SIZE = 5 * 1024 * 1024;
+
+/**
+ * POST /api/teams/:id/icon - Upload team icon
+ *
+ * Accepts multipart/form-data with a file field named "icon".
+ * Processes the image at multiple sizes and updates the team.
+ */
+export async function handleUploadTeamIcon(
+  req: Request,
+  session: Session | null,
+  teamId: number
+): Promise<Response> {
+  if (!session) {
+    return unauthorized();
+  }
+
+  const team = getTeam(teamId);
+  if (!team) {
+    return jsonResponse({ error: "Team not found" }, 404);
+  }
+
+  // Check if user is a manager or super-admin
+  if (!isAdmin(session.npub) && !isUserTeamManager(team.id, session.npub)) {
+    return forbidden("You do not have permission to update this team");
+  }
+
+  // Parse the form data
+  let formData: FormData;
+  try {
+    formData = await req.formData();
+  } catch {
+    return jsonResponse({ error: "Invalid form data" }, 400);
+  }
+
+  const file = formData.get("icon");
+  if (!file || !(file instanceof File)) {
+    return jsonResponse({ error: "No icon file provided" }, 400);
+  }
+
+  // Validate file size
+  if (file.size > MAX_ICON_SIZE) {
+    return jsonResponse({ error: "Icon file too large. Maximum size is 5MB." }, 400);
+  }
+
+  // Validate it's an image
+  if (!isValidImage(file)) {
+    return jsonResponse({ error: "Invalid image file. Supported formats: JPEG, PNG, GIF, WebP." }, 400);
+  }
+
+  try {
+    // Process the image at icon and standard sizes
+    const result = await processImageFromFile(file, {
+      sizes: ["icon", "standard"],
+      quality: 90,
+      format: "webp",
+      subDir: `teams/${team.slug}`,
+    });
+
+    // Use the standard size as the main icon URL
+    const iconUrl = result.images.standard.url;
+
+    // Update the team with the new icon URL
+    const updated = updateTeam(teamId, { iconUrl });
+    if (!updated) {
+      return jsonResponse({ error: "Failed to update team icon" }, 500);
+    }
+
+    // Update session if this is the current team
+    if (session.currentTeamId === teamId) {
+      const membership = session.teamMemberships?.find((m) => m.teamId === teamId);
+      if (membership) {
+        membership.iconUrl = iconUrl;
+      }
+    }
+
+    return jsonResponse({
+      success: true,
+      iconUrl,
+      images: {
+        icon: result.images.icon.url,
+        standard: result.images.standard.url,
+      },
+    });
+  } catch (error) {
+    console.error("Failed to process team icon:", error);
+    return jsonResponse({ error: "Failed to process image" }, 500);
+  }
 }

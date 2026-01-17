@@ -12,6 +12,8 @@ import { renderTeamTodosPage } from "../render/home";
 import { TeamDatabase } from "../team-db";
 import { normalizeStateInput, validateTodoForm, validateTodoTitle } from "../validation";
 
+import { getTeamBranding } from "./app-settings";
+
 import type { ViewMode } from "../routes/home";
 import type { Session } from "../types";
 
@@ -107,6 +109,7 @@ export function handleTeamTodos(url: URL, session: Session | null, teamSlug: str
     todos = db.listTodos(result.ctx.session.npub, filterTags);
   }
 
+  const branding = getTeamBranding(teamSlug);
   const page = renderTeamTodosPage({
     showArchive,
     session: result.ctx.session,
@@ -117,6 +120,7 @@ export function handleTeamTodos(url: URL, session: Session | null, teamSlug: str
     canManage,
     teamSlug,
     viewMode,
+    branding,
   });
 
   return new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } });

@@ -320,6 +320,9 @@ function initTeamInfoForm(team, isOwner) {
   const form = document.querySelector("[data-team-info-form]");
   if (!form) return;
 
+  const submitBtn = form.querySelector('button[type="submit"]');
+
+  // Handle form submission (name, description)
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -328,6 +331,12 @@ function initTeamInfoForm(team, isOwner) {
       displayName: formData.get("displayName"),
       description: formData.get("description"),
     };
+
+    // Show saving state
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Saving...";
+    }
 
     try {
       const res = await fetch(`/api/teams/${team.id}`, {
@@ -339,13 +348,102 @@ function initTeamInfoForm(team, isOwner) {
       if (res.ok) {
         // Update page title
         document.title = `${data.displayName} Settings`;
+        // Show success feedback
+        if (submitBtn) {
+          submitBtn.textContent = "Saved!";
+          submitBtn.classList.add("success");
+          setTimeout(() => {
+            submitBtn.textContent = "Save Changes";
+            submitBtn.classList.remove("success");
+            submitBtn.disabled = false;
+          }, 2000);
+        }
       } else {
         const result = await res.json();
         alert(result.error || "Failed to update team");
+        if (submitBtn) {
+          submitBtn.textContent = "Save Changes";
+          submitBtn.disabled = false;
+        }
       }
     } catch (err) {
       console.error("Failed to update team:", err);
       alert("Network error. Please try again.");
+      if (submitBtn) {
+        submitBtn.textContent = "Save Changes";
+        submitBtn.disabled = false;
+      }
+    }
+  });
+
+  // Handle icon upload
+  initTeamIconUpload(team);
+}
+
+/**
+ * Initialize team icon upload functionality
+ */
+function initTeamIconUpload(team) {
+  const iconInput = document.querySelector("[data-icon-input]");
+  const iconPreview = document.querySelector("[data-icon-preview]");
+  if (!iconInput || !iconPreview) return;
+
+  iconInput.addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Icon file too large. Maximum size is 5MB.");
+      iconInput.value = "";
+      return;
+    }
+
+    // Validate file type
+    if (!file.type.match(/^image\/(png|jpeg|gif|webp)$/)) {
+      alert("Invalid image file. Supported formats: PNG, JPEG, GIF, WebP.");
+      iconInput.value = "";
+      return;
+    }
+
+    // Show loading state
+    const uploadBtn = iconInput.closest("label");
+    const originalText = uploadBtn?.textContent?.trim();
+    if (uploadBtn) {
+      uploadBtn.classList.add("loading");
+      const textNode = Array.from(uploadBtn.childNodes).find((n) => n.nodeType === Node.TEXT_NODE);
+      if (textNode) textNode.textContent = "Uploading...";
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("icon", file);
+
+      const res = await fetch(`/api/teams/${team.id}/icon`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await res.json();
+
+      if (res.ok) {
+        // Update preview with new icon
+        iconPreview.innerHTML = `<img src="${result.iconUrl}" alt="Team icon" class="team-icon-img" />`;
+        console.log("[Teams] Icon uploaded successfully:", result);
+      } else {
+        alert(result.error || "Failed to upload icon");
+      }
+    } catch (err) {
+      console.error("Failed to upload icon:", err);
+      alert("Network error. Please try again.");
+    } finally {
+      // Reset input and button state
+      iconInput.value = "";
+      if (uploadBtn) {
+        uploadBtn.classList.remove("loading");
+        const textNode = Array.from(uploadBtn.childNodes).find((n) => n.nodeType === Node.TEXT_NODE);
+        if (textNode) textNode.textContent = originalText || "Upload Icon";
+      }
     }
   });
 }

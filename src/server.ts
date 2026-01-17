@@ -233,6 +233,7 @@ import {
   handleDeleteTeamInvitation,
   handleListTeamManagers,
   handleAddTeamManager,
+  handleUploadTeamIcon,
 } from "./routes/teams";
 import {
   handleApiTodoPosition,
@@ -644,6 +645,8 @@ const server = Bun.serve({
         const createTeamInviteMatch = pathname.match(/^\/api\/teams\/(\d+)\/invitations$/);
         if (createTeamInviteMatch) return handleCreateTeamInvitation(req, session, Number(createTeamInviteMatch[1]));
         if (pathname === "/api/team-managers") return handleAddTeamManager(req, session);
+        const uploadTeamIconMatch = pathname.match(/^\/api\/teams\/(\d+)\/icon$/);
+        if (uploadTeamIconMatch) return handleUploadTeamIcon(req, session, Number(uploadTeamIconMatch[1]));
 
         // Team-scoped chat POST routes
         const teamCreateChannelMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels$/);

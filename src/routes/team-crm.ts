@@ -10,6 +10,8 @@ import { jsonResponse } from "../http";
 import { renderTeamCrmPage } from "../render/crm";
 import { TeamDatabase } from "../team-db";
 
+import { getTeamBranding } from "./app-settings";
+
 import type { CrmOpportunityStage } from "../db";
 import type { Session } from "../types";
 
@@ -41,7 +43,8 @@ export function handleTeamCrmPage(session: Session | null, teamSlug: string) {
     return new Response("CRM access requires manager role", { status: 403 });
   }
 
-  return new Response(renderTeamCrmPage(result.ctx.session, teamSlug, result.ctx.teamDb), {
+  const branding = getTeamBranding(teamSlug);
+  return new Response(renderTeamCrmPage(result.ctx.session, teamSlug, result.ctx.teamDb, branding), {
     headers: { "Content-Type": "text/html" },
   });
 }

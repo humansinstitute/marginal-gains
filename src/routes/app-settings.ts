@@ -1,7 +1,16 @@
 import { APP_NAME_DEFAULT, isAdmin } from "../config";
 import { getSetting, setSetting } from "../db";
+import { getTeamBySlug } from "../master-db";
 
 import type { Session } from "../types";
+
+/**
+ * Branding info for a team context (or app-level fallback)
+ */
+export type TeamBranding = {
+  name: string;
+  iconUrl: string;
+};
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
@@ -38,6 +47,18 @@ export function getAppName(): string {
  */
 export function getFaviconUrl(): string {
   return getSetting(SETTING_FAVICON_URL) || "";
+}
+
+/**
+ * Get branding for a team context.
+ * Falls back to app-level branding if team doesn't have custom branding.
+ */
+export function getTeamBranding(teamSlug: string): TeamBranding {
+  const team = getTeamBySlug(teamSlug);
+  return {
+    name: team?.display_name || getAppName(),
+    iconUrl: team?.icon_url || getFaviconUrl() || "/favicon.png",
+  };
 }
 
 export function getAppSettings() {

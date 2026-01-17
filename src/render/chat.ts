@@ -2,21 +2,23 @@ import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
 import { renderAppMenu, renderPinModal } from "./components";
 
+import type { TeamBranding } from "../routes/app-settings";
 import type { DeepLink, Session } from "../types";
 
 export function renderChatPage(
   session: Session | null,
   deepLink?: DeepLink,
   needsOnboarding = false,
-  teamSlug?: string
+  teamSlug?: string,
+  branding?: TeamBranding
 ) {
   const bodyClass = needsOnboarding ? "chat-page onboarding-mode" : "chat-page";
   return `<!doctype html>
 <html lang="en">
-${renderHead()}
+${renderHead(branding)}
 <body class="${bodyClass}">
   <main class="chat-app-shell">
-    ${renderChatHeader(session, needsOnboarding)}
+    ${renderChatHeader(session, needsOnboarding, branding)}
     ${!session ? renderAuthRequired() : needsOnboarding ? renderOnboardingLobby() : renderChatContent()}
   </main>
   ${renderSessionSeed(session, deepLink, needsOnboarding, teamSlug)}
@@ -25,9 +27,9 @@ ${renderHead()}
 </html>`;
 }
 
-function renderHead() {
-  const appName = getAppName();
-  const faviconUrl = getFaviconUrl() || "/favicon.png";
+function renderHead(branding?: TeamBranding) {
+  const appName = branding?.name || getAppName();
+  const faviconUrl = branding?.iconUrl || getFaviconUrl() || "/favicon.png";
   return `<head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
@@ -41,9 +43,9 @@ function renderHead() {
 </head>`;
 }
 
-function renderChatHeader(session: Session | null, needsOnboarding = false) {
-  const appName = getAppName();
-  const faviconUrl = getFaviconUrl() || "/favicon.png";
+function renderChatHeader(session: Session | null, needsOnboarding = false, branding?: TeamBranding) {
+  const appName = branding?.name || getAppName();
+  const faviconUrl = branding?.iconUrl || getFaviconUrl() || "/favicon.png";
   // Hide menu during onboarding - user can only enter invite code or log out
   if (needsOnboarding) {
     return `<header class="chat-page-header">

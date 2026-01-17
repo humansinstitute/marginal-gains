@@ -103,10 +103,15 @@ function renderNoTeams() {
 function renderTeamsList(teams: SessionTeamMembership[]) {
   const teamCards = teams
     .map(
-      (team) => `<div class="team-card-wrapper">
+      (team) => {
+        const iconContent = team.iconUrl
+          ? `<img src="${escapeHtml(team.iconUrl)}" alt="" class="team-icon-img" />`
+          : `<span class="team-icon-fallback">${team.displayName.slice(0, 2).toUpperCase()}</span>`;
+
+        return `<div class="team-card-wrapper">
       <button type="button" class="team-card" data-select-team="${team.teamSlug}">
         <div class="team-card-icon">
-          <span class="team-icon-fallback">${team.displayName.slice(0, 2).toUpperCase()}</span>
+          ${iconContent}
         </div>
         <div class="team-card-info">
           <span class="team-card-name">${escapeHtml(team.displayName)}</span>
@@ -115,7 +120,8 @@ function renderTeamsList(teams: SessionTeamMembership[]) {
         <span class="team-card-arrow">&rarr;</span>
       </button>
       ${team.role === "owner" ? `<button type="button" class="team-delete-btn ghost danger" data-delete-team-id="${team.teamId}" data-delete-team-name="${escapeHtml(team.displayName)}" title="Delete team">&times;</button>` : ""}
-    </div>`
+    </div>`;
+      }
     )
     .join("");
 
@@ -233,6 +239,10 @@ function renderTeamSettingsContent(
 }
 
 function renderTeamInfoSection(team: Team, isOwner: boolean) {
+  const iconPreview = team.icon_url
+    ? `<img src="${escapeHtml(team.icon_url)}" alt="Team icon" class="team-icon-img" />`
+    : `<span class="team-icon-fallback">${team.display_name.slice(0, 2).toUpperCase()}</span>`;
+
   return `<section class="settings-section">
     <div class="settings-section-header">
       <h2>Team Information</h2>
@@ -246,6 +256,21 @@ function renderTeamInfoSection(team: Team, isOwner: boolean) {
         <span>Description</span>
         <textarea name="description" rows="2" ${isOwner ? "" : "disabled"}>${escapeHtml(team.description)}</textarea>
       </label>
+      <div class="form-field">
+        <span class="form-label">Team Icon</span>
+        <div class="team-icon-upload" data-team-id="${team.id}">
+          <div class="team-icon-current" data-icon-preview>
+            ${iconPreview}
+          </div>
+          ${isOwner ? `<div class="team-icon-actions">
+            <label class="btn secondary team-icon-upload-btn">
+              <input type="file" name="icon" accept="image/png,image/jpeg,image/gif,image/webp" hidden data-icon-input />
+              Upload Icon
+            </label>
+            <small class="form-hint">PNG, JPEG, GIF, or WebP. Max 5MB.</small>
+          </div>` : ""}
+        </div>
+      </div>
       <label>
         <span>Team URL</span>
         <input type="text" value="/t/${team.slug}" disabled />
