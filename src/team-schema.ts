@@ -298,6 +298,25 @@ export function initTeamSchema(db: Database): void {
   createIndex(db, "CREATE INDEX idx_task_threads_message ON task_threads(message_id)");
 
   // ============================================================================
+  // Pinned Messages
+  // ============================================================================
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS pinned_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id INTEGER NOT NULL,
+      message_id INTEGER NOT NULL,
+      pinned_by TEXT NOT NULL,
+      pinned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(channel_id, message_id),
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+    )
+  `);
+  createIndex(db, "CREATE INDEX idx_pinned_messages_channel ON pinned_messages(channel_id)");
+  createIndex(db, "CREATE INDEX idx_pinned_messages_message ON pinned_messages(message_id)");
+
+  // ============================================================================
   // Task-CRM Links
   // ============================================================================
 

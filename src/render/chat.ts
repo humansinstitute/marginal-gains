@@ -40,6 +40,8 @@ function renderHead(branding?: TeamBranding) {
   <link rel="apple-touch-icon" href="${faviconUrl}" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/app.css?v=3" />
+  <script defer src="/lib/alpine.min.js"></script>
+  <script src="/stores/chatStore.js"></script>
 </head>`;
 }
 
@@ -104,30 +106,193 @@ function renderAvatarMenu(session: Session) {
 }
 
 function renderChatContent() {
-  return `<section class="chat-shell chat-shell-page" data-chat-shell>
+  return `<section class="chat-shell chat-shell-page" data-chat-shell x-data="createChatStore(window.__CHAT_INIT__ || {})" x-init="init()">
     <div class="chat-layout" data-chat-layout data-mobile-view="channels">
       <aside class="chat-channels-sidebar">
         <div class="chat-section-header">
           <h3>Channels</h3>
           <button type="button" class="text-btn" data-new-channel-trigger>+ New</button>
         </div>
-        <div class="chat-list" data-channel-list></div>
+        <div class="chat-list" data-channel-list>
+          <template x-for="channel in channels" :key="channel.id">
+            <button class="chat-channel"
+              :class="{ 'active': isChannelActive(channel.id), 'unread': hasUnread(channel.id) }"
+              :data-channel-id="channel.id"
+              :title="channel.displayName || channel.name"
+              @click="onChannelClick(channel.id)">
+              <div class="chat-channel-name">
+                <span x-text="'#' + channel.name"></span>
+                <span x-show="channel.encrypted" class="channel-encrypted" title="E2E Encrypted">&#128737;</span>
+                <span x-show="!channel.encrypted && !channel.isPublic" class="channel-lock" title="Private">&#128274;</span>
+                <img x-show="channel.hasWingmanAccess" src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />
+                <span x-show="getMentionCount(channel.id) > 0 && !isChannelActive(channel.id)"
+                  class="unread-badge mention"
+                  x-text="'(' + (getMentionCount(channel.id) > 99 ? '99+' : getMentionCount(channel.id)) + ')'"></span>
+              </div>
+            </button>
+          </template>
+        </div>
         <div class="chat-section-header dm-section-header">
           <h3>Direct Messages</h3>
           <button type="button" class="text-btn" data-new-dm-trigger>+ New</button>
         </div>
-        <div class="chat-list" data-dm-list></div>
-        <div class="chat-personal-section" data-personal-section></div>
+        <div class="chat-list" data-dm-list>
+          <template x-if="dmChannels.length === 0">
+            <p class="dm-empty">No conversations yet</p>
+          </template>
+          <template x-for="dm in dmChannels" :key="dm.id">
+            <button class="chat-channel dm-channel"
+              :class="{ 'active': isChannelActive(dm.id), 'unread': hasUnread(dm.id) }"
+              :data-channel-id="dm.id"
+              @click="onChannelClick(dm.id)">
+              <img class="dm-avatar" :src="getAvatarUrl(dm.otherNpub)" alt="" loading="lazy" />
+              <div class="dm-info">
+                <div class="chat-channel-name">
+                  <span x-text="getDmDisplayName(dm)"></span>
+                  <span x-show="hasUnread(dm.id)"
+                    class="unread-badge"
+                    x-text="'(' + (getUnreadCount(dm.id) > 99 ? '99+' : getUnreadCount(dm.id)) + ')'"></span>
+                </div>
+              </div>
+            </button>
+          </template>
+        </div>
+        <div class="chat-personal-section" data-personal-section>
+          <template x-if="personalChannel">
+            <div>
+              <div class="channel-divider"></div>
+              <button class="chat-channel channel-personal"
+                :class="{ 'active': isChannelActive(personalChannel.id) }"
+                :data-channel-id="personalChannel.id"
+                @click="onChannelClick(personalChannel.id)">
+                <div class="chat-channel-name">
+                  <span class="channel-note-icon" title="Personal notes">&#128221;</span>
+                  <span x-text="personalChannel.displayName || 'Notes'"></span>
+                </div>
+                <p class="chat-channel-desc">Your private notes</p>
+              </button>
+            </div>
+          </template>
+        </div>
       </aside>
       <section class="chat-messages-area">
         <header class="chat-messages-header">
           <button type="button" class="chat-back-btn" data-back-to-channels>Channels</button>
           <div class="chat-channel-chip" data-active-channel>Pick a channel</div>
+          <button type="button" class="channel-pinned-btn" data-channel-pinned hidden title="Pinned messages">&#128204;</button>
           <button type="button" class="channel-hang-btn" data-channel-hang hidden title="Start a hang">&#128222;</button>
           <button type="button" class="channel-settings-btn" data-channel-settings hidden title="Channel settings">&#9881;</button>
         </header>
-        <div class="chat-threads" data-thread-list>
-          <p class="chat-placeholder">Pick or create a channel to start chatting.</p>
+        <div class="chat-threads" data-thread-list @scroll.passive="updateWindow($event.target)">
+          <!-- Placeholder when no channel selected -->
+          <template x-if="!selectedChannelId">
+            <p class="chat-placeholder">Pick or create a channel to start chatting.</p>
+          </template>
+
+          <!-- Loading state -->
+          <template x-if="selectedChannelId && loading">
+            <p class="chat-placeholder">Loading messages...</p>
+          </template>
+
+          <!-- Empty state -->
+          <template x-if="selectedChannelId && !loading && rootMessages.length === 0">
+            <p class="chat-placeholder">No messages yet. Start the conversation!</p>
+          </template>
+
+          <!-- Message threads -->
+          <template x-for="thread in getVisibleThreads()" :key="thread.id">
+            <article class="chat-thread" :data-thread-id="thread.id">
+              <div class="chat-thread-collapsed">
+                <div class="chat-thread-first">
+                  <div class="chat-message chat-message-with-avatar" :data-message-id="thread.id">
+                    <img class="chat-message-avatar" :src="getAvatarUrl(thread.author)" alt="" loading="lazy" />
+                    <div class="chat-message-content">
+                      <div class="chat-message-meta">
+                        <span class="chat-message-author" x-text="getAuthorName(thread.author)"></span>
+                        <time x-text="formatTime(thread.createdAt)"></time>
+                      </div>
+                      <p class="chat-message-body" x-html="renderBody(thread.body)"></p>
+                      <!-- Reaction pills -->
+                      <div class="message-reactions" x-show="thread.reactions && thread.reactions.length > 0">
+                        <template x-for="reaction in (thread.reactions || [])" :key="reaction.emoji">
+                          <button type="button"
+                            class="reaction-pill"
+                            :class="{ 'reacted': hasUserReacted(reaction) }"
+                            :data-message-id="thread.id"
+                            :data-emoji="reaction.emoji"
+                            :title="reaction.reactors?.map(n => n.slice(0,12) + '...').join(', ')"
+                            x-text="reaction.emoji + ' ' + reaction.count">
+                          </button>
+                        </template>
+                      </div>
+                      <!-- Message menu -->
+                      <div class="message-menu">
+                        <button class="message-menu-trigger" :data-message-menu="thread.id" aria-label="Message options">&#8942;</button>
+                        <div class="message-menu-dropdown" :data-message-dropdown="thread.id" hidden>
+                          <button class="message-menu-item" :data-copy-message="thread.id">Copy message text</button>
+                          <button class="message-menu-item" :data-copy-thread="thread.id">Copy entire thread</button>
+                          <button class="message-menu-item" :data-link-thread-to-task="thread.id">Link thread to task</button>
+                          <template x-if="canPinMessage()">
+                            <button class="message-menu-item"
+                              x-show="!isPinned(thread.id)"
+                              :data-pin-message="thread.id">Pin message</button>
+                          </template>
+                          <template x-if="canPinMessage()">
+                            <button class="message-menu-item"
+                              x-show="isPinned(thread.id)"
+                              :data-unpin-message="thread.id">Unpin message</button>
+                          </template>
+                          <template x-if="canDeleteMessage(thread.author)">
+                            <button class="message-menu-item danger" :data-delete-message="thread.id">Delete</button>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Quick react bar -->
+                    <div class="quick-react-bar" :data-message-id="thread.id">
+                      <button type="button" class="quick-react-btn" data-emoji="👍">👍</button>
+                      <button type="button" class="quick-react-btn" data-emoji="❤️">❤️</button>
+                      <button type="button" class="quick-react-btn" data-emoji="😂">😂</button>
+                      <button type="button" class="quick-react-btn" data-emoji="🎉">🎉</button>
+                      <button type="button" class="quick-react-btn" data-emoji="👀">👀</button>
+                      <button type="button" class="quick-react-btn" data-emoji="🙏">🙏</button>
+                      <button type="button" class="quick-react-btn add-reaction-btn" title="More reactions">+</button>
+                    </div>
+                  </div>
+                </div>
+                <!-- Reply preview -->
+                <template x-if="getReplyCount(thread.id) > 0">
+                  <div class="chat-reply" data-open-thread>
+                    <img class="chat-reply-avatar" :src="getAvatarUrl(getLastReply(thread.id)?.author)" alt="" loading="lazy" />
+                    <div class="chat-reply-content">
+                      <div class="chat-reply-meta">
+                        <span class="chat-reply-author" x-text="getAuthorName(getLastReply(thread.id)?.author)"></span>
+                        <span class="chat-reply-time" x-text="formatTime(getLastReply(thread.id)?.createdAt)"></span>
+                      </div>
+                      <p class="chat-message-body" x-html="renderBody(getLastReply(thread.id)?.body || '')"></p>
+                      <span class="chat-reply-thread-link">
+                        <span x-show="getReplyCount(thread.id) > 1" x-text="'+' + (getReplyCount(thread.id) - 1) + ' more · '"></span>
+                        ... view thread
+                      </span>
+                    </div>
+                  </div>
+                </template>
+                <!-- Reply prompt when no replies -->
+                <template x-if="getReplyCount(thread.id) === 0">
+                  <div class="chat-reply chat-reply-prompt" data-open-thread>
+                    <div class="chat-reply-content">
+                      <div class="chat-reply-input-placeholder">Send a reply...</div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </article>
+          </template>
+
+          <!-- New messages indicator -->
+          <div class="new-message-indicator" x-show="hasNewMessages" @click="onNewMessagesClick()" x-cloak>
+            New messages below ↓
+          </div>
         </div>
         <div class="chat-composer">
           <div class="mention-popup" data-mention-popup hidden></div>
@@ -141,19 +306,113 @@ function renderChatContent() {
           </div>
         </div>
       </section>
-      <aside class="chat-thread-panel" data-thread-panel hidden>
+      <aside class="chat-thread-panel" data-thread-panel :hidden="!isThreadOpen()">
         <header class="chat-thread-panel-header">
-          <button type="button" class="chat-back-btn" data-back-to-messages>Back</button>
+          <button type="button" class="chat-back-btn" data-back-to-messages @click="closeThread()">Back</button>
           <h3>Thread</h3>
           <div class="chat-thread-header-actions">
             <button type="button" class="chat-thread-tasks-btn" data-view-thread-tasks hidden title="View linked tasks">&#9745;</button>
             <button type="button" class="chat-thread-hang-btn" data-thread-hang title="Start a hang">&#128222;</button>
             <button type="button" class="chat-thread-expand" data-expand-thread title="Expand thread">|&larr;</button>
             <button type="button" class="chat-thread-expand" data-collapse-thread hidden title="Collapse thread">&rarr;|</button>
-            <button type="button" class="chat-thread-close" data-close-thread>&times;</button>
+            <button type="button" class="chat-thread-close" data-close-thread @click="closeThread()">&times;</button>
           </div>
         </header>
-        <div class="chat-thread-panel-messages" data-thread-messages></div>
+        <div class="chat-thread-panel-messages" data-thread-messages>
+          <!-- Thread root message -->
+          <template x-if="threadRoot">
+            <div class="chat-message chat-message-with-avatar thread-root-message" :data-message-id="threadRoot.id">
+              <img class="chat-message-avatar" :src="getAvatarUrl(threadRoot.author)" alt="" loading="lazy" />
+              <div class="chat-message-content">
+                <div class="chat-message-meta">
+                  <span class="chat-message-author" x-text="getAuthorName(threadRoot.author)"></span>
+                  <time x-text="formatTime(threadRoot.createdAt)"></time>
+                </div>
+                <p class="chat-message-body" x-html="renderBody(threadRoot.body)"></p>
+                <!-- Reaction pills for thread root -->
+                <div class="message-reactions" x-show="threadRoot.reactions && threadRoot.reactions.length > 0">
+                  <template x-for="reaction in (threadRoot.reactions || [])" :key="reaction.emoji">
+                    <button type="button"
+                      class="reaction-pill"
+                      :class="{ 'reacted': hasUserReacted(reaction) }"
+                      :data-message-id="threadRoot.id"
+                      :data-emoji="reaction.emoji"
+                      x-text="reaction.emoji + ' ' + reaction.count">
+                    </button>
+                  </template>
+                </div>
+                <!-- Message menu for thread root -->
+                <div class="message-menu">
+                  <button class="message-menu-trigger" :data-message-menu="threadRoot.id" aria-label="Message options">&#8942;</button>
+                  <div class="message-menu-dropdown" :data-message-dropdown="threadRoot.id" hidden>
+                    <button class="message-menu-item" :data-copy-message="threadRoot.id">Copy message text</button>
+                    <button class="message-menu-item" :data-copy-thread="threadRoot.id">Copy entire thread</button>
+                    <button class="message-menu-item" :data-link-thread-to-task="threadRoot.id">Link thread to task</button>
+                    <template x-if="canDeleteMessage(threadRoot.author)">
+                      <button class="message-menu-item danger" :data-delete-message="threadRoot.id">Delete</button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <!-- Quick react bar -->
+              <div class="quick-react-bar" :data-message-id="threadRoot.id">
+                <button type="button" class="quick-react-btn" data-emoji="👍">👍</button>
+                <button type="button" class="quick-react-btn" data-emoji="❤️">❤️</button>
+                <button type="button" class="quick-react-btn" data-emoji="😂">😂</button>
+                <button type="button" class="quick-react-btn" data-emoji="🎉">🎉</button>
+                <button type="button" class="quick-react-btn" data-emoji="👀">👀</button>
+                <button type="button" class="quick-react-btn" data-emoji="🙏">🙏</button>
+                <button type="button" class="quick-react-btn add-reaction-btn" title="More reactions">+</button>
+              </div>
+            </div>
+          </template>
+          <!-- Thread replies -->
+          <template x-for="reply in threadMessages" :key="reply.id">
+            <div class="chat-message chat-message-with-avatar" :data-message-id="reply.id">
+              <img class="chat-message-avatar" :src="getAvatarUrl(reply.author)" alt="" loading="lazy" />
+              <div class="chat-message-content">
+                <div class="chat-message-meta">
+                  <span class="chat-message-author" x-text="getAuthorName(reply.author)"></span>
+                  <time x-text="formatTime(reply.createdAt)"></time>
+                </div>
+                <p class="chat-message-body" x-html="renderBody(reply.body)"></p>
+                <!-- Reaction pills -->
+                <div class="message-reactions" x-show="reply.reactions && reply.reactions.length > 0">
+                  <template x-for="reaction in (reply.reactions || [])" :key="reaction.emoji">
+                    <button type="button"
+                      class="reaction-pill"
+                      :class="{ 'reacted': hasUserReacted(reaction) }"
+                      :data-message-id="reply.id"
+                      :data-emoji="reaction.emoji"
+                      x-text="reaction.emoji + ' ' + reaction.count">
+                    </button>
+                  </template>
+                </div>
+                <!-- Message menu -->
+                <div class="message-menu">
+                  <button class="message-menu-trigger" :data-message-menu="reply.id" aria-label="Message options">&#8942;</button>
+                  <div class="message-menu-dropdown" :data-message-dropdown="reply.id" hidden>
+                    <button class="message-menu-item" :data-copy-message="reply.id">Copy message text</button>
+                    <button class="message-menu-item" :data-link-thread-to-task="openThreadId">Link thread to task</button>
+                    <template x-if="canDeleteMessage(reply.author)">
+                      <button class="message-menu-item danger" :data-delete-message="reply.id">Delete</button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <!-- Quick react bar -->
+              <div class="quick-react-bar" :data-message-id="reply.id">
+                <button type="button" class="quick-react-btn" data-emoji="👍">👍</button>
+                <button type="button" class="quick-react-btn" data-emoji="❤️">❤️</button>
+                <button type="button" class="quick-react-btn" data-emoji="😂">😂</button>
+                <button type="button" class="quick-react-btn" data-emoji="🎉">🎉</button>
+                <button type="button" class="quick-react-btn" data-emoji="👀">👀</button>
+                <button type="button" class="quick-react-btn" data-emoji="🙏">🙏</button>
+                <button type="button" class="quick-react-btn add-reaction-btn" title="More reactions">+</button>
+              </div>
+            </div>
+          </template>
+        </div>
         <div class="chat-thread-panel-composer">
           <div class="chat-composer-row">
             <textarea placeholder="Reply to thread..." data-thread-input rows="2"></textarea>
@@ -456,6 +715,15 @@ function renderSessionSeed(
     window.__DEEP_LINK__ = ${JSON.stringify(deepLink ?? null)};
     window.__NEEDS_ONBOARDING__ = ${needsOnboarding};
     window.__TEAM_SLUG__ = ${JSON.stringify(teamSlug ?? null)};
+    window.__CHAT_INIT__ = {
+      channels: [],
+      dmChannels: [],
+      personalChannel: null,
+      selectedChannelId: ${JSON.stringify(deepLink?.channelId ?? null)},
+      unreadCounts: {},
+      mentionCounts: {}
+    };
+    window.__FEATURE_FLAGS__ = { alpineChat: true };
   </script>`;
 }
 

@@ -472,6 +472,16 @@ async function handleDelete() {
   const form = document.createElement("form");
   form.method = "POST";
   form.action = deleteUrl;
+
+  // Include group_id so server knows where to redirect back to
+  if (el.groupId?.value) {
+    const groupInput = document.createElement("input");
+    groupInput.type = "hidden";
+    groupInput.name = "group_id";
+    groupInput.value = el.groupId.value;
+    form.appendChild(groupInput);
+  }
+
   document.body.appendChild(form);
   form.submit();
 }

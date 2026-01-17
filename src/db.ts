@@ -153,6 +153,14 @@ export type TaskThread = {
   linked_at: string;
 };
 
+export type PinnedMessage = {
+  id: number;
+  channel_id: number;
+  message_id: number;
+  pinned_by: string;
+  pinned_at: string;
+};
+
 export type TaskCrmLink = {
   id: number;
   todo_id: number;
@@ -310,6 +318,18 @@ export type WalletTransaction = {
   description: string | null;
   created_at: string;
   settled_at: string | null;
+};
+
+export type DbSession = {
+  token: string;
+  pubkey: string;
+  npub: string;
+  method: string;
+  created_at: number;
+  expires_at: number;
+  current_team_id: number | null;
+  current_team_slug: string | null;
+  team_memberships: string | null;
 };
 
 const dbPath = process.env.DB_PATH || Bun.env.DB_PATH || "marginal-gains.sqlite";
@@ -580,6 +600,22 @@ db.run(`
 db.run("CREATE INDEX IF NOT EXISTS idx_task_threads_todo ON task_threads(todo_id)");
 db.run("CREATE INDEX IF NOT EXISTS idx_task_threads_message ON task_threads(message_id)");
 
+// Pinned Messages - tracks messages pinned to channel headers
+db.run(`
+  CREATE TABLE IF NOT EXISTS pinned_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    pinned_by TEXT NOT NULL,
+    pinned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(channel_id, message_id),
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_pinned_messages_channel ON pinned_messages(channel_id)");
+db.run("CREATE INDEX IF NOT EXISTS idx_pinned_messages_message ON pinned_messages(message_id)");
+
 // Task-CRM links (link tasks to CRM entities)
 db.run(`
   CREATE TABLE IF NOT EXISTS task_crm_links (
@@ -803,6 +839,23 @@ db.run(`
 `);
 db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_npub ON wallet_transactions(npub)");
 db.run("CREATE INDEX IF NOT EXISTS idx_wallet_tx_created ON wallet_transactions(created_at)");
+
+// Sessions table for persistent login
+db.run(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    pubkey TEXT NOT NULL,
+    npub TEXT NOT NULL,
+    method TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    current_team_id INTEGER,
+    current_team_slug TEXT,
+    team_memberships TEXT
+  )
+`);
+db.run("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)");
+db.run("CREATE INDEX IF NOT EXISTS idx_sessions_npub ON sessions(npub)");
 
 const listByOwnerStmt = db.query<Todo>(
   "SELECT * FROM todos WHERE deleted = 0 AND owner = ? AND group_id IS NULL ORDER BY state, position IS NULL, position ASC, created_at DESC"
@@ -2129,6 +2182,46 @@ export function getTaskThreadLink(todoId: number, messageId: number) {
   return getTaskThreadLinkStmt.get(todoId, messageId) as TaskThread | undefined ?? null;
 }
 
+// Pinned message statements
+const pinMessageStmt = db.query<PinnedMessage>(
+  `INSERT INTO pinned_messages (channel_id, message_id, pinned_by)
+   VALUES (?, ?, ?)
+   ON CONFLICT(channel_id, message_id) DO NOTHING
+   RETURNING *`
+);
+const unpinMessageStmt = db.query(
+  "DELETE FROM pinned_messages WHERE channel_id = ? AND message_id = ?"
+);
+const getPinnedMessagesStmt = db.query<PinnedMessage & { body: string; author: string; thread_root_id: number | null; created_at: string }>(
+  `SELECT pm.*, m.body, m.author, m.thread_root_id, m.created_at
+   FROM pinned_messages pm
+   JOIN messages m ON pm.message_id = m.id
+   WHERE pm.channel_id = ?
+   ORDER BY pm.pinned_at DESC`
+);
+const isPinnedStmt = db.query<{ count: number }>(
+  "SELECT COUNT(*) as count FROM pinned_messages WHERE channel_id = ? AND message_id = ?"
+);
+
+// Pinned message functions
+export function pinMessage(channelId: number, messageId: number, pinnedBy: string): PinnedMessage | null {
+  return pinMessageStmt.get(channelId, messageId, pinnedBy) as PinnedMessage | undefined ?? null;
+}
+
+export function unpinMessage(channelId: number, messageId: number): boolean {
+  const result = unpinMessageStmt.run(channelId, messageId);
+  return result.changes > 0;
+}
+
+export function getPinnedMessages(channelId: number) {
+  return getPinnedMessagesStmt.all(channelId);
+}
+
+export function isMessagePinned(channelId: number, messageId: number): boolean {
+  const result = isPinnedStmt.get(channelId, messageId);
+  return (result?.count ?? 0) > 0;
+}
+
 // Task-CRM linking statements
 type TaskWithCrmLink = Todo & { link_id: number; linked_at: string };
 
@@ -3054,6 +3147,58 @@ export function updateWalletTransactionState(id: number, state: "pending" | "set
   return updateWalletTxStateStmt.get(state, state, id) as WalletTransaction | undefined ?? null;
 }
 
+// Session prepared statements
+const insertSessionStmt = db.query(
+  `INSERT INTO sessions (token, pubkey, npub, method, created_at, expires_at, current_team_id, current_team_slug, team_memberships)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+);
+const getSessionStmt = db.query<DbSession>(
+  "SELECT * FROM sessions WHERE token = ? AND expires_at > ?"
+);
+const updateSessionStmt = db.query(
+  `UPDATE sessions SET current_team_id = ?, current_team_slug = ?, team_memberships = ? WHERE token = ?`
+);
+const deleteSessionStmt = db.query("DELETE FROM sessions WHERE token = ?");
+const deleteExpiredSessionsStmt = db.query("DELETE FROM sessions WHERE expires_at <= ?");
+
+// Session functions
+export function saveSession(
+  token: string,
+  pubkey: string,
+  npub: string,
+  method: string,
+  createdAt: number,
+  expiresAt: number,
+  currentTeamId: number | null,
+  currentTeamSlug: string | null,
+  teamMemberships: string | null
+) {
+  insertSessionStmt.run(token, pubkey, npub, method, createdAt, expiresAt, currentTeamId, currentTeamSlug, teamMemberships);
+}
+
+export function getSession(token: string): DbSession | null {
+  const now = Date.now();
+  return getSessionStmt.get(token, now) as DbSession | undefined ?? null;
+}
+
+export function updateSession(
+  token: string,
+  currentTeamId: number | null,
+  currentTeamSlug: string | null,
+  teamMemberships: string | null
+) {
+  updateSessionStmt.run(currentTeamId, currentTeamSlug, teamMemberships, token);
+}
+
+export function deleteSession(token: string) {
+  deleteSessionStmt.run(token);
+}
+
+export function cleanupExpiredSessions() {
+  const now = Date.now();
+  deleteExpiredSessionsStmt.run(now);
+}
+
 export function resetDatabase() {
   db.run("DELETE FROM task_threads");
   db.run("DELETE FROM todos");
@@ -3080,6 +3225,7 @@ export function resetDatabase() {
   db.run("DELETE FROM crm_contacts");
   db.run("DELETE FROM crm_companies");
   db.run("DELETE FROM wallet_transactions");
+  db.run("DELETE FROM sessions");
   // Note: vapid_config is intentionally NOT reset to preserve VAPID keys
   db.run(
     "DELETE FROM sqlite_sequence WHERE name IN ('todos', 'ai_summaries', 'channels', 'messages', 'message_mentions', 'message_reactions', 'groups', 'push_subscriptions', 'task_threads', 'wingman_costs', 'invite_codes', 'invite_redemptions', 'crm_companies', 'crm_contacts', 'crm_opportunities', 'crm_activities', 'wallet_transactions')"

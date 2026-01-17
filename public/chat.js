@@ -57,6 +57,10 @@ let threadExpanded = false;
 // Track if we should scroll to bottom (only on initial load or explicit action)
 let shouldScrollToBottom = false;
 
+// Pinned messages state for current channel
+let pinnedMessages = [];
+let canPinMessages = false;
+
 /**
  * Parse slash commands from message text (client-side, before encryption)
  * Returns array of command names found in the message
@@ -654,6 +658,26 @@ function setupLiveUpdateHandlers() {
       renderThreads();
     }
   });
+
+  // When a message is pinned, refresh pinned messages if viewing that channel
+  onEvent("message:pinned", async (data) => {
+    const channelIdStr = String(data.channelId);
+    if (state.chat.selectedChannelId === channelIdStr) {
+      await fetchPinnedMessages(channelIdStr);
+      updateChannelSettingsCog();
+      renderThreads();
+    }
+  });
+
+  // When a message is unpinned, refresh pinned messages if viewing that channel
+  onEvent("message:unpinned", async (data) => {
+    const channelIdStr = String(data.channelId);
+    if (state.chat.selectedChannelId === channelIdStr) {
+      await fetchPinnedMessages(channelIdStr);
+      updateChannelSettingsCog();
+      renderThreads();
+    }
+  });
 }
 
 /**
@@ -706,9 +730,72 @@ export const initChat = async () => {
   initMessageRenderer({
     getAuthorDisplayName,
     getAuthorAvatarUrl,
-    getContext: () => ({ session: state.session, isAdmin: state.isAdmin }),
+    getContext: () => ({ session: state.session, isAdmin: state.isAdmin, canPin: canPinMessages }),
     userCache: localUserCache,
   });
+
+  // Initialize Alpine chat store if feature is enabled
+  if (window.__FEATURE_FLAGS__?.alpineChat && isChatPage) {
+    try {
+      const chatSync = await import("./stores/chatSync.js");
+      // Wait for Alpine to be ready
+      const waitForAlpine = () => {
+        return new Promise((resolve) => {
+          if (window.Alpine) {
+            resolve();
+          } else {
+            document.addEventListener("alpine:init", resolve, { once: true });
+            // Fallback timeout
+            setTimeout(resolve, 2000);
+          }
+        });
+      };
+      await waitForAlpine();
+
+      // Get the Alpine store from the chat shell element
+      const chatShell = document.querySelector("[data-chat-shell]");
+      if (chatShell && chatShell._x_dataStack) {
+        const alpineStore = chatShell._x_dataStack[0];
+
+        // Initialize chatSync with store and dependencies
+        chatSync.init(alpineStore, {
+          processMessage: async (msg, channelId) => {
+            // Use existing decryption logic
+            const result = await processMessagesForDisplay([msg], channelId);
+            return result[0];
+          },
+          userCache: localUserCache,
+          currentUserNpub: state.session?.npub,
+        });
+
+        // Inject dependencies into Alpine store
+        alpineStore.setDependencies({
+          getAuthorDisplayName,
+          getAuthorAvatarUrl,
+          escapeHtml,
+          formatTimestamp: (ts) => formatReplyTimestamp(ts),
+          renderMessageBody,
+          currentUserNpub: state.session?.npub || null,
+          isAdmin: state.session?.isAdmin || false,
+          canPin: state.session?.isAdmin || false, // For now, only admins can pin
+          getDmDisplayName,
+          onChannelSelect: async (channelId) => {
+            // Called by Alpine store when user clicks a channel
+            selectChannel(channelId);
+            updateChatUrl(channelId);
+            await fetchPinnedMessages(channelId);
+            updateChannelSettingsCog();
+            await fetchMessages(channelId);
+            setMobileView("messages");
+          },
+        });
+
+        console.log("[Chat] Alpine chat store initialized");
+      }
+    } catch (err) {
+      console.error("[Chat] Failed to initialize Alpine chat:", err);
+    }
+  }
 
   if (isChatPage && el.chatShell) {
     // On chat page - show chat immediately and connect to live updates
@@ -728,10 +815,25 @@ export const initChat = async () => {
       // Community key may not be available - that's OK
     }
 
+    // Helper to update Alpine store when selecting a channel
+    const updateAlpineChannel = (channelId) => {
+      if (window.__FEATURE_FLAGS__?.alpineChat) {
+        const chatShell = document.querySelector("[data-chat-shell]");
+        if (chatShell && chatShell._x_dataStack) {
+          const alpineStore = chatShell._x_dataStack[0];
+          alpineStore.selectedChannelId = channelId;
+          alpineStore.loading = true;
+          alpineStore.messages = [];
+          alpineStore.rootMessages = [];
+        }
+      }
+    };
+
     // Handle deep link if present (e.g., /chat/channel/general?thread=123)
     const deepLink = handleDeepLink();
     if (deepLink.channelId) {
       selectChannel(deepLink.channelId);
+      updateAlpineChannel(deepLink.channelId);
       await fetchMessages(deepLink.channelId);
 
       // If a thread ID was specified, open that thread after messages load
@@ -745,13 +847,19 @@ export const initChat = async () => {
       }
     } else if (state.chat.selectedChannelId) {
       // Update URL to reflect default selected channel
+      updateAlpineChannel(state.chat.selectedChannelId);
       updateChatUrl(state.chat.selectedChannelId);
+      await fetchPinnedMessages(state.chat.selectedChannelId);
+      updateChannelSettingsCog();
       await fetchMessages(state.chat.selectedChannelId);
     } else if (state.chat.channels.length > 0) {
       // Default to first channel if none selected
       const firstChannel = state.chat.channels[0];
       selectChannel(firstChannel.id);
+      updateAlpineChannel(firstChannel.id);
       updateChatUrl(firstChannel.id);
+      await fetchPinnedMessages(firstChannel.id);
+      updateChannelSettingsCog();
       await fetchMessages(firstChannel.id);
     }
 
@@ -796,6 +904,7 @@ export const initChat = async () => {
   wireThreadSidebar();
   wireChannelSettingsModal();
   wireHangButtons();
+  wirePinnedButton();
   wireDmModal();
   wireTaskLinkModal();
   updateChannelSettingsCog();
@@ -839,6 +948,23 @@ async function fetchChannels() {
 
     // Update all channels at once
     updateAllChannels(channels, dmChannels, personalChannel);
+
+    // Update Alpine store if feature enabled
+    if (window.__FEATURE_FLAGS__?.alpineChat) {
+      const chatShell = document.querySelector("[data-chat-shell]");
+      if (chatShell && chatShell._x_dataStack) {
+        const alpineStore = chatShell._x_dataStack[0];
+        alpineStore.channels = channels;
+        alpineStore.dmChannels = dmChannels;
+        alpineStore.personalChannel = personalChannel;
+        if (data.unreadState) {
+          Object.keys(data.unreadState).forEach(id => {
+            alpineStore.unreadCounts[id] = data.unreadState[id].unread || 0;
+            alpineStore.mentionCounts[id] = data.unreadState[id].mentions || 0;
+          });
+        }
+      }
+    }
 
     // Set unread state from server
     if (data.unreadState) {
@@ -895,6 +1021,27 @@ async function fetchMessages(channelId) {
     });
   }
 
+  // If Alpine + Dexie enabled, try to load from cache first for instant display
+  if (window.__FEATURE_FLAGS__?.alpineChat) {
+    try {
+      const chatDB = await import("./db/chatDB.js");
+      const cached = await chatDB.getMessagesForChannel(channelId);
+      if (cached && cached.length > 0) {
+        console.log(`[Chat] Loaded ${cached.length} messages from cache for channel ${channelId}`);
+        const chatShell = document.querySelector("[data-chat-shell]");
+        const alpineStore = chatShell?._x_dataStack?.[0];
+        if (alpineStore) {
+          alpineStore.setMessages(cached);
+          // Keep loading true - we're still fetching from server
+        }
+        setChannelMessages(channelId, cached);
+        renderThreads();
+      }
+    } catch (err) {
+      console.warn("[Chat] Failed to load from cache:", err);
+    }
+  }
+
   try {
     const res = await fetch(chatUrl(`/channels/${channelId}/messages`));
     if (!res.ok) return;
@@ -908,12 +1055,32 @@ async function fetchMessages(channelId) {
       parentId: m.parent_id ? String(m.parent_id) : null,
       encrypted: m.encrypted === 1,
       keyVersion: m.key_version,
+      reactions: m.reactions || [],
     }));
 
     // Decrypt encrypted messages if needed
     mapped = await processMessagesForDisplay(mapped, channelId);
 
     setChannelMessages(channelId, mapped);
+
+    // Update Alpine store if feature enabled
+    if (window.__FEATURE_FLAGS__?.alpineChat) {
+      const chatShell = document.querySelector("[data-chat-shell]");
+      if (chatShell && chatShell._x_dataStack) {
+        const alpineStore = chatShell._x_dataStack[0];
+        alpineStore.setMessages(mapped);
+        alpineStore.loading = false;
+      }
+
+      // Save to Dexie cache for future
+      try {
+        const chatDB = await import("./db/chatDB.js");
+        await chatDB.hydrateMessages(channelId, mapped);
+        console.log(`[Chat] Cached ${mapped.length} messages for channel ${channelId}`);
+      } catch (err) {
+        console.warn("[Chat] Failed to cache messages:", err);
+      }
+    }
 
     // Scroll to bottom on initial load of channel messages
     shouldScrollToBottom = true;
@@ -1180,11 +1347,13 @@ function wireComposer() {
     }
   });
 
-  // Message menu: toggle dropdown, close others, and handle copy/delete
+  // Message menu: toggle dropdown, close others, and handle copy/delete/pin
   document.addEventListener("click", async (event) => {
     const trigger = event.target.closest("[data-message-menu]");
     const copyBtn = event.target.closest("[data-copy-message]");
     const copyThreadBtn = event.target.closest("[data-copy-thread]");
+    const pinBtn = event.target.closest("[data-pin-message]");
+    const unpinBtn = event.target.closest("[data-unpin-message]");
     const deleteBtn = event.target.closest("[data-delete-message]");
 
     // Handle menu trigger click
@@ -1259,6 +1428,28 @@ function wireComposer() {
         }
       }
       // Close the menu
+      document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
+        d.hidden = true;
+      });
+      return;
+    }
+
+    // Handle pin button click
+    if (pinBtn) {
+      event.stopPropagation();
+      const messageId = pinBtn.dataset.pinMessage;
+      await pinMessage(messageId);
+      document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
+        d.hidden = true;
+      });
+      return;
+    }
+
+    // Handle unpin button click
+    if (unpinBtn) {
+      event.stopPropagation();
+      const messageId = unpinBtn.dataset.unpinMessage;
+      await unpinMessage(messageId);
       document.querySelectorAll("[data-message-dropdown]").forEach((d) => {
         d.hidden = true;
       });
@@ -1388,6 +1579,14 @@ export const refreshChatUI = () => {
 };
 
 function renderChannels() {
+  // If Alpine is handling the sidebar, skip innerHTML rendering
+  // Alpine templates reactively update from the store's channels/dmChannels/personalChannel
+  if (window.__FEATURE_FLAGS__?.alpineChat) {
+    // Still wire up handlers for elements that aren't in the Alpine template
+    // (modals, etc. are still handled via old pattern)
+    return;
+  }
+
   // Render regular channels (with signature-based caching to avoid unnecessary DOM updates)
   if (el.chatChannelList) {
     const channels = state.chat.channels;
@@ -1489,7 +1688,21 @@ function renderChannels() {
     const handler = async () => {
       const channelId = btn.dataset.channelId;
       selectChannel(channelId);
+
+      // Update Alpine store if feature enabled
+      if (window.__FEATURE_FLAGS__?.alpineChat) {
+        const chatShell = document.querySelector("[data-chat-shell]");
+        if (chatShell && chatShell._x_dataStack) {
+          const alpineStore = chatShell._x_dataStack[0];
+          alpineStore.selectedChannelId = channelId;
+          alpineStore.loading = true;
+          alpineStore.messages = [];
+          alpineStore.rootMessages = [];
+        }
+      }
+
       updateChatUrl(channelId);
+      await fetchPinnedMessages(channelId);
       updateChannelSettingsCog();
       await fetchMessages(channelId);
       setMobileView("messages");
@@ -1523,7 +1736,61 @@ function findChannel(channelId) {
   );
 }
 
+// Wire up thread click handlers for Alpine-rendered content
+function wireAlpineThreadHandlers() {
+  if (!el.chatThreadList) return;
+
+  const messages = getActiveChannelMessages();
+  const byParent = groupByParent(messages);
+
+  el.chatThreadList.querySelectorAll("[data-thread-id]").forEach((thread) => {
+    // Skip if already wired
+    if (thread.dataset.wired) return;
+    thread.dataset.wired = "true";
+
+    const replySection = thread.querySelector("[data-open-thread]");
+    if (!replySection) return;
+
+    const handler = (e) => {
+      // Don't open if clicking on a button
+      if (e.target.closest("button")) return;
+      e.preventDefault();
+      const threadId = thread.dataset.threadId;
+      openThread(threadId, messages, byParent);
+    };
+    replySection.addEventListener("click", handler);
+    replySection.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      handler(e);
+    });
+  });
+}
+
 function renderThreads() {
+  // Skip rendering if Alpine chat is enabled - Alpine handles reactivity
+  if (window.__FEATURE_FLAGS__?.alpineChat) {
+    // Still need to update header
+    const channel = findChannel(state.chat.selectedChannelId);
+    if (channel) {
+      const isDm = state.chat.dmChannels.some((c) => c.id === channel.id);
+      const isPersonal = state.chat.personalChannel?.id === channel.id;
+      if (isDm) {
+        setChatHeader(`DM - ${getDmDisplayName(channel)}`);
+      } else if (isPersonal) {
+        setChatHeader("Note to self");
+      } else {
+        setChatHeader(`#${channel.name}`);
+      }
+    }
+
+    // Wire up thread click handlers after Alpine renders
+    // Use requestAnimationFrame to ensure DOM is updated
+    requestAnimationFrame(() => {
+      wireAlpineThreadHandlers();
+    });
+    return;
+  }
+
   if (!el.chatThreadList) return;
   const channel = findChannel(state.chat.selectedChannelId);
   if (!channel) {
@@ -1556,7 +1823,15 @@ function renderThreads() {
     el.chatThreadList.innerHTML = `<p class="chat-placeholder">No messages yet. ${placeholderText}.</p>`;
     return;
   }
-  const byParent = groupByParent(messages);
+
+  // Mark messages as pinned based on pinnedMessages array
+  const pinnedIds = new Set(pinnedMessages.map((p) => String(p.message_id)));
+  const messagesWithPinned = messages.map((m) => ({
+    ...m,
+    isPinned: pinnedIds.has(String(m.id)),
+  }));
+
+  const byParent = groupByParent(messagesWithPinned);
   const roots = byParent.get(null) || [];
   el.chatThreadList.innerHTML = roots
     .map((message) => renderCollapsedThread(message, byParent))
@@ -1686,22 +1961,32 @@ async function openThread(threadId, messages, byParent) {
   if (!rootMessage) return;
 
   const replies = byParent.get(threadId) || [];
-  const allMessages = [rootMessage, ...replies];
 
-  // Render messages in panel - pass threadRootId for all messages
-  if (el.threadMessages) {
-    el.threadMessages.innerHTML = allMessages
-      .map((msg, index) => renderMessageFull(msg, { isThreadRoot: index === 0, threadRootId: threadId }))
-      .join("");
-    // Scroll to bottom to show latest replies
-    scrollToBottom(el.threadMessages);
+  // Use Alpine store if feature enabled
+  if (window.__FEATURE_FLAGS__?.alpineChat) {
+    const chatShell = document.querySelector("[data-chat-shell]");
+    const alpineStore = chatShell?._x_dataStack?.[0];
+    if (alpineStore) {
+      alpineStore.openThread(threadId);
+      // Scroll to bottom after Alpine renders
+      requestAnimationFrame(() => {
+        scrollToBottom(el.threadMessages);
+      });
+    }
+  } else {
+    // Vanilla JS rendering
+    const allMessages = [rootMessage, ...replies];
+    if (el.threadMessages) {
+      el.threadMessages.innerHTML = allMessages
+        .map((msg, index) => renderMessageFull(msg, { isThreadRoot: index === 0, threadRootId: threadId }))
+        .join("");
+      scrollToBottom(el.threadMessages);
+    }
+    show(el.threadPanel);
   }
 
   // Check for linked tasks and show/hide the view tasks button
   await updateThreadTasksButton(threadId);
-
-  // Show inline panel
-  show(el.threadPanel);
 
   // Switch to thread view on mobile
   if (isMobile()) {
@@ -1715,13 +2000,30 @@ async function openThread(threadId, messages, byParent) {
 function renderThreadPanel(threadId) {
   if (!threadId) return;
   const messages = getActiveChannelMessages();
-  const byParent = groupByParent(messages);
-  openThread(threadId, messages, byParent);
+  // Mark messages as pinned
+  const pinnedIds = new Set(pinnedMessages.map((p) => String(p.message_id)));
+  const messagesWithPinned = messages.map((m) => ({
+    ...m,
+    isPinned: pinnedIds.has(String(m.id)),
+  }));
+  const byParent = groupByParent(messagesWithPinned);
+  openThread(threadId, messagesWithPinned, byParent);
 }
 
 function closeThreadPanel() {
   openThreadId = null;
-  hide(el.threadPanel);
+
+  // Close Alpine store thread if feature enabled
+  if (window.__FEATURE_FLAGS__?.alpineChat) {
+    const chatShell = document.querySelector("[data-chat-shell]");
+    const alpineStore = chatShell?._x_dataStack?.[0];
+    if (alpineStore) {
+      alpineStore.closeThread();
+    }
+  } else {
+    hide(el.threadPanel);
+  }
+
   if (el.threadInput) el.threadInput.value = "";
   el.threadSendBtn?.setAttribute("disabled", "disabled");
 
@@ -1835,6 +2137,199 @@ export function updateChannelSettingsCog() {
     } else {
       hide(el.channelHangBtn);
     }
+  }
+
+  // Show pinned button when a channel is selected
+  if (el.channelPinnedBtn) {
+    if (state.chat.selectedChannelId) {
+      show(el.channelPinnedBtn);
+      // Update has-pins class based on current pinned messages
+      if (pinnedMessages.length > 0) {
+        el.channelPinnedBtn.classList.add("has-pins");
+      } else {
+        el.channelPinnedBtn.classList.remove("has-pins");
+      }
+    } else {
+      hide(el.channelPinnedBtn);
+    }
+  }
+}
+
+// Fetch pinned messages for a channel
+async function fetchPinnedMessages(channelId) {
+  if (!channelId) {
+    pinnedMessages = [];
+    canPinMessages = false;
+    return;
+  }
+  try {
+    const res = await fetch(chatUrl(`/channels/${channelId}/pinned`).replace("/chat/", "/api/"));
+    if (!res.ok) {
+      pinnedMessages = [];
+      canPinMessages = false;
+      return;
+    }
+    const data = await res.json();
+    canPinMessages = data.canPin || false;
+
+    // Update Alpine store if feature enabled
+    if (window.__FEATURE_FLAGS__?.alpineChat) {
+      const chatShell = document.querySelector("[data-chat-shell]");
+      const alpineStore = chatShell?._x_dataStack?.[0];
+      if (alpineStore) {
+        alpineStore._deps.canPin = canPinMessages;
+      }
+    }
+
+    // Map pinned messages to the format expected by processMessagesForDisplay
+    let pinned = (data.pinned || []).map((p) => ({
+      id: String(p.message_id),
+      author: p.author,
+      body: p.body,
+      createdAt: p.created_at,
+      parentId: p.thread_root_id ? String(p.thread_root_id) : null,
+      encrypted: p.encrypted === 1,
+      keyVersion: p.key_version,
+      // Preserve original fields for the popout
+      message_id: p.message_id,
+      thread_root_id: p.thread_root_id,
+      created_at: p.created_at,
+    }));
+
+    // Decrypt encrypted pinned messages
+    pinned = await processMessagesForDisplay(pinned, channelId);
+    pinnedMessages = pinned;
+  } catch (err) {
+    console.error("[Chat] Failed to fetch pinned messages:", err);
+    pinnedMessages = [];
+    canPinMessages = false;
+  }
+}
+
+// Show pinned messages popout
+function showPinnedPopout() {
+  // Close any existing popout
+  closePinnedPopout();
+
+  if (!pinnedMessages.length) {
+    // No pinned messages - still show popout with empty state
+  }
+
+  const popout = document.createElement("div");
+  popout.className = "pinned-popout";
+  popout.setAttribute("data-pinned-popout", "");
+
+  let html = `<div class="pinned-popout-header">Pinned Messages</div>`;
+
+  if (pinnedMessages.length === 0) {
+    html += `<div class="pinned-popout-empty">No pinned messages</div>`;
+  } else {
+    for (const pin of pinnedMessages) {
+      const authorName = getAuthorDisplayName(pin.author);
+      // Use decrypted body from processMessagesForDisplay
+      const body = pin.body || "";
+      const preview = body.slice(0, 80) + (body.length > 80 ? "..." : "");
+      const time = formatReplyTimestamp(pin.createdAt || pin.created_at);
+      const threadId = pin.parentId || pin.id || pin.thread_root_id || pin.message_id;
+      html += `
+        <div class="pinned-message-item" data-open-pinned-thread="${threadId}">
+          <div class="pinned-message-author">${escapeHtml(authorName)}</div>
+          <div class="pinned-message-preview">${escapeHtml(preview)}</div>
+          <div class="pinned-message-time">${time}</div>
+        </div>
+      `;
+    }
+  }
+
+  popout.innerHTML = html;
+
+  // Position relative to the button
+  const btnRect = el.channelPinnedBtn.getBoundingClientRect();
+  const header = el.channelPinnedBtn.closest("header");
+  if (header) {
+    header.style.position = "relative";
+    popout.style.top = `${el.channelPinnedBtn.offsetTop + el.channelPinnedBtn.offsetHeight}px`;
+    popout.style.right = "0";
+    header.appendChild(popout);
+  } else {
+    document.body.appendChild(popout);
+    popout.style.position = "fixed";
+    popout.style.top = `${btnRect.bottom + 4}px`;
+    popout.style.right = `${window.innerWidth - btnRect.right}px`;
+  }
+
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener("click", closePinnedPopoutOnOutsideClick);
+  }, 0);
+
+  // Wire up click handlers for pinned items
+  popout.querySelectorAll("[data-open-pinned-thread]").forEach((item) => {
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const threadId = item.getAttribute("data-open-pinned-thread");
+      closePinnedPopout();
+      // Use renderThreadPanel which handles getting messages internally
+      renderThreadPanel(threadId);
+    });
+  });
+}
+
+function closePinnedPopout() {
+  const popout = document.querySelector("[data-pinned-popout]");
+  if (popout) popout.remove();
+  document.removeEventListener("click", closePinnedPopoutOnOutsideClick);
+}
+
+function closePinnedPopoutOnOutsideClick(e) {
+  const popout = document.querySelector("[data-pinned-popout]");
+  if (popout && !popout.contains(e.target) && e.target !== el.channelPinnedBtn) {
+    closePinnedPopout();
+  }
+}
+
+// Pin a message
+async function pinMessage(messageId) {
+  const channelId = state.chat.selectedChannelId;
+  if (!channelId || !messageId) return;
+
+  try {
+    const res = await fetch(chatUrl(`/channels/${channelId}/messages/${messageId}/pin`).replace("/chat/", "/api/"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (res.ok) {
+      // Show feedback to user
+      showToast("Message pinned");
+      // SSE event will handle refreshing pinned messages and re-rendering
+    } else {
+      showToast("Failed to pin message", "error");
+    }
+  } catch (err) {
+    console.error("[Chat] Failed to pin message:", err);
+    showToast("Failed to pin message", "error");
+  }
+}
+
+// Unpin a message
+async function unpinMessage(messageId) {
+  const channelId = state.chat.selectedChannelId;
+  if (!channelId || !messageId) return;
+
+  try {
+    const res = await fetch(chatUrl(`/channels/${channelId}/messages/${messageId}/pin`).replace("/chat/", "/api/"), {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      // Show feedback to user
+      showToast("Message unpinned");
+      // SSE event will handle refreshing pinned messages and re-rendering
+    } else {
+      showToast("Failed to unpin message", "error");
+    }
+  } catch (err) {
+    console.error("[Chat] Failed to unpin message:", err);
+    showToast("Failed to unpin message", "error");
   }
 }
 
@@ -2283,6 +2778,19 @@ function wireHangButtons() {
   });
 }
 
+// Wire pinned messages button
+function wirePinnedButton() {
+  el.channelPinnedBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const popout = document.querySelector("[data-pinned-popout]");
+    if (popout) {
+      closePinnedPopout();
+    } else {
+      showPinnedPopout();
+    }
+  });
+}
+
 // ========== DM Modal ==========
 
 let dmSearchQuery = "";
@@ -2563,9 +3071,9 @@ async function createAndLinkTask(formData) {
 }
 
 // Show a toast notification
-function showToast(message) {
+function showToast(message, type = "success") {
   const toast = document.createElement("div");
-  toast.className = "toast";
+  toast.className = `toast${type === "error" ? " toast-error" : ""}`;
   toast.textContent = message;
   document.body.appendChild(toast);
   setTimeout(() => {
