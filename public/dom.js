@@ -91,6 +91,8 @@ export const elements = {
   // Hang buttons
   channelHangBtn: document.querySelector("[data-channel-hang]"),
   threadHangBtn: document.querySelector("[data-thread-hang]"),
+  // Pinned messages button
+  channelPinnedBtn: document.querySelector("[data-channel-pinned]"),
   // Channel settings elements
   channelSettingsBtn: document.querySelector("[data-channel-settings]"),
   channelSettingsModal: document.querySelector("[data-channel-settings-modal]"),

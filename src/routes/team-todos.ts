@@ -37,7 +37,7 @@ function parseGroupId(value: FormDataEntryValue | null): number | null {
 
 /**
  * Check if a user can manage todos in a team group.
- * Team owners/managers can always manage. Group creators can manage their groups.
+ * Team owners/managers can always manage. Group creators and members can manage their groups.
  */
 function canManageTeamGroupTodo(
   db: TeamDatabase,
@@ -50,7 +50,12 @@ function canManageTeamGroupTodo(
 
   // Check if user is the group creator
   const group = db.getGroup(groupId);
-  return group?.created_by === npub;
+  if (!group) return false;
+  if (group.created_by === npub) return true;
+
+  // Check if user is a group member
+  const members = db.listGroupMembers(groupId);
+  return members.some((m) => m.npub === npub);
 }
 
 /**

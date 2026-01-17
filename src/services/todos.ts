@@ -48,12 +48,16 @@ function applyAutoArchive(targetState: TodoState, updatedAt: string): TodoState 
 
 /**
  * Check if a user can manage todos in a group.
- * Only system admins and group creators can manage group todos.
+ * System admins, group creators, and group members can manage group todos.
  */
 export function canManageGroupTodo(npub: string, groupId: number): boolean {
   if (isAdmin(npub)) return true;
   const group = getGroup(groupId);
-  return group?.created_by === npub;
+  if (!group) return false;
+  if (group.created_by === npub) return true;
+  // Check if user is a group member
+  const members = listGroupMembers(groupId);
+  return members.some((m) => m.npub === npub);
 }
 
 /**

@@ -22,19 +22,23 @@ import {
   handleCreateDm,
   handleDeleteChannel,
   handleDeleteMessage,
+  handleCheckMessagePinned,
   handleGetChannel,
   handleGetChannelKey,
   handleGetChannelKeysAll,
   handleGetMe,
   handleGetMessages,
   handleGetPendingKeyMembers,
+  handleGetPinnedMessages,
   handleListChannels,
   handleListUsers,
   handleMarkChannelRead,
+  handlePinMessage,
   handleSendMessage,
   handleStoreChannelKey,
   handleStoreChannelKeysBatch,
   handleToggleReaction,
+  handleUnpinMessage,
   handleUpdateChannel,
   handleUpdateUser,
 } from "./routes/chat";
@@ -90,7 +94,7 @@ import {
   handleRemoveGroupMember,
   handleUpdateGroup,
 } from "./routes/groups";
-import { handleHome, handleTodos, handleTodosRedirect } from "./routes/home";
+import { handleHome } from "./routes/home";
 import {
   handleOnboardingPage,
   handlePreviewInvite,
@@ -133,6 +137,7 @@ import {
   handleTeamChatPage,
   handleTeamCreateChannel,
   handleTeamCreateDm,
+  handleTeamCheckMessagePinned,
   handleTeamDeleteChannel,
   handleTeamDeleteMessage,
   handleTeamGetChannel,
@@ -141,15 +146,18 @@ import {
   handleTeamGetMe,
   handleTeamGetMessages,
   handleTeamGetPendingKeyMembers,
+  handleTeamGetPinnedMessages,
   handleTeamListChannelGroups,
   handleTeamListChannels,
   handleTeamListUsers,
   handleTeamMarkChannelRead,
+  handleTeamPinMessage,
   handleTeamRemoveChannelGroup,
   handleTeamSendMessage,
   handleTeamStoreChannelKey,
   handleTeamStoreChannelKeysBatch,
   handleTeamToggleReaction,
+  handleTeamUnpinMessage,
   handleTeamUpdateChannel,
   handleTeamUpdateUser,
 } from "./routes/team-chat";
@@ -365,6 +373,16 @@ const server = Bun.serve({
           return handleTeamListChannelGroups(session, teamChannelGroupsMatch[1], Number(teamChannelGroupsMatch[2]));
         }
 
+        const teamPinnedMessagesMatch = pathname.match(/^\/t\/([^/]+)\/api\/channels\/(\d+)\/pinned$/);
+        if (teamPinnedMessagesMatch) {
+          return handleTeamGetPinnedMessages(req, session, teamPinnedMessagesMatch[1], Number(teamPinnedMessagesMatch[2]));
+        }
+
+        const teamCheckPinnedMatch = pathname.match(/^\/t\/([^/]+)\/api\/channels\/(\d+)\/messages\/(\d+)\/pinned$/);
+        if (teamCheckPinnedMatch) {
+          return handleTeamCheckMessagePinned(req, session, teamCheckPinnedMatch[1], Number(teamCheckPinnedMatch[2]), Number(teamCheckPinnedMatch[3]));
+        }
+
         // Team-scoped groups route (for chat UI to fetch available groups)
         const teamChatGroupsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/groups$/);
         if (teamChatGroupsMatch) {
@@ -436,6 +454,10 @@ const server = Bun.serve({
         if (messagesMatch) return handleGetMessages(session, Number(messagesMatch[1]));
         const channelGroupsMatch = pathname.match(/^\/chat\/channels\/(\d+)\/groups$/);
         if (channelGroupsMatch) return handleListChannelGroups(session, Number(channelGroupsMatch[1]));
+        const pinnedMessagesMatch = pathname.match(/^\/api\/channels\/(\d+)\/pinned$/);
+        if (pinnedMessagesMatch) return handleGetPinnedMessages(req, session, Number(pinnedMessagesMatch[1]));
+        const checkPinnedMatch = pathname.match(/^\/api\/channels\/(\d+)\/messages\/(\d+)\/pinned$/);
+        if (checkPinnedMatch) return handleCheckMessagePinned(req, session, Number(checkPinnedMatch[1]), Number(checkPinnedMatch[2]));
 
         // Channel encryption key routes
         const channelKeysMatch = pathname.match(/^\/chat\/channels\/(\d+)\/keys$/);
@@ -460,9 +482,15 @@ const server = Bun.serve({
           }
           return handleHome(session);
         }
-        if (pathname === "/todo") return requireAuth() || handleTodosRedirect(url);
-        if (pathname === "/todo/kanban") return requireAuth() || handleTodos(url, session, "kanban");
-        if (pathname === "/todo/list") return requireAuth() || handleTodos(url, session, "list");
+        // Redirect legacy /todo routes to team context
+        if (pathname === "/todo" || pathname === "/todo/kanban" || pathname === "/todo/list") {
+          const authCheck = requireAuth();
+          if (authCheck) return authCheck;
+          const teamSlug = session!.currentTeamSlug || session!.teamMemberships?.[0]?.teamSlug;
+          const viewMode = pathname === "/todo/list" ? "list" : "kanban";
+          const location = teamSlug ? `/t/${teamSlug}/todo/${viewMode}` : "/chat";
+          return new Response(null, { status: 302, headers: { Location: location } });
+        }
         if (pathname === "/settings") return requireAuth() || handleSettings(session);
         if (pathname === "/admin/settings") return handleAppSettingsPage(session);
         const teamConfigMatch = pathname.match(/^\/t\/([^/]+)\/config$/);
@@ -673,6 +701,11 @@ const server = Bun.serve({
           return handleTeamToggleReaction(req, session, teamReactionMatch[1], Number(teamReactionMatch[2]));
         }
 
+        const teamPinMessageMatch = pathname.match(/^\/t\/([^/]+)\/api\/channels\/(\d+)\/messages\/(\d+)\/pin$/);
+        if (teamPinMessageMatch) {
+          return handleTeamPinMessage(req, session, teamPinMessageMatch[1], Number(teamPinMessageMatch[2]), Number(teamPinMessageMatch[3]));
+        }
+
         const teamAddChannelGroupsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/groups$/);
         if (teamAddChannelGroupsMatch) {
           return handleTeamAddChannelGroups(req, session, teamAddChannelGroupsMatch[1], Number(teamAddChannelGroupsMatch[2]));
@@ -795,6 +828,8 @@ const server = Bun.serve({
         if (sendMessageMatch) return handleSendMessage(req, session, Number(sendMessageMatch[1]));
         const reactionMatch = pathname.match(/^\/api\/messages\/(\d+)\/reactions$/);
         if (reactionMatch) return handleToggleReaction(req, session, Number(reactionMatch[1]));
+        const pinMessageMatch = pathname.match(/^\/api\/channels\/(\d+)\/messages\/(\d+)\/pin$/);
+        if (pinMessageMatch) return handlePinMessage(req, session, Number(pinMessageMatch[1]), Number(pinMessageMatch[2]));
         const markReadMatch = pathname.match(/^\/chat\/channels\/(\d+)\/read$/);
         if (markReadMatch) return handleMarkChannelRead(session, Number(markReadMatch[1]));
         const addChannelGroupsMatch = pathname.match(/^\/chat\/channels\/(\d+)\/groups$/);
@@ -946,6 +981,11 @@ const server = Bun.serve({
           return handleTeamDeleteChannel(session, teamDeleteChannelMatch[1], Number(teamDeleteChannelMatch[2]));
         }
 
+        const teamUnpinMessageMatch = pathname.match(/^\/t\/([^/]+)\/api\/channels\/(\d+)\/messages\/(\d+)\/pin$/);
+        if (teamUnpinMessageMatch) {
+          return handleTeamUnpinMessage(req, session, teamUnpinMessageMatch[1], Number(teamUnpinMessageMatch[2]), Number(teamUnpinMessageMatch[3]));
+        }
+
         const teamRemoveChannelGroupMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/groups\/(\d+)$/);
         if (teamRemoveChannelGroupMatch) {
           return handleTeamRemoveChannelGroup(
@@ -1007,6 +1047,10 @@ const server = Bun.serve({
         // Channel delete (admin only)
         const deleteChannelMatch = pathname.match(/^\/chat\/channels\/(\d+)$/);
         if (deleteChannelMatch) return handleDeleteChannel(session, Number(deleteChannelMatch[1]));
+
+        // Unpin message from channel
+        const unpinMessageMatch = pathname.match(/^\/api\/channels\/(\d+)\/messages\/(\d+)\/pin$/);
+        if (unpinMessageMatch) return handleUnpinMessage(req, session, Number(unpinMessageMatch[1]), Number(unpinMessageMatch[2]));
 
         // Group routes (admin only)
         const deleteGroupMatch = pathname.match(/^\/chat\/groups\/(\d+)$/);

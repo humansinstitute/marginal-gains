@@ -16,17 +16,21 @@ import {
   getMessagesReactions,
   getOrCreateDmChannel,
   getOrCreatePersonalChannel,
+  getPinnedMessages,
   getUnreadCounts,
   getUserByNpub,
   getUserChannelKey,
   isCommunityBootstrapped,
+  isMessagePinned,
   listAllChannels,
   listDmChannels,
   listUsers,
   listVisibleChannels,
+  pinMessage,
   setChannelEncrypted,
   storeUserChannelKey,
   toggleReaction,
+  unpinMessage,
   updateChannelReadState,
   upsertUser,
   userHasChannelAccessViaGroups,
@@ -799,4 +803,150 @@ export async function handleToggleReaction(req: Request, session: Session | null
     action: result.action,
     reactions,
   });
+}
+
+/**
+ * Pin a message to a channel
+ * POST /api/channels/:id/messages/:messageId/pin
+ */
+export async function handlePinMessage(
+  _req: Request,
+  session: Session | null,
+  channelId: number,
+  messageId: number
+) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check if user is channel creator or admin
+  const canPin = channel.creator === session.npub || isAdmin(session.npub);
+  if (!canPin) {
+    return forbidden("Only channel admins can pin messages");
+  }
+
+  const message = getMessage(messageId);
+  if (!message) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  // Message must belong to this channel
+  if (message.channel_id !== channelId) {
+    return jsonResponse({ error: "Message not in this channel" }, 400);
+  }
+
+  const pinned = pinMessage(channelId, messageId, session.npub);
+
+  if (pinned) {
+    broadcast({
+      type: "message:pinned",
+      data: {
+        channelId,
+        messageId,
+        pinnedBy: session.npub,
+      },
+      channelId,
+    });
+  }
+
+  return jsonResponse({ success: true, pinned });
+}
+
+/**
+ * Unpin a message from a channel
+ * DELETE /api/channels/:id/messages/:messageId/pin
+ */
+export async function handleUnpinMessage(
+  _req: Request,
+  session: Session | null,
+  channelId: number,
+  messageId: number
+) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check if user is channel creator or admin
+  const canUnpin = channel.creator === session.npub || isAdmin(session.npub);
+  if (!canUnpin) {
+    return forbidden("Only channel admins can unpin messages");
+  }
+
+  const removed = unpinMessage(channelId, messageId);
+
+  if (removed) {
+    broadcast({
+      type: "message:unpinned",
+      data: {
+        channelId,
+        messageId,
+        unpinnedBy: session.npub,
+      },
+      channelId,
+    });
+  }
+
+  return jsonResponse({ success: true, removed });
+}
+
+/**
+ * Get all pinned messages for a channel
+ * GET /api/channels/:id/pinned
+ */
+export async function handleGetPinnedMessages(
+  _req: Request,
+  session: Session | null,
+  channelId: number
+) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check if user has access to the channel
+  if (!canUserAccessChannel(channelId, session.npub) && !isAdmin(session.npub)) {
+    return forbidden("You don't have access to this channel");
+  }
+
+  const pinned = getPinnedMessages(channelId);
+
+  // Check if current user can pin (for UI purposes)
+  const canPin = channel.creator === session.npub || isAdmin(session.npub);
+
+  return jsonResponse({ pinned, canPin });
+}
+
+/**
+ * Check if a specific message is pinned
+ * GET /api/channels/:id/messages/:messageId/pinned
+ */
+export async function handleCheckMessagePinned(
+  _req: Request,
+  session: Session | null,
+  channelId: number,
+  messageId: number
+) {
+  if (!session) return unauthorized();
+
+  const channel = getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  if (!canUserAccessChannel(channelId, session.npub) && !isAdmin(session.npub)) {
+    return forbidden("You don't have access to this channel");
+  }
+
+  const isPinned = isMessagePinned(channelId, messageId);
+  const canPin = channel.creator === session.npub || isAdmin(session.npub);
+
+  return jsonResponse({ isPinned, canPin });
 }

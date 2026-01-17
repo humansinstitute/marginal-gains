@@ -8,6 +8,7 @@
 import { getWingmanIdentity, isAdmin } from "../config";
 import { createTeamRouteContext } from "../context";
 import { jsonResponse } from "../http";
+import { getTeamBySlug, getTeamMembers } from "../master-db";
 import { renderChatPage } from "../render/chat";
 import { broadcast } from "../services/events";
 import { TeamDatabase } from "../team-db";
@@ -193,8 +194,17 @@ export function handleTeamGetMessages(
   }
 
   const messages = db.listMessages(channelId);
+
+  // Augment messages with reactions
+  const messageIds = messages.map((m) => m.id);
+  const reactionsMap = db.getMessagesReactions(messageIds);
+  const messagesWithReactions = messages.map((m) => ({
+    ...m,
+    reactions: reactionsMap.get(m.id) || [],
+  }));
+
   console.log(`[TeamChat] GetMessages: team=${teamSlug}, channel=${channelId}, user=${ctx.session.npub.slice(0, 15)}, messageCount=${messages.length}`);
-  return jsonResponse(messages);
+  return jsonResponse(messagesWithReactions);
 }
 
 export async function handleTeamSendMessage(
@@ -394,7 +404,35 @@ export function handleTeamListUsers(
   const { ctx } = result;
   const db = new TeamDatabase(ctx.teamDb);
 
-  const users = db.listUsers();
+  // Get users from team database (those who have sent messages or updated profile)
+  const teamDbUsers = db.listUsers();
+  const usersByNpub = new Map(teamDbUsers.map((u) => [u.npub, u]));
+
+  // Also get all team members from master database
+  // This ensures new members appear in the DM list even if they haven't interacted yet
+  const team = getTeamBySlug(teamSlug);
+  if (team) {
+    const members = getTeamMembers(team.id);
+    for (const member of members) {
+      if (!usersByNpub.has(member.user_npub)) {
+        // Add a minimal user entry for members not yet in team DB
+        usersByNpub.set(member.user_npub, {
+          id: 0, // Placeholder - not a real DB id
+          npub: member.user_npub,
+          pubkey: "", // Will be filled when they interact
+          display_name: null,
+          name: null,
+          about: null,
+          picture: null,
+          nip05: null,
+          last_login: null,
+          updated_at: member.joined_at,
+        });
+      }
+    }
+  }
+
+  const users = Array.from(usersByNpub.values());
   return jsonResponse(users);
 }
 
@@ -952,4 +990,174 @@ export async function handleTeamToggleReaction(
     action: toggleResult.action,
     reactions,
   });
+}
+
+/**
+ * Pin a message to a channel
+ * POST /t/:teamSlug/api/channels/:id/messages/:messageId/pin
+ */
+export async function handleTeamPinMessage(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  channelId: number,
+  messageId: number
+): Promise<Response> {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) return result.response;
+
+  const { ctx } = result;
+  const db = new TeamDatabase(ctx.teamDb);
+
+  const channel = db.getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check if user is channel creator or admin
+  const canPin = channel.creator === ctx.session.npub || isAdmin(ctx.session.npub);
+  if (!canPin) {
+    return forbidden("Only channel admins can pin messages");
+  }
+
+  const message = db.getMessage(messageId);
+  if (!message) {
+    return jsonResponse({ error: "Message not found" }, 404);
+  }
+
+  // Message must belong to this channel
+  if (message.channel_id !== channelId) {
+    return jsonResponse({ error: "Message not in this channel" }, 400);
+  }
+
+  const pinned = db.pinMessage(channelId, messageId, ctx.session.npub);
+
+  if (pinned) {
+    broadcast(teamSlug, ctx.teamDb, {
+      type: "message:pinned",
+      data: {
+        channelId,
+        messageId,
+        pinnedBy: ctx.session.npub,
+      },
+      channelId,
+    });
+  }
+
+  return jsonResponse({ success: true, pinned });
+}
+
+/**
+ * Unpin a message from a channel
+ * DELETE /t/:teamSlug/api/channels/:id/messages/:messageId/pin
+ */
+export async function handleTeamUnpinMessage(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  channelId: number,
+  messageId: number
+): Promise<Response> {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) return result.response;
+
+  const { ctx } = result;
+  const db = new TeamDatabase(ctx.teamDb);
+
+  const channel = db.getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check if user is channel creator or admin
+  const canUnpin = channel.creator === ctx.session.npub || isAdmin(ctx.session.npub);
+  if (!canUnpin) {
+    return forbidden("Only channel admins can unpin messages");
+  }
+
+  const removed = db.unpinMessage(channelId, messageId);
+
+  if (removed) {
+    broadcast(teamSlug, ctx.teamDb, {
+      type: "message:unpinned",
+      data: {
+        channelId,
+        messageId,
+        unpinnedBy: ctx.session.npub,
+      },
+      channelId,
+    });
+  }
+
+  return jsonResponse({ success: true, removed });
+}
+
+/**
+ * Get all pinned messages for a channel
+ * GET /t/:teamSlug/api/channels/:id/pinned
+ */
+export async function handleTeamGetPinnedMessages(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  channelId: number
+): Promise<Response> {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) return result.response;
+
+  const { ctx } = result;
+  const db = new TeamDatabase(ctx.teamDb);
+
+  const channel = db.getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  // Check if user has access to the channel
+  if (channel.is_public === 0 && !isAdmin(ctx.session.npub)) {
+    if (!db.canUserAccessChannel(channelId, ctx.session.npub)) {
+      return forbidden("You don't have access to this channel");
+    }
+  }
+
+  const pinned = db.getPinnedMessages(channelId);
+
+  // Check if current user can pin (for UI purposes)
+  const canPin = channel.creator === ctx.session.npub || isAdmin(ctx.session.npub);
+
+  return jsonResponse({ pinned, canPin });
+}
+
+/**
+ * Check if a specific message is pinned
+ * GET /t/:teamSlug/api/channels/:id/messages/:messageId/pinned
+ */
+export async function handleTeamCheckMessagePinned(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  channelId: number,
+  messageId: number
+): Promise<Response> {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) return result.response;
+
+  const { ctx } = result;
+  const db = new TeamDatabase(ctx.teamDb);
+
+  const channel = db.getChannel(channelId);
+  if (!channel) {
+    return jsonResponse({ error: "Channel not found" }, 404);
+  }
+
+  if (channel.is_public === 0 && !isAdmin(ctx.session.npub)) {
+    if (!db.canUserAccessChannel(channelId, ctx.session.npub)) {
+      return forbidden("You don't have access to this channel");
+    }
+  }
+
+  const isPinned = db.isMessagePinned(channelId, messageId);
+  const canPin = channel.creator === ctx.session.npub || isAdmin(ctx.session.npub);
+
+  return jsonResponse({ isPinned, canPin });
 }

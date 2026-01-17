@@ -1,9 +1,15 @@
 import { nip19 } from "nostr-tools";
 import { verifyEvent } from "nostr-tools/pure";
 
+import {
+  saveSession as dbSaveSession,
+  getSession as dbGetSession,
+  deleteSession as dbDeleteSession,
+  cleanupExpiredSessions,
+} from "../db";
 import { jsonResponse, serializeSessionCookie } from "../http";
 
-import type { LoginMethod, Session } from "../types";
+import type { LoginMethod, Session, SessionTeamMembership } from "../types";
 
 type LoginEvent = {
   id: string;
@@ -18,8 +24,6 @@ type LoginEvent = {
 type ValidateResult = { ok: true } | { ok: false; message: string };
 
 export class AuthService {
-  private readonly sessions = new Map<string, Session>();
-
   constructor(
     private readonly sessionCookieName: string,
     private readonly appTag: string,
@@ -27,16 +31,41 @@ export class AuthService {
     private readonly loginMaxAgeSeconds: number,
     private readonly cookieSecure: boolean,
     private readonly sessionMaxAgeSeconds: number
-  ) {}
+  ) {
+    // Cleanup expired sessions on startup
+    cleanupExpiredSessions();
+  }
 
-  getSession(token: string | null) {
+  getSession(token: string | null): Session | null {
     if (!token) return null;
-    return this.sessions.get(token) ?? null;
+    const dbSession = dbGetSession(token);
+    if (!dbSession) return null;
+
+    // Convert db row to Session type
+    let teamMemberships: SessionTeamMembership[] | undefined;
+    if (dbSession.team_memberships) {
+      try {
+        teamMemberships = JSON.parse(dbSession.team_memberships);
+      } catch {
+        teamMemberships = undefined;
+      }
+    }
+
+    return {
+      token: dbSession.token,
+      pubkey: dbSession.pubkey,
+      npub: dbSession.npub,
+      method: dbSession.method as LoginMethod,
+      createdAt: dbSession.created_at,
+      currentTeamId: dbSession.current_team_id,
+      currentTeamSlug: dbSession.current_team_slug,
+      teamMemberships,
+    };
   }
 
   destroySession(token: string | null) {
     if (!token) return;
-    this.sessions.delete(token);
+    dbDeleteSession(token);
   }
 
   validateLoginEvent(method: LoginMethod, event: LoginEvent): ValidateResult {
@@ -56,18 +85,34 @@ export class AuthService {
 
   createSession(method: LoginMethod, event: LoginEvent) {
     const token = crypto.randomUUID();
+    const createdAt = Date.now();
     const session: Session = {
       token,
       pubkey: event.pubkey,
       npub: nip19.npubEncode(event.pubkey),
       method,
-      createdAt: Date.now(),
+      createdAt,
     };
-    this.sessions.set(token, session);
     return {
       session,
       cookie: serializeSessionCookie(token, this.sessionCookieName, this.sessionMaxAgeSeconds, this.cookieSecure),
     };
+  }
+
+  private persistSession(session: Session) {
+    const expiresAt = session.createdAt + this.sessionMaxAgeSeconds * 1000;
+    const teamMemberships = session.teamMemberships ? JSON.stringify(session.teamMemberships) : null;
+    dbSaveSession(
+      session.token,
+      session.pubkey,
+      session.npub,
+      session.method,
+      session.createdAt,
+      expiresAt,
+      session.currentTeamId ?? null,
+      session.currentTeamSlug ?? null,
+      teamMemberships
+    );
   }
 
   login(method: LoginMethod, event: LoginEvent, enrichSession?: (session: Session) => void) {
@@ -80,12 +125,15 @@ export class AuthService {
       enrichSession(session);
     }
 
+    // Persist session to database after enrichment
+    this.persistSession(session);
+
     return jsonResponse(session, 200, cookie);
   }
 
   logout(token: string | null) {
     if (token) {
-      this.sessions.delete(token);
+      dbDeleteSession(token);
     }
     const cleared = serializeSessionCookie(null, this.sessionCookieName, this.sessionMaxAgeSeconds, this.cookieSecure);
     return jsonResponse({ ok: true }, 200, cleared);

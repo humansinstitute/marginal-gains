@@ -94,8 +94,17 @@ export function renderMessageBody(body) {
 export function renderMessageMenu(message, { isThreadRoot = false, threadRootId = null } = {}) {
   const ctx = getContext();
   const canDelete = ctx.session?.npub === message.author || ctx.isAdmin;
+  const canPin = ctx.canPin || false;
+  const isPinned = message.isPinned || false;
   // Use the thread root ID for linking (or message.id if this is the root)
   const linkTargetId = threadRootId || message.id;
+
+  // Pin option - only show for thread roots when user can pin
+  const pinHtml = canPin && isThreadRoot
+    ? isPinned
+      ? `<button class="message-menu-item" data-unpin-message="${message.id}">Unpin message</button>`
+      : `<button class="message-menu-item" data-pin-message="${message.id}">Pin message</button>`
+    : "";
 
   return `<div class="message-menu">
     <button class="message-menu-trigger" data-message-menu="${message.id}" aria-label="Message options">&#8942;</button>
@@ -103,6 +112,7 @@ export function renderMessageMenu(message, { isThreadRoot = false, threadRootId 
       <button class="message-menu-item" data-copy-message="${message.id}">Copy message text</button>
       ${isThreadRoot ? `<button class="message-menu-item" data-copy-thread="${message.id}">Copy entire thread</button>` : ""}
       <button class="message-menu-item" data-link-thread-to-task="${linkTargetId}">Link thread to task</button>
+      ${pinHtml}
       ${canDelete ? `<button class="message-menu-item danger" data-delete-message="${message.id}">Delete</button>` : ""}
     </div>
   </div>`;

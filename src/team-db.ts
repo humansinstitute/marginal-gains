@@ -23,6 +23,7 @@ import type {
   GroupMember,
   InviteCode,
   Message,
+  PinnedMessage,
   PushSubscription,
   Reaction,
   ReactionGroup,
@@ -60,6 +61,7 @@ export type {
   InviteCode,
   InviteRedemption,
   Message,
+  PinnedMessage,
   PushSubscription,
   Reaction,
   ReactionGroup,
@@ -497,14 +499,15 @@ export class TeamDatabase {
   }
 
   canUserAccessChannel(channelId: number, npub: string): boolean {
-    const result = this.db.query<{ can_access: number }, [number, string, string]>(
+    const result = this.db.query<{ can_access: number }, [number, string, string, string]>(
       `SELECT CASE WHEN EXISTS (
         SELECT 1 FROM channels c
         LEFT JOIN channel_groups cg ON c.id = cg.channel_id
         LEFT JOIN group_members gm ON cg.group_id = gm.group_id
-        WHERE c.id = ? AND (c.is_public = 1 OR c.owner_npub = ? OR gm.npub = ?)
+        LEFT JOIN dm_participants dp ON c.id = dp.channel_id
+        WHERE c.id = ? AND (c.is_public = 1 OR c.owner_npub = ? OR gm.npub = ? OR dp.npub = ?)
       ) THEN 1 ELSE 0 END as can_access`
-    ).get(channelId, npub, npub);
+    ).get(channelId, npub, npub, npub);
     return result?.can_access === 1;
   }
 
@@ -663,6 +666,31 @@ export class TeamDatabase {
     ).all(messageId);
 
     return this.groupReactions(reactions);
+  }
+
+  getMessagesReactions(messageIds: number[]): Map<number, ReactionGroup[]> {
+    const result = new Map<number, ReactionGroup[]>();
+    if (messageIds.length === 0) return result;
+
+    const placeholders = messageIds.map(() => "?").join(",");
+    const allReactions = this.db.query<Reaction>(
+      `SELECT * FROM message_reactions WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
+    ).all(...messageIds);
+
+    // Group by message_id first
+    const byMessage = new Map<number, Reaction[]>();
+    for (const r of allReactions) {
+      const list = byMessage.get(r.message_id) || [];
+      list.push(r);
+      byMessage.set(r.message_id, list);
+    }
+
+    // Convert to ReactionGroup arrays
+    for (const [msgId, reactions] of byMessage) {
+      result.set(msgId, this.groupReactions(reactions));
+    }
+
+    return result;
   }
 
   private groupReactions(reactions: Reaction[]): ReactionGroup[] {
@@ -984,6 +1012,44 @@ export class TeamDatabase {
     return this.db.query<TaskThread, [number, number]>(
       "SELECT * FROM task_threads WHERE todo_id = ? AND message_id = ?"
     ).get(todoId, messageId) ?? null;
+  }
+
+  // ============================================================================
+  // Pinned Messages
+  // ============================================================================
+
+  pinMessage(channelId: number, messageId: number, pinnedBy: string): PinnedMessage | null {
+    return this.db.query<PinnedMessage, [number, number, string]>(
+      `INSERT INTO pinned_messages (channel_id, message_id, pinned_by)
+       VALUES (?, ?, ?)
+       ON CONFLICT(channel_id, message_id) DO NOTHING
+       RETURNING *`
+    ).get(channelId, messageId, pinnedBy) ?? null;
+  }
+
+  unpinMessage(channelId: number, messageId: number): boolean {
+    const result = this.db.run(
+      "DELETE FROM pinned_messages WHERE channel_id = ? AND message_id = ?",
+      [channelId, messageId]
+    );
+    return result.changes > 0;
+  }
+
+  getPinnedMessages(channelId: number): (PinnedMessage & { body: string; author: string; thread_root_id: number | null; created_at: string })[] {
+    return this.db.query<PinnedMessage & { body: string; author: string; thread_root_id: number | null; created_at: string }, [number]>(
+      `SELECT pm.*, m.body, m.author, m.thread_root_id, m.created_at
+       FROM pinned_messages pm
+       JOIN messages m ON pm.message_id = m.id
+       WHERE pm.channel_id = ?
+       ORDER BY pm.pinned_at DESC`
+    ).all(channelId);
+  }
+
+  isMessagePinned(channelId: number, messageId: number): boolean {
+    const result = this.db.query<{ count: number }, [number, number]>(
+      "SELECT COUNT(*) as count FROM pinned_messages WHERE channel_id = ? AND message_id = ?"
+    ).get(channelId, messageId);
+    return (result?.count ?? 0) > 0;
   }
 
   // ============================================================================

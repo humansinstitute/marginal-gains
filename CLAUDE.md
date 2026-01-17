@@ -45,42 +45,41 @@ The server (`src/server.ts`) is a single Bun.serve() with pattern-matched routin
 
 ### Database Layer
 
-**IMPORTANT: Dual Database Architecture**
+**Multi-Tenant Database Architecture**
 
-The app uses a multi-tenant architecture with TWO separate database systems:
+The app uses a multi-tenant architecture with separate databases per team:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Master Database (src/db.ts)                                │
 │  File: marginal-gains.sqlite                                │
-│  - Personal todos (no team)                                 │
 │  - Team registry (list of all teams)                        │
 │  - Team memberships                                         │
 │  - Global user directory                                    │
+│  - (deprecated: personal todos table - no longer used)      │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │ Team "foo" DB   │  │ Team "bar" DB   │  │ Team "baz" DB   │
 │ (team-db.ts)    │  │ (team-db.ts)    │  │ (team-db.ts)    │
-│ - Team todos    │  │ - Team todos    │  │ - Team todos    │
-│ - Team chat     │  │ - Team chat     │  │ - Team chat     │
-│ - Team groups   │  │ - Team groups   │  │ - Team groups   │
+│ - Todos         │  │ - Todos         │  │ - Todos         │
+│ - Chat          │  │ - Chat          │  │ - Chat          │
+│ - Groups        │  │ - Groups        │  │ - Groups        │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
   data/teams/foo.sqlite  data/teams/bar.sqlite  etc.
 ```
 
-**Code Duplication - CRITICAL:**
+**Todos are TEAM-ONLY:**
 
-| Component | Personal Tasks | Team Tasks |
-|-----------|---------------|------------|
-| Database | `src/db.ts` (prepared statements) | `src/team-db.ts` (TeamDatabase class) |
-| Schema | `src/db.ts` (inline migrations) | `src/team-schema.ts` |
-| Routes | `src/routes/todos.ts` | `src/routes/team-todos.ts` |
-| Services | `src/services/todos.ts` | (logic inline in team routes) |
+Todos exist exclusively in team databases. There are no personal todos.
 
-**When adding todo features, you MUST update BOTH:**
-1. `src/db.ts` + `src/services/todos.ts` + `src/routes/todos.ts` (personal)
-2. `src/team-db.ts` + `src/team-schema.ts` + `src/routes/team-todos.ts` (team)
+| Component | Location |
+|-----------|----------|
+| Database | `src/team-db.ts` (TeamDatabase class) |
+| Schema | `src/team-schema.ts` |
+| Routes | `src/routes/team-todos.ts` |
+
+**Note:** Legacy personal todo code (`src/routes/todos.ts`, `src/services/todos.ts`) is deprecated and scheduled for removal. See `docs/remediate_todo.md` for cleanup plan.
 
 The `db-router.ts` manages connections to team databases (cached, LRU eviction).
 
