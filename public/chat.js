@@ -633,18 +633,25 @@ function setupLiveUpdateHandlers() {
   });
 
   // When our key request is fulfilled (we received keys)
-  // Clear cached key and refetch
+  // Clear cached key and refetch, then refresh UI
   onEvent("key_request:fulfilled", async (data) => {
-    const { channelId } = data;
-    console.log("[Chat] Key request fulfilled for channel", channelId);
+    const channelIdStr = String(data.channelId);
+    console.log("[Chat] Key request fulfilled for channel", channelIdStr);
+
     // Clear any cached key to force refetch
-    clearCachedChannelKey(String(channelId));
-    // Refetch the key
-    await fetchChannelKey(String(channelId));
-    // If we're viewing this channel, refresh messages
-    if (state.chat.selectedChannelId === String(channelId)) {
+    clearCachedChannelKey(channelIdStr);
+
+    // Refetch the key - this populates the cache
+    const key = await fetchChannelKey(channelIdStr);
+    console.log("[Chat] Key fetched:", key ? "success" : "not available");
+
+    // If we're viewing this channel, fully refresh it
+    if (state.chat.selectedChannelId === channelIdStr) {
       console.log("[Chat] Refreshing current channel after key received");
-      await fetchMessages(channelId);
+      // Re-fetch messages (will now decrypt properly)
+      await fetchMessages(channelIdStr);
+      // Explicitly re-render to update UI state
+      renderThreads();
     }
   });
 }
