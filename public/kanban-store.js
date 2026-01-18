@@ -395,6 +395,20 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
         return false;
       });
       return found;
+    },
+
+    // Get parent task title for display on child cards
+    getParentTitle: function(parentId) {
+      var parent = this.findTodoById(parentId);
+      if (parent && parent.title) {
+        // Truncate long titles
+        var title = parent.title;
+        if (title.length > 30) {
+          return title.slice(0, 27) + '...';
+        }
+        return title;
+      }
+      return 'Parent Task';
     }
   };
 };

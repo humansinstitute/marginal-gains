@@ -604,6 +604,12 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
             <template x-if="card.description">
               <p class="kanban-card-desc" x-text="card.description.slice(0, 100) + (card.description.length > 100 ? '...' : '')"></p>
             </template>
+            <template x-if="card.parent_id && Number(card.parent_id) > 0">
+              <div class="kanban-card-parent" @click.stop="window.openTaskModal && window.openTaskModal(card.parent_id)">
+                <span class="parent-indicator-icon">&#8593;</span>
+                <span class="parent-indicator-title" x-text="getParentTitle(card.parent_id)"></span>
+              </div>
+            </template>
             <div class="kanban-card-meta">
               ${isAllTasksView ? `<template x-if="card.group_name || card.group_id === null">
                 <span class="badge board-badge" x-text="card.group_name || 'Personal'"></span>
@@ -937,6 +943,10 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
         <label>Description
           <textarea name="description" data-task-modal-description rows="8"></textarea>
         </label>
+        <div class="task-modal-parent" data-task-modal-parent hidden>
+          <span class="task-modal-parent-label">Parent:</span>
+          <span class="task-modal-parent-title" data-task-modal-parent-title></span>
+        </div>
         <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
           <div class="task-modal-subtasks-header">Subtasks</div>
           <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
@@ -978,10 +988,6 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
         <div class="task-modal-links" data-task-modal-links hidden>
           <div class="task-modal-links-header">Links</div>
           <div class="task-modal-links-list" data-task-modal-links-list></div>
-        </div>
-        <div class="task-modal-parent" data-task-modal-parent hidden>
-          <span class="task-modal-parent-label">Parent:</span>
-          <span class="task-modal-parent-title" data-task-modal-parent-title></span>
         </div>
         <div class="task-modal-actions">
           <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
@@ -1457,6 +1463,10 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
         <label>Description
           <textarea name="description" data-task-modal-description rows="8"></textarea>
         </label>
+        <div class="task-modal-parent" data-task-modal-parent hidden>
+          <span class="task-modal-parent-label">Parent:</span>
+          <span class="task-modal-parent-title" data-task-modal-parent-title></span>
+        </div>
         <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
           <div class="task-modal-subtasks-header">Subtasks</div>
           <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
@@ -1493,10 +1503,6 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
         <div class="task-modal-links" data-task-modal-links hidden>
           <div class="task-modal-links-header">Links</div>
           <div class="task-modal-links-list" data-task-modal-links-list></div>
-        </div>
-        <div class="task-modal-parent" data-task-modal-parent hidden>
-          <span class="task-modal-parent-label">Parent:</span>
-          <span class="task-modal-parent-title" data-task-modal-parent-title></span>
         </div>
         <div class="task-modal-actions">
           <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
