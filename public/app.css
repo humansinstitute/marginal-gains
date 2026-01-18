@@ -3493,6 +3493,34 @@ body.chat-page {
   flex-shrink: 0;
 }
 
+/* Parent indicator on subtask cards */
+.kanban-card-parent {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.kanban-card-parent:hover {
+  background: var(--surface);
+}
+.parent-indicator-icon {
+  color: #9333ea;
+  font-weight: bold;
+  font-size: 0.85rem;
+}
+.parent-indicator-title {
+  color: #9333ea;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Progress squares for parent cards */
 .subtask-progress {
   display: inline-flex;
@@ -3954,6 +3982,11 @@ body.chat-page {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.task-modal-parent:hover {
+  background: var(--surface);
 }
 .task-modal-parent-label {
   color: var(--muted);

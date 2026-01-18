@@ -82,6 +82,9 @@ export function initTaskModal() {
   // Add subtask handler
   el.addSubtaskBtn?.addEventListener("click", handleAddSubtask);
 
+  // Parent indicator click handler - opens parent task modal
+  el.parentSection?.addEventListener("click", handleParentClick);
+
   // Form submit
   el.form?.addEventListener("submit", handleSubmit);
 
@@ -193,8 +196,9 @@ function openModalForCreate(options = {}) {
   el.title?.focus();
 }
 
-// Export for external use (e.g., from Add Subtask button)
+// Export for external use (e.g., from Add Subtask button, Alpine templates)
 window.openTaskModalForCreate = openModalForCreate;
+window.openTaskModal = openModalForTaskById;
 
 async function openModalForTask(todoId, card) {
   isCreateMode = false;
@@ -757,7 +761,10 @@ async function fetchAndDisplaySubtasks(todoId) {
 
     // If this is a subtask, show parent info
     if (data.parent) {
-      if (el.parentSection) el.parentSection.hidden = false;
+      if (el.parentSection) {
+        el.parentSection.hidden = false;
+        el.parentSection.dataset.parentId = data.parent.id;
+      }
       if (el.parentTitle) el.parentTitle.textContent = data.parent.title;
       // Hide add subtask button for subtasks (2-level max)
       if (el.addSubtaskBtn) el.addSubtaskBtn.hidden = true;
@@ -831,6 +838,19 @@ function handleAddSubtask() {
       parentTitle,
       groupId,
     });
+  }, 100);
+}
+
+function handleParentClick() {
+  const parentId = el.parentSection?.dataset.parentId;
+  if (!parentId) return;
+
+  // Close current modal and open parent task modal
+  closeModal();
+
+  // Small delay to let modal close animation complete
+  setTimeout(() => {
+    openModalForTaskById(parentId);
   }, 100);
 }
 
