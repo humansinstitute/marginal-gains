@@ -482,6 +482,39 @@ export async function handleTeamApiTodoPosition(
 }
 
 /**
+ * GET /t/:slug/api/todos/:id - Get full task details
+ */
+export function handleTeamGetTodo(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const db = new TeamDatabase(result.ctx.teamDb);
+  const todo = db.getTodoById(id);
+
+  if (!todo) {
+    return new Response(JSON.stringify({ error: "Task not found" }), {
+      status: 404,
+      headers: jsonHeaders,
+    });
+  }
+
+  return new Response(JSON.stringify(todo), {
+    status: 200,
+    headers: jsonHeaders,
+  });
+}
+
+/**
  * GET /t/:slug/api/todos/:id/subtasks - List subtasks and parent info
  */
 export function handleTeamGetSubtasks(

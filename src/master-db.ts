@@ -106,6 +106,29 @@ export function updateTeam(
 }
 
 /**
+ * Update team feature visibility settings
+ */
+export function updateTeamFeatureVisibility(
+  id: number,
+  updates: { hideTasks?: boolean; hideCrm?: boolean }
+): Team | null {
+  const db = getMasterDb();
+  const team = getTeam(id);
+  if (!team) return null;
+
+  const hideTasks = updates.hideTasks !== undefined ? (updates.hideTasks ? 1 : 0) : team.hide_tasks;
+  const hideCrm = updates.hideCrm !== undefined ? (updates.hideCrm ? 1 : 0) : team.hide_crm;
+
+  const stmt = db.prepare(`
+    UPDATE teams SET hide_tasks = ?, hide_crm = ?
+    WHERE id = ?
+  `);
+  stmt.run(hideTasks, hideCrm, id);
+
+  return getTeam(id);
+}
+
+/**
  * Soft-delete a team (sets is_active = 0)
  */
 export function deactivateTeam(id: number): boolean {

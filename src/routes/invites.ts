@@ -11,6 +11,7 @@ import { createHash } from "crypto";
 
 import { nip19 } from "nostr-tools";
 
+import { updateSession } from "../db";
 import { getTeamDb } from "../db-router";
 import { jsonResponse, unauthorized } from "../http";
 import {
@@ -266,6 +267,15 @@ export async function handleRedeemInvite(
     session.currentTeamId = team.id;
     session.currentTeamSlug = team.slug;
   }
+
+  // Persist session changes
+  const teamMemberships = session.teamMemberships ? JSON.stringify(session.teamMemberships) : null;
+  updateSession(
+    session.token,
+    session.currentTeamId ?? null,
+    session.currentTeamSlug ?? null,
+    teamMemberships
+  );
 
   return jsonResponse({
     success: true,

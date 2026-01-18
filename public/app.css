@@ -715,12 +715,43 @@ summary::-webkit-details-marker {
   background: #fff;
 }
 .auth-panel {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 1.25rem;
   margin-bottom: 1.5rem;
   background: var(--surface);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+}
+
+/* Key Teleport overlay */
+.keyteleport-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  z-index: 10;
+}
+.keyteleport-overlay p {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.keyteleport-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: keyteleport-spin 0.8s linear infinite;
+}
+@keyframes keyteleport-spin {
+  to { transform: rotate(360deg); }
 }
 .auth-panel h2 {
   margin: 0 0 0.5rem;
@@ -3120,6 +3151,34 @@ body.chat-page {
 .channel-settings-body {
   max-width: 480px;
 }
+/* DM settings modal */
+.dm-settings-body {
+  max-width: 400px;
+}
+.dm-settings-content {
+  padding: 1rem 0;
+}
+.dm-settings-info {
+  color: var(--text-muted, #6b7280);
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+.dm-danger-zone {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.dm-danger-zone .danger {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 500;
+}
+.dm-danger-zone .danger:hover {
+  background: #b91c1c;
+}
 .channel-groups-section {
   margin-top: 0.5rem;
   padding-top: 0.75rem;
@@ -3301,29 +3360,57 @@ body.chat-page {
 .kanban-view[hidden] {
   display: none;
 }
+
+/* Scroll container for top + bottom scrollbars */
+.kanban-scroll-container {
+  position: relative;
+  margin-top: 1rem;
+}
+
+/* Top scrollbar - only shown when horizontal scroll is needed */
+.kanban-scroll-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 12px;
+  margin-bottom: 0.25rem;
+  display: none; /* Hidden by default, shown by JS when needed */
+}
+.kanban-scroll-top.visible {
+  display: block;
+}
+.kanban-scroll-top-inner {
+  height: 1px;
+  /* Width will be set by JavaScript to match kanban content */
+}
+.kanban-scroll-top::-webkit-scrollbar {
+  height: 8px;
+}
+.kanban-scroll-top::-webkit-scrollbar-track {
+  background: var(--bg);
+  border-radius: 4px;
+}
+.kanban-scroll-top::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.kanban-scroll-top::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
 .kanban-board {
   display: flex;
   gap: 1rem;
-  margin-top: 1rem;
   min-height: 400px;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 1rem;
+  /* Hide native scrollbar - scrolling handled by synced top scrollbar */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
 }
 .kanban-board::-webkit-scrollbar {
-  height: 8px;
-}
-.kanban-board::-webkit-scrollbar-track {
-  background: var(--bg);
-  border-radius: 4px;
-}
-.kanban-board::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
-}
-.kanban-board::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  display: none; /* Chrome/Safari */
 }
 /* Alpine.js loading/sync states */
 .kanban-loading {
@@ -4418,11 +4505,27 @@ body.onboarding-mode .avatar-chip {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm, 0.25rem);
+  overflow: hidden;
+}
+.team-selector-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.team-selector-icon-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: linear-gradient(135deg, #6b3a6b, #8b5a8b);
   color: #fff;
   font-size: 0.75rem;
   font-weight: 700;
-  border-radius: var(--radius-sm, 0.25rem);
+  border-radius: inherit;
 }
 .team-selector-name {
   flex: 1;
@@ -4904,6 +5007,35 @@ body.team-settings-page {
   color: var(--text-muted, #6b7280);
   font-size: 0.875rem;
   margin: 0;
+}
+.settings-section-desc {
+  color: var(--muted, #6b7280);
+  font-size: 0.875rem;
+  margin: 0 0 1rem 0;
+}
+.settings-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+.settings-toggle:last-of-type {
+  border-bottom: none;
+}
+.settings-toggle input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.125rem;
+  flex-shrink: 0;
+}
+.settings-toggle span {
+  font-weight: 500;
+}
+.settings-toggle .form-hint {
+  display: block;
+  margin-top: 0.25rem;
 }
 .settings-form {
   display: flex;

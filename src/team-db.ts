@@ -533,15 +533,47 @@ export class TeamDatabase {
   // ============================================================================
 
   listDmChannels(npub: string): (Channel & { other_npub: string | null })[] {
-    return this.db.query<Channel & { other_npub: string | null }, [string, string]>(
+    return this.db.query<Channel & { other_npub: string | null }, [string, string, string]>(
       `SELECT c.*,
               (SELECT dp2.npub FROM dm_participants dp2
                WHERE dp2.channel_id = c.id AND dp2.npub != ?) as other_npub
        FROM channels c
        JOIN dm_participants dp ON c.id = dp.channel_id
-       WHERE dp.npub = ?
+       LEFT JOIN archived_dm_channels adc ON c.id = adc.channel_id AND adc.npub = ?
+       WHERE dp.npub = ? AND adc.channel_id IS NULL
        ORDER BY c.created_at DESC`
-    ).all(npub, npub);
+    ).all(npub, npub, npub);
+  }
+
+  archiveDmChannel(channelId: number, npub: string): boolean {
+    try {
+      this.db.run(
+        "INSERT OR IGNORE INTO archived_dm_channels (channel_id, npub) VALUES (?, ?)",
+        [channelId, npub]
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  unarchiveDmChannel(channelId: number, npub: string): boolean {
+    try {
+      this.db.run(
+        "DELETE FROM archived_dm_channels WHERE channel_id = ? AND npub = ?",
+        [channelId, npub]
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  isDmArchived(channelId: number, npub: string): boolean {
+    const result = this.db.query<{ count: number }, [number, string]>(
+      "SELECT COUNT(*) as count FROM archived_dm_channels WHERE channel_id = ? AND npub = ?"
+    ).get(channelId, npub);
+    return (result?.count ?? 0) > 0;
   }
 
   findDmChannel(npub1: string, npub2: string): Channel | null {
@@ -860,11 +892,14 @@ export class TeamDatabase {
   // Channel Groups
   // ============================================================================
 
-  listChannelGroups(channelId: number): number[] {
-    const rows = this.db.query<{ group_id: number }, [number]>(
-      "SELECT group_id FROM channel_groups WHERE channel_id = ?"
+  listChannelGroups(channelId: number): Array<{ id: number; name: string }> {
+    const rows = this.db.query<{ group_id: number; name: string }, [number]>(
+      `SELECT cg.group_id, g.name
+       FROM channel_groups cg
+       JOIN groups g ON cg.group_id = g.id
+       WHERE cg.channel_id = ?`
     ).all(channelId);
-    return rows.map(r => r.group_id);
+    return rows.map(r => ({ id: r.group_id, name: r.name }));
   }
 
   addChannelGroup(channelId: number, groupId: number): void {

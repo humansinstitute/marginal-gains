@@ -1161,3 +1161,37 @@ export async function handleTeamCheckMessagePinned(
 
   return jsonResponse({ isPinned, canPin });
 }
+
+// ============================================================================
+// DM Archive
+// ============================================================================
+
+/**
+ * Archive a DM channel (hides from user's list, doesn't delete data)
+ * POST /t/:teamSlug/api/dm/:channelId/archive
+ */
+export function handleTeamArchiveDm(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  channelId: number
+): Response {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) return result.response;
+
+  const { ctx } = result;
+  const db = new TeamDatabase(ctx.teamDb);
+
+  // Verify the channel exists and user is a participant
+  const participants = db.getDmParticipants(channelId);
+  if (!participants.includes(ctx.session.npub)) {
+    return forbidden("You are not a participant in this DM");
+  }
+
+  const success = db.archiveDmChannel(channelId, ctx.session.npub);
+  if (!success) {
+    return jsonResponse({ error: "Failed to archive DM" }, 500);
+  }
+
+  return jsonResponse({ success: true });
+}

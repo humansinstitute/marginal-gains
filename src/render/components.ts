@@ -1,4 +1,5 @@
 import { isAdmin } from "../config";
+import { getTeamBySlug } from "../master-db";
 
 import type { Session } from "../types";
 
@@ -20,8 +21,10 @@ export function renderPinModal() {
   return `<div class="pin-modal-overlay" data-pin-modal hidden>
     <div class="pin-modal">
       <h2 data-pin-title>Enter PIN</h2>
-      <p data-pin-subtitle>Enter your 4-digit PIN to unlock</p>
+      <p data-pin-subtitle>Enter your 6-digit PIN to unlock</p>
       <div class="pin-display">
+        <span class="pin-dot" data-pin-dot></span>
+        <span class="pin-dot" data-pin-dot></span>
         <span class="pin-dot" data-pin-dot></span>
         <span class="pin-dot" data-pin-dot></span>
         <span class="pin-dot" data-pin-dot></span>
@@ -36,7 +39,16 @@ export function renderPinModal() {
   </div>`;
 }
 
-export function renderAppMenu(session: Session | null, activePage: ActivePage) {
+export type FeatureVisibility = {
+  hideTasks?: boolean;
+  hideCrm?: boolean;
+};
+
+export function renderAppMenu(
+  session: Session | null,
+  activePage: ActivePage,
+  featureVisibility?: FeatureVisibility
+) {
   // Team selector is first in the menu
   const teamSelector = session ? renderTeamSelector(session) : "";
 
@@ -46,6 +58,24 @@ export function renderAppMenu(session: Session | null, activePage: ActivePage) {
   const tasksHref = teamSlug ? `/t/${teamSlug}/todo` : "/todo";
   const teamConfigHref = teamSlug ? `/t/${teamSlug}/config` : null;
 
+  // Get feature visibility from team settings if not provided
+  let visibility = featureVisibility;
+  if (!visibility && teamSlug) {
+    const team = getTeamBySlug(teamSlug);
+    if (team) {
+      visibility = {
+        hideTasks: !!team.hide_tasks,
+        hideCrm: !!team.hide_crm,
+      };
+    }
+  }
+  visibility = visibility || {};
+
+  // Tasks link - can be hidden per-team
+  const tasksLink = !visibility.hideTasks
+    ? `<li><a href="${tasksHref}" class="app-menu-item${activePage === "tasks" ? " active" : ""}">Tasks</a></li>`
+    : "";
+
   // CRM link - team-scoped for managers, global for admins
   const crmHref = teamSlug ? `/t/${teamSlug}/crm` : "/crm";
   // In team context, show to team managers (owner/manager role)
@@ -54,7 +84,7 @@ export function renderAppMenu(session: Session | null, activePage: ActivePage) {
     (m) => m.teamSlug === teamSlug
   );
   const isTeamManager = currentMembership?.role === "owner" || currentMembership?.role === "manager";
-  const canAccessCrm = session && (teamSlug ? isTeamManager : isAdmin(session.npub));
+  const canAccessCrm = session && (teamSlug ? isTeamManager : isAdmin(session.npub)) && !visibility.hideCrm;
   const crmLink = canAccessCrm
     ? `<li><a href="${crmHref}" class="app-menu-item${activePage === "crm" ? " active" : ""}">CRM</a></li>`
     : "";
@@ -84,7 +114,7 @@ export function renderAppMenu(session: Session | null, activePage: ActivePage) {
       ${teamSelector}
       <ul class="app-menu-list">
         <li><a href="${chatHref}" class="app-menu-item${activePage === "chat" ? " active" : ""}">Chat</a></li>
-        <li><a href="${tasksHref}" class="app-menu-item${activePage === "tasks" ? " active" : ""}">Tasks</a></li>
+        ${tasksLink}
         ${crmLink}
         ${teamSettingsLink}
       </ul>
@@ -109,9 +139,14 @@ function renderTeamSelector(session: Session) {
   const teamName = currentTeam?.displayName || "Select Team";
   const hasMultipleTeams = (session.teamMemberships?.length || 0) > 1;
 
+  // Show team icon if available, otherwise show 2-letter fallback
+  const iconContent = currentTeam?.iconUrl
+    ? `<img src="${escapeHtml(currentTeam.iconUrl)}" alt="" class="team-selector-icon-img" />`
+    : `<span class="team-selector-icon-fallback">${currentTeam ? teamName.slice(0, 2).toUpperCase() : "?"}</span>`;
+
   return `<div class="team-selector" data-team-selector>
     <button type="button" class="team-selector-btn" data-team-selector-btn>
-      <span class="team-selector-icon">${currentTeam ? teamName.slice(0, 2).toUpperCase() : "?"}</span>
+      <span class="team-selector-icon">${iconContent}</span>
       <span class="team-selector-name">${escapeHtml(teamName)}</span>
       ${hasMultipleTeams ? `<span class="team-selector-arrow">&#9662;</span>` : ""}
     </button>
@@ -129,15 +164,20 @@ function renderTeamDropdownItems(session: Session) {
   }
 
   return session.teamMemberships
-    .map(
-      (team) => `<button type="button" class="team-selector-item${
+    .map((team) => {
+      // Show team icon if available, otherwise show 2-letter fallback
+      const iconContent = team.iconUrl
+        ? `<img src="${escapeHtml(team.iconUrl)}" alt="" class="team-selector-icon-img" />`
+        : `<span class="team-selector-icon-fallback">${team.displayName.slice(0, 2).toUpperCase()}</span>`;
+
+      return `<button type="button" class="team-selector-item${
         team.teamSlug === session.currentTeamSlug ? " active" : ""
       }" data-switch-team="${team.teamSlug}">
-      <span class="team-selector-icon">${team.displayName.slice(0, 2).toUpperCase()}</span>
+      <span class="team-selector-icon">${iconContent}</span>
       <span>${escapeHtml(team.displayName)}</span>
       ${team.teamSlug === session.currentTeamSlug ? `<span class="team-check">&#10003;</span>` : ""}
-    </button>`
-    )
+    </button>`;
+    })
     .join("");
 }
 

@@ -60,7 +60,11 @@ export const initAuth = () => {
     void fetchSummaries();
   }
 
-  void checkFragmentLogin().then(() => {
+  // Check for Key Teleport first (URL param), then fragment login, then auto-login
+  void checkKeyTeleport().then((handled) => {
+    if (handled) return;
+    return checkFragmentLogin();
+  }).then(() => {
     if (!state.session) void maybeAutoLogin();
   });
 
@@ -653,6 +657,102 @@ const wireSecretToggle = () => {
   });
 };
 
+/**
+ * Check for Key Teleport login via URL parameter
+ * Flow: ?keyteleport=<blob> -> POST to server -> receive ncryptsec -> prompt PIN -> decrypt -> login
+ */
+const checkKeyTeleport = async () => {
+  const url = new URL(window.location.href);
+  const blob = url.searchParams.get("keyteleport");
+  if (!blob) return false;
+
+  // Clear the URL parameter immediately to prevent replay
+  url.searchParams.delete("keyteleport");
+  history.replaceState(null, "", url.pathname + url.search);
+
+  authLog.info("Key Teleport: Processing teleport request");
+
+  // Show the overlay to indicate teleport in progress
+  const overlay = document.querySelector("[data-keyteleport-overlay]");
+  if (overlay) show(overlay);
+
+  try {
+    // Check for secure context before PIN operations
+    if (!isSecureContext()) {
+      showError("Key Teleport requires HTTPS. Please access via https:// or localhost.");
+      if (overlay) hide(overlay);
+      return true;
+    }
+
+    // Send the blob to the server for decryption and key retrieval
+    const response = await fetch("/api/keyteleport", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blob }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || "Key Teleport failed");
+    }
+
+    const { ncryptsec } = await response.json();
+    if (!ncryptsec) {
+      throw new Error("No key received from teleport");
+    }
+
+    // Hide overlay before showing PIN prompt
+    if (overlay) hide(overlay);
+
+    authLog.info("Key Teleport: Received ncryptsec, prompting for PIN");
+
+    // Prompt for 6-digit PIN to decrypt the ncryptsec
+    const pin = await promptForPin({
+      title: "Key Teleport",
+      subtitle: "Enter your 6-digit PIN to unlock",
+    });
+
+    if (!pin) {
+      showError("PIN is required to complete key teleport.");
+      return true;
+    }
+
+    // Decrypt the ncryptsec using NIP-49
+    const { nip49, pure, nip19 } = await loadNostrLibs();
+
+    let secretBytes;
+    try {
+      secretBytes = nip49.decrypt(ncryptsec, pin);
+    } catch (err) {
+      authLog.error("Key Teleport: PIN decryption failed", err);
+      showError("Wrong PIN. Please try again.");
+      return true;
+    }
+
+    const secretHex = bytesToHex(secretBytes);
+    authLog.info("Key Teleport: Successfully decrypted key");
+
+    // Store the ncryptsec (already encrypted with PIN) for auto-login
+    localStorage.setItem(ENCRYPTED_SECRET_KEY, ncryptsec);
+    localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "secret");
+
+    // Store unencrypted in sessionStorage for current session operations
+    sessionStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
+
+    // Sign login event and complete login
+    const signedEvent = pure.finalizeEvent(buildUnsignedEvent("secret"), secretBytes);
+    await completeLogin("secret", signedEvent);
+
+    authLog.info("Key Teleport: Login complete");
+    return true;
+  } catch (err) {
+    console.error("Key Teleport failed", err);
+    if (overlay) hide(overlay);
+    showError(err?.message || "Key Teleport failed.");
+    return true;
+  }
+};
+
 const checkFragmentLogin = async () => {
   const hash = window.location.hash;
   if (!hash.startsWith("#code=")) return;
@@ -714,6 +814,9 @@ const maybeAutoLogin = async () => {
       return;
     }
 
+    // Detect format: ncryptsec (NIP-49) vs legacy (PBKDF2+AES-GCM)
+    const isNip49 = encryptedSecret.startsWith("ncryptsec1");
+
     // Prompt for PIN
     const pin = await promptForPin({
       title: "Welcome back",
@@ -726,12 +829,31 @@ const maybeAutoLogin = async () => {
     }
 
     try {
-      const secretHex = await decryptWithPin(encryptedSecret, pin);
-      if (!secretHex) {
-        // Wrong PIN - let them try again
-        autoLoginAttempted = false;
-        showError("Wrong PIN. Try again.");
-        return;
+      let secretBytes;
+      let secretHex;
+
+      if (isNip49) {
+        // NIP-49 ncryptsec format (from Key Teleport)
+        const { nip49, pure } = await loadNostrLibs();
+        try {
+          secretBytes = nip49.decrypt(encryptedSecret, pin);
+          secretHex = bytesToHex(secretBytes);
+        } catch (err) {
+          authLog.error("NIP-49 decryption failed", err);
+          autoLoginAttempted = false;
+          showError("Wrong PIN. Try again.");
+          return;
+        }
+      } else {
+        // Legacy PBKDF2+AES-GCM format
+        secretHex = await decryptWithPin(encryptedSecret, pin);
+        if (!secretHex) {
+          // Wrong PIN - let them try again
+          autoLoginAttempted = false;
+          showError("Wrong PIN. Try again.");
+          return;
+        }
+        secretBytes = hexToBytes(secretHex);
       }
 
       // Store unencrypted in sessionStorage for current session (needed for NIP-44 decryption)
@@ -739,7 +861,6 @@ const maybeAutoLogin = async () => {
       sessionStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
 
       // Convert hex to bytes for signing
-      const secretBytes = hexToBytes(secretHex);
       const { pure } = await loadNostrLibs();
       const signedEvent = pure.finalizeEvent(buildUnsignedEvent("secret"), secretBytes);
       await completeLogin("secret", signedEvent);

@@ -118,6 +118,18 @@ export function initTeamSchema(db: Database): void {
   `);
   createIndex(db, "CREATE INDEX idx_dm_participants_npub ON dm_participants(npub)");
 
+  // Archived DM Channels - per-user archive state (doesn't delete data)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS archived_dm_channels (
+      channel_id INTEGER NOT NULL,
+      npub TEXT NOT NULL,
+      archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (channel_id, npub),
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+    )
+  `);
+  createIndex(db, "CREATE INDEX idx_archived_dm_channels_npub ON archived_dm_channels(npub)");
+
   // Channel Members
   db.run(`
     CREATE TABLE IF NOT EXISTS channel_members (

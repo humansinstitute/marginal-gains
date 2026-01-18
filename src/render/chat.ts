@@ -428,6 +428,7 @@ function renderChatContent() {
     ${renderChannelModal()}
     ${renderChannelSettingsModal()}
     ${renderDmModal()}
+    ${renderDmSettingsModal()}
     ${renderProfileModal()}
     ${renderTaskLinkModal()}
   </section>`;
@@ -554,6 +555,24 @@ function renderDmModal() {
       <div class="dm-user-search">
         <input type="text" placeholder="Search users..." data-dm-search autocomplete="off" />
         <div class="dm-user-list" data-dm-user-list></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDmSettingsModal() {
+  return `<div class="chat-modal" data-dm-settings-modal hidden>
+    <div class="chat-modal-body dm-settings-body">
+      <header class="chat-modal-header">
+        <h3>Conversation Settings</h3>
+        <button type="button" class="ghost" data-close-dm-settings>&times;</button>
+      </header>
+      <div class="dm-settings-content">
+        <input type="hidden" data-dm-settings-id />
+        <p class="dm-settings-info">Archive this conversation to remove it from your sidebar. Messages will not be deleted.</p>
+        <div class="dm-danger-zone">
+          <button type="button" class="danger" data-archive-dm>Archive Conversation</button>
+        </div>
       </div>
     </div>
   </div>`;

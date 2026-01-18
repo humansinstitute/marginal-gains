@@ -7,6 +7,7 @@
  */
 
 import { isAdmin } from "./config";
+import { updateSession } from "./db";
 import { getMasterDb, getTeamDb, teamDbExists } from "./db-router";
 import { getTeamBySlug, getUserTeams, isUserTeamMember } from "./master-db";
 
@@ -238,6 +239,15 @@ export function createTeamRouteContext(
   session.currentTeamId = team.id;
   session.currentTeamSlug = team.slug;
   session.teamMemberships = getUserTeams(session.npub);
+
+  // Persist session changes to database
+  const teamMemberships = session.teamMemberships ? JSON.stringify(session.teamMemberships) : null;
+  updateSession(
+    session.token,
+    session.currentTeamId,
+    session.currentTeamSlug,
+    teamMemberships
+  );
 
   // Create context with team database
   const masterDb = getMasterDb();

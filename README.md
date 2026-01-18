@@ -94,6 +94,12 @@ public/
   settings.css       # Admin page styles
 ```
 
+## Encryption & Security
+
+Marginal Gains uses a layered encryption model built on Nostr standards. Messages in private channels and DMs are encrypted client-side using AES-256-GCM before transmission, with the ciphertext stored in the database. Channel encryption keys are wrapped per-user using NIP-44 (XChaCha20-Poly1305 with secp256k1 ECDH), allowing secure key distribution without exposing plaintext keys to the server. Each encrypted message includes a signed Nostr event payload, providing sender authentication and integrity verification.
+
+The architecture follows a zero-knowledge model where the server never has access to plaintext encryption keys or message content. Team keys are distributed via invite codes that derive ephemeral keypairs - when a user joins, they decrypt the team key using the invite-derived keypair, then re-encrypt it to their own Nostr pubkey for storage. This ensures that even if the server database is compromised, encrypted messages remain protected. Users with Nostr browser extensions (NIP-07) or remote signers (NIP-46) can participate in encrypted channels without exposing their private keys to the application.
+
 ## Tech Stack
 
 - **Runtime**: [Bun](https://bun.sh/)

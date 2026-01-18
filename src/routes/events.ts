@@ -129,16 +129,17 @@ function listVisibleChannels(db: Database, npub: string) {
 
 function listDmChannels(db: Database, npub: string) {
   return db
-    .query<DmChannelRow, [string, string]>(
+    .query<DmChannelRow, [string, string, string]>(
       `SELECT c.id, c.name, c.display_name, c.description,
               (SELECT dp2.npub FROM dm_participants dp2
                WHERE dp2.channel_id = c.id AND dp2.npub != ?) as other_npub
        FROM channels c
        JOIN dm_participants dp ON c.id = dp.channel_id
-       WHERE c.name LIKE 'dm-%' AND dp.npub = ?
+       LEFT JOIN archived_dm_channels adc ON c.id = adc.channel_id AND adc.npub = ?
+       WHERE c.name LIKE 'dm-%' AND dp.npub = ? AND adc.channel_id IS NULL
        ORDER BY c.id DESC`
     )
-    .all(npub, npub);
+    .all(npub, npub, npub);
 }
 
 function getOrCreatePersonalChannel(db: Database, npub: string) {

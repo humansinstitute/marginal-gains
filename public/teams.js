@@ -300,6 +300,9 @@ export function initTeamSettingsPage() {
   // Team info form
   initTeamInfoForm(team, isOwner);
 
+  // Feature visibility form (managers and owners)
+  initFeatureVisibilityForm(team);
+
   // Member management
   if (isOwner) {
     initMemberManagement(team);
@@ -381,6 +384,64 @@ function initTeamInfoForm(team, isOwner) {
 }
 
 /**
+ * Initialize feature visibility form
+ */
+function initFeatureVisibilityForm(team) {
+  const form = document.querySelector("[data-feature-visibility-form]");
+  if (!form) return;
+
+  const submitBtn = form.querySelector('button[type="submit"]');
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const formData = new FormData(form);
+    const data = {
+      hideTasks: formData.get("hideTasks") === "on",
+      hideCrm: formData.get("hideCrm") === "on",
+    };
+
+    // Show saving state
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Saving...";
+    }
+
+    try {
+      const res = await fetch(`/api/teams/${team.id}/features`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      if (res.ok) {
+        if (submitBtn) {
+          submitBtn.textContent = "Saved!";
+          setTimeout(() => {
+            submitBtn.textContent = "Save Changes";
+            submitBtn.disabled = false;
+          }, 1500);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Failed to update feature visibility");
+        if (submitBtn) {
+          submitBtn.textContent = "Save Changes";
+          submitBtn.disabled = false;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to update feature visibility:", err);
+      alert("Network error. Please try again.");
+      if (submitBtn) {
+        submitBtn.textContent = "Save Changes";
+        submitBtn.disabled = false;
+      }
+    }
+  });
+}
+
+/**
  * Initialize team icon upload functionality
  */
 function initTeamIconUpload(team) {
@@ -448,13 +509,71 @@ function initTeamIconUpload(team) {
   });
 }
 
+// Cache for user suggestions
+let teamUsersCache = [];
+
+/**
+ * Fetch all users for autocomplete suggestions
+ */
+async function fetchTeamUsers() {
+  if (teamUsersCache.length > 0) {
+    return teamUsersCache;
+  }
+
+  try {
+    // Fetch from the global users endpoint (all users seen by server)
+    const res = await fetch("/chat/users");
+    if (!res.ok) {
+      console.error("[Teams] Failed to fetch users for suggestions");
+      return [];
+    }
+    teamUsersCache = await res.json();
+    return teamUsersCache;
+  } catch (err) {
+    console.error("[Teams] Error fetching users:", err);
+    return [];
+  }
+}
+
+/**
+ * Escape HTML for safe insertion
+ */
+function escapeHtmlAttr(str) {
+  if (!str) return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Populate the user suggestions datalist
+ */
+function populateTeamUserSuggestions(users) {
+  const datalist = document.querySelector("[data-team-user-suggestions]");
+  if (!datalist) return;
+
+  datalist.innerHTML = users
+    .map((user) => {
+      const displayName = user.display_name || user.name || "";
+      const label = displayName || user.npub.slice(0, 16) + "...";
+      // Value is the npub, label shows the display name
+      return `<option value="${escapeHtmlAttr(user.npub)}">${escapeHtmlAttr(label)}</option>`;
+    })
+    .join("");
+}
+
 function initMemberManagement(team) {
   // Add member modal
   const addBtn = document.querySelector("[data-add-member]");
   const addModal = document.querySelector("[data-add-member-modal]");
 
   if (addBtn && addModal) {
-    addBtn.addEventListener("click", () => {
+    addBtn.addEventListener("click", async () => {
+      // Fetch users and populate suggestions when modal opens
+      const users = await fetchTeamUsers();
+      populateTeamUserSuggestions(users);
       addModal.hidden = false;
     });
 
