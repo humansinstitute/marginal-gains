@@ -1,4 +1,4 @@
-import { baseChatUrl, channelUrl, chatUrl, dmUrl, eventsUrl } from "./api.js";
+import { baseChatUrl, channelUrl, chatUrl, dmUrl, eventsUrl, teamUrl } from "./api.js";
 import { closeAvatarMenu, getCachedProfile, fetchProfile } from "./avatar.js";
 import { formatLocalDateTime } from "./dateUtils.js";
 import { elements as el, escapeHtml, hide, show } from "./dom.js";
@@ -787,7 +787,7 @@ export const initChat = async () => {
         const alpineStore = chatShell._x_dataStack[0];
 
         // Initialize chatSync with store and dependencies
-        chatSync.init(alpineStore, {
+        await chatSync.init(alpineStore, {
           processMessage: async (msg, channelId) => {
             // Use existing decryption logic
             const result = await processMessagesForDisplay([msg], channelId);
@@ -932,6 +932,7 @@ export const initChat = async () => {
   wireComposer();
   wireThreadSidebar();
   wireChannelSettingsModal();
+  wireDmSettingsModal();
   wireHangButtons();
   wirePinnedButton();
   wireDmModal();
@@ -1115,6 +1116,14 @@ async function fetchMessages(channelId) {
     shouldScrollToBottom = true;
     // Hide any existing new message indicator
     hideNewMessageIndicator();
+
+    // Mark channel as read after a short delay (allows scroll to complete)
+    // This handles the case where all messages fit on screen without scrolling
+    setTimeout(() => {
+      if (isNearBottom(el.chatThreadList) && getUnreadCount(channelId) > 0) {
+        markChannelAsRead(channelId);
+      }
+    }, 100);
 
     // Prefetch author profiles in background, then re-render to show names
     prefetchAuthorProfiles(mapped).then(() => {
@@ -2140,11 +2149,18 @@ async function sendThreadReply() {
 let channelSettingsGroups = [];
 let allGroups = [];
 
+// Check if the selected channel is a DM
+function isSelectedChannelDm() {
+  if (!state.chat.selectedChannelId) return false;
+  return state.chat.dmChannels.some((dm) => dm.id === state.chat.selectedChannelId);
+}
+
 // Update cog button and hang button visibility based on admin status and selected channel
 export function updateChannelSettingsCog() {
-  // Show cog only for admins when a channel is selected
+  // Show cog for admins (all channels) or for any user viewing a DM
   if (el.channelSettingsBtn) {
-    if (state.isAdmin && state.chat.selectedChannelId) {
+    const isDm = isSelectedChannelDm();
+    if (state.chat.selectedChannelId && (state.isAdmin || isDm)) {
       show(el.channelSettingsBtn);
     } else {
       hide(el.channelSettingsBtn);
@@ -2379,10 +2395,19 @@ async function fetchChannelGroups(channelId) {
 
 // Open channel settings modal
 async function openChannelSettingsModal() {
-  if (!state.chat.selectedChannelId) return;
+  if (!state.chat.selectedChannelId) {
+    console.warn("[Chat] openChannelSettingsModal: No selected channel ID");
+    return;
+  }
 
   const channel = state.chat.channels.find((c) => c.id === state.chat.selectedChannelId);
-  if (!channel) return;
+  if (!channel) {
+    console.warn("[Chat] openChannelSettingsModal: Channel not found in state.chat.channels", {
+      selectedChannelId: state.chat.selectedChannelId,
+      availableChannels: state.chat.channels.map((c) => ({ id: c.id, name: c.name })),
+    });
+    return;
+  }
 
   // Populate form
   if (el.channelSettingsId) el.channelSettingsId.value = channel.id;
@@ -2674,8 +2699,14 @@ async function deleteChannel() {
 
 // Wire channel settings modal
 function wireChannelSettingsModal() {
-  // Open modal on cog click
-  el.channelSettingsBtn?.addEventListener("click", openChannelSettingsModal);
+  // Open modal on cog click - show DM settings for DMs, channel settings for channels
+  el.channelSettingsBtn?.addEventListener("click", () => {
+    if (isSelectedChannelDm()) {
+      openDmSettingsModal();
+    } else {
+      openChannelSettingsModal();
+    }
+  });
 
   // Close modal
   const closeModal = () => hide(el.channelSettingsModal);
@@ -2728,6 +2759,119 @@ function wireChannelSettingsModal() {
       el.distributeKeysBtn.textContent = "Distribute Keys to Pending Members";
     }
   });
+}
+
+// ========== DM Settings Modal ==========
+
+// Open DM settings modal
+function openDmSettingsModal() {
+  if (!state.chat.selectedChannelId) return;
+
+  const dm = state.chat.dmChannels.find((d) => d.id === state.chat.selectedChannelId);
+  if (!dm) return;
+
+  // Set the channel ID in the hidden input
+  if (el.dmSettingsId) el.dmSettingsId.value = dm.id;
+
+  show(el.dmSettingsModal);
+}
+
+// Archive a DM channel
+async function archiveDm() {
+  const channelId = el.dmSettingsId?.value;
+  if (!channelId) return;
+
+  if (!confirm("Archive this conversation? It will be removed from your sidebar but messages will not be deleted.")) {
+    return;
+  }
+
+  try {
+    const res = await fetch(teamUrl(`/api/dm/${channelId}/archive`), {
+      method: "POST",
+      credentials: "same-origin",
+    });
+
+    if (res.ok) {
+      // Remove from local state
+      state.chat.dmChannels = state.chat.dmChannels.filter((d) => d.id !== channelId);
+
+      // Update Alpine store if using Alpine chat
+      if (window.__FEATURE_FLAGS__?.alpineChat) {
+        const chatShell = document.querySelector("[data-chat-shell]");
+        if (chatShell && chatShell._x_dataStack) {
+          const alpineStore = chatShell._x_dataStack[0];
+          alpineStore.dmChannels = state.chat.dmChannels;
+        }
+      }
+
+      // Close modal first
+      hide(el.dmSettingsModal);
+
+      // If viewing this DM, switch to another channel
+      if (state.chat.selectedChannelId === channelId) {
+        // Helper to update Alpine store's selected channel
+        const updateAlpineSelectedChannel = (newChannelId) => {
+          if (window.__FEATURE_FLAGS__?.alpineChat) {
+            const chatShell = document.querySelector("[data-chat-shell]");
+            if (chatShell && chatShell._x_dataStack) {
+              const alpineStore = chatShell._x_dataStack[0];
+              alpineStore.selectedChannelId = newChannelId;
+              alpineStore.loading = true;
+            }
+          }
+        };
+
+        if (state.chat.channels.length > 0) {
+          const firstChannel = state.chat.channels[0];
+          selectChannel(firstChannel.id);
+          updateAlpineSelectedChannel(firstChannel.id);
+          updateChatUrl(firstChannel.id);
+          await fetchPinnedMessages(firstChannel.id);
+          updateChannelSettingsCog();
+          await fetchMessages(firstChannel.id);
+        } else if (state.chat.dmChannels.length > 0) {
+          // Switch to another DM if no regular channels
+          const firstDm = state.chat.dmChannels[0];
+          selectChannel(firstDm.id);
+          updateAlpineSelectedChannel(firstDm.id);
+          updateChatUrl(firstDm.id);
+          updateChannelSettingsCog();
+          await fetchMessages(firstDm.id);
+        } else {
+          state.chat.selectedChannelId = null;
+          updateAlpineSelectedChannel(null);
+          if (el.threadList) {
+            el.threadList.innerHTML = `<p class="chat-placeholder">Pick or create a channel to start chatting.</p>`;
+          }
+          if (el.activeChannel) {
+            el.activeChannel.textContent = "Pick a channel";
+          }
+          updateChannelSettingsCog();
+        }
+      }
+
+      renderChannels();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Failed to archive conversation");
+    }
+  } catch (_err) {
+    console.error("[Chat] Failed to archive DM");
+    alert("Failed to archive conversation");
+  }
+}
+
+// Wire DM settings modal
+function wireDmSettingsModal() {
+  // Close modal
+  const closeModal = () => hide(el.dmSettingsModal);
+  el.closeDmSettingsBtns?.forEach((btn) => btn.addEventListener("click", closeModal));
+  el.dmSettingsModal?.addEventListener("click", (e) => {
+    if (e.target === el.dmSettingsModal) closeModal();
+  });
+
+  // Archive button
+  el.archiveDmBtn?.addEventListener("click", archiveDm);
 }
 
 // ========== Hang Buttons ==========

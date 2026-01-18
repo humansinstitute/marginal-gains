@@ -213,16 +213,56 @@ async function openModalForTask(todoId, card) {
   // Show edit-only elements
   if (el.deleteBtn) el.deleteBtn.hidden = false;
 
-  // Extract data from the card
+  // Fetch full task details from server
+  const teamSlug = el.form?.dataset.teamSlug;
+  const taskUrl = teamSlug
+    ? `/t/${teamSlug}/api/todos/${todoId}`
+    : `/api/todos/${todoId}`;
+
+  try {
+    const res = await fetch(taskUrl);
+    if (res.ok) {
+      const task = await res.json();
+      // Use full task data from server
+      populateModal({
+        title: task.title || "",
+        description: task.description || "",
+        priority: task.priority || "sand",
+        state: task.state || "ready",
+        scheduled_for: task.scheduled_for || "",
+        tags: task.tags || "",
+        assigned_to: task.assigned_to || "",
+        group_id: task.group_id ? String(task.group_id) : "",
+      });
+    } else {
+      // Fallback to card data if fetch fails
+      populateModalFromCard(card);
+    }
+  } catch (err) {
+    console.error("[TaskModal] Failed to fetch task details:", err);
+    // Fallback to card data if fetch fails
+    populateModalFromCard(card);
+  }
+
+  show(el.overlay);
+  el.title?.focus();
+
+  // Fetch and display task links
+  await fetchAndDisplayLinks(todoId);
+
+  // Fetch and display subtasks
+  await fetchAndDisplaySubtasks(todoId);
+}
+
+function populateModalFromCard(card) {
+  // Extract data from the card (fallback for when API fails)
   const title = card.querySelector(".kanban-card-title")?.textContent || "";
   const desc = card.querySelector(".kanban-card-desc")?.textContent || "";
 
   // Get state - prefer data attribute, but fallback to column if blank/invalid
-  // (after drag-drop, Alpine may not have updated the attribute yet)
   const validStates = ["new", "ready", "in_progress", "review", "done", "archived"];
   let state = card.dataset.todoState || "";
   if (!validStates.includes(state)) {
-    // Try to determine state from card's column position
     const column = card.closest("[data-kanban-column]");
     if (column) {
       state = column.dataset.kanbanColumn || "ready";
@@ -246,14 +286,6 @@ async function openModalForTask(todoId, card) {
   const tags = Array.from(tagChips).map(chip => chip.textContent.trim()).join(",");
 
   populateModal({ title, description: desc, priority, state, scheduled_for: "", tags, assigned_to, group_id });
-  show(el.overlay);
-  el.title?.focus();
-
-  // Fetch and display task links
-  await fetchAndDisplayLinks(todoId);
-
-  // Fetch and display subtasks
-  await fetchAndDisplaySubtasks(todoId);
 }
 
 async function openModalFromListItem(todoId, details) {
@@ -269,7 +301,49 @@ async function openModalFromListItem(todoId, details) {
   // Show edit-only elements
   if (el.deleteBtn) el.deleteBtn.hidden = false;
 
-  // Extract data from the details element
+  // Fetch full task details from server
+  const teamSlug = el.form?.dataset.teamSlug;
+  const taskUrl = teamSlug
+    ? `/t/${teamSlug}/api/todos/${todoId}`
+    : `/api/todos/${todoId}`;
+
+  try {
+    const res = await fetch(taskUrl);
+    if (res.ok) {
+      const task = await res.json();
+      // Use full task data from server
+      populateModal({
+        title: task.title || "",
+        description: task.description || "",
+        priority: task.priority || "sand",
+        state: task.state || "ready",
+        scheduled_for: task.scheduled_for || "",
+        tags: task.tags || "",
+        assigned_to: task.assigned_to || "",
+        group_id: task.group_id ? String(task.group_id) : "",
+      });
+    } else {
+      // Fallback to DOM data if fetch fails
+      populateModalFromListItem(details);
+    }
+  } catch (err) {
+    console.error("[TaskModal] Failed to fetch task details:", err);
+    // Fallback to DOM data if fetch fails
+    populateModalFromListItem(details);
+  }
+
+  show(el.overlay);
+  el.title?.focus();
+
+  // Fetch and display task links
+  await fetchAndDisplayLinks(todoId);
+
+  // Fetch and display subtasks
+  await fetchAndDisplaySubtasks(todoId);
+}
+
+function populateModalFromListItem(details) {
+  // Extract data from the details element (fallback for when API fails)
   const editForm = details.querySelector(".edit-form");
   if (!editForm) return;
 
@@ -283,14 +357,6 @@ async function openModalFromListItem(todoId, details) {
   const group_id = editForm.querySelector("[name='group_id']")?.value || "";
 
   populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id });
-  show(el.overlay);
-  el.title?.focus();
-
-  // Fetch and display task links
-  await fetchAndDisplayLinks(todoId);
-
-  // Fetch and display subtasks
-  await fetchAndDisplaySubtasks(todoId);
 }
 
 function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id }) {

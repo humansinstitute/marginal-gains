@@ -1,5 +1,5 @@
 /**
- * PIN Modal - numpad interface for entering 4-digit PINs
+ * PIN Modal - numpad interface for entering 6-digit PINs
  */
 
 import { hide, show } from "./dom.js";
@@ -97,12 +97,12 @@ export function initPinModal() {
 }
 
 function addDigit(digit) {
-  if (currentPin.length >= 4) return;
+  if (currentPin.length >= 6) return;
   currentPin += digit;
   updateDots();
   hideError();
 
-  if (currentPin.length === 4) {
+  if (currentPin.length === 6) {
     // Small delay for visual feedback
     setTimeout(() => {
       if (isConfirmMode) {
@@ -150,7 +150,7 @@ function handleConfirmPin() {
     isConfirmMode = false;
     const el = getElements();
     if (el.title) el.title.textContent = "Create PIN";
-    if (el.subtitle) el.subtitle.textContent = "Choose a 4-digit PIN to protect your key";
+    if (el.subtitle) el.subtitle.textContent = "Choose a 6-digit PIN to protect your key";
   }
 }
 
@@ -161,7 +161,7 @@ function handleConfirmPin() {
  * @param {string} options.subtitle - Modal subtitle
  * @returns {Promise<string|null>} The entered PIN, or null if cancelled
  */
-export function promptForPin({ title = "Enter PIN", subtitle = "Enter your 4-digit PIN" } = {}) {
+export function promptForPin({ title = "Enter PIN", subtitle = "Enter your 6-digit PIN" } = {}) {
   return new Promise((resolve) => {
     const el = getElements();
     if (!el.modal) {
@@ -208,7 +208,7 @@ export function promptForNewPin() {
     firstPin = "";
 
     if (el.title) el.title.textContent = "Create PIN";
-    if (el.subtitle) el.subtitle.textContent = "Choose a 4-digit PIN to protect your key";
+    if (el.subtitle) el.subtitle.textContent = "Choose a 6-digit PIN to protect your key";
     updateDots();
     hideError();
 

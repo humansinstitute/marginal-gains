@@ -119,6 +119,11 @@ export const elements = {
   dmSearch: document.querySelector("[data-dm-search]"),
   dmUserList: document.querySelector("[data-dm-user-list]"),
   closeDmModalBtns: document.querySelectorAll("[data-close-dm-modal]"),
+  // DM settings elements
+  dmSettingsModal: document.querySelector("[data-dm-settings-modal]"),
+  dmSettingsId: document.querySelector("[data-dm-settings-id]"),
+  closeDmSettingsBtns: document.querySelectorAll("[data-close-dm-settings]"),
+  archiveDmBtn: document.querySelector("[data-archive-dm]"),
   // Task link modal elements
   viewThreadTasksBtn: document.querySelector("[data-view-thread-tasks]"),
   taskLinkModal: document.querySelector("[data-task-link-modal]"),

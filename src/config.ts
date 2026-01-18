@@ -121,3 +121,76 @@ if (WINGMAN_KEY) {
 } else {
   console.log("[Wingman] WINGMAN_KEY not configured");
 }
+
+// Key Teleport configuration
+export const KEYTELEPORT_PRIVKEY = Bun.env.KEYTELEPORT_PRIVKEY ?? "";
+export const KEYTELEPORT_WELCOME_PUBKEY = Bun.env.KEYTELEPORT_WELCOME_PUBKEY ?? "";
+
+// Derive Key Teleport identity from nsec or hex private key
+export function getKeyTeleportIdentity(): {
+  npub: string;
+  pubkey: string;
+  secretKey: Uint8Array;
+} | null {
+  if (!KEYTELEPORT_PRIVKEY) {
+    return null;
+  }
+
+  try {
+    let secretKey: Uint8Array;
+
+    if (KEYTELEPORT_PRIVKEY.startsWith("nsec")) {
+      const decoded = nip19.decode(KEYTELEPORT_PRIVKEY);
+      if (decoded.type !== "nsec") {
+        console.error("[KeyTeleport] KEYTELEPORT_PRIVKEY is not a valid nsec");
+        return null;
+      }
+      secretKey = decoded.data as Uint8Array;
+    } else if (/^[0-9a-fA-F]{64}$/.test(KEYTELEPORT_PRIVKEY)) {
+      secretKey = hexToBytes(KEYTELEPORT_PRIVKEY);
+    } else {
+      console.error("[KeyTeleport] KEYTELEPORT_PRIVKEY must be nsec or 64-char hex");
+      return null;
+    }
+
+    const pubkey = getPublicKey(secretKey);
+    const npub = nip19.npubEncode(pubkey);
+
+    return { npub, pubkey, secretKey };
+  } catch (err) {
+    console.error("[KeyTeleport] Failed to decode KEYTELEPORT_PRIVKEY:", err);
+    return null;
+  }
+}
+
+// Get the welcome pubkey (trusted key manager) as hex
+export function getKeyTeleportWelcomePubkey(): string | null {
+  if (!KEYTELEPORT_WELCOME_PUBKEY) {
+    return null;
+  }
+
+  try {
+    if (KEYTELEPORT_WELCOME_PUBKEY.startsWith("npub")) {
+      const decoded = nip19.decode(KEYTELEPORT_WELCOME_PUBKEY);
+      if (decoded.type !== "npub") {
+        console.error("[KeyTeleport] KEYTELEPORT_WELCOME_PUBKEY is not a valid npub");
+        return null;
+      }
+      return decoded.data as string;
+    } else if (/^[0-9a-fA-F]{64}$/.test(KEYTELEPORT_WELCOME_PUBKEY)) {
+      return KEYTELEPORT_WELCOME_PUBKEY;
+    } else {
+      console.error("[KeyTeleport] KEYTELEPORT_WELCOME_PUBKEY must be npub or 64-char hex");
+      return null;
+    }
+  } catch (err) {
+    console.error("[KeyTeleport] Failed to decode KEYTELEPORT_WELCOME_PUBKEY:", err);
+    return null;
+  }
+}
+
+// Startup logging for Key Teleport config
+if (KEYTELEPORT_PRIVKEY && KEYTELEPORT_WELCOME_PUBKEY) {
+  console.log("[KeyTeleport] Key Teleport configured");
+  getKeyTeleportIdentity();
+}

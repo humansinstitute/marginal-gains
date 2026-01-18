@@ -231,11 +231,36 @@ function renderTeamSettingsContent(
 ) {
   return `<div class="team-settings-content">
     ${renderTeamInfoSection(team, isOwner)}
+    ${renderFeatureVisibilitySection(team)}
     ${renderTeamMembersSection(members, isOwner)}
     ${renderTeamInvitationsSection(invitations)}
     ${isOwner ? renderTeamDangerZone(team) : ""}
     ${renderInviteModal(groups)}
   </div>`;
+}
+
+function renderFeatureVisibilitySection(team: Team) {
+  return `<section class="settings-section">
+    <div class="settings-section-header">
+      <h2>Feature Visibility</h2>
+    </div>
+    <p class="settings-section-desc">Control which features are visible in the sidebar for team members.</p>
+    <form class="settings-form" data-feature-visibility-form data-team-id="${team.id}">
+      <label class="settings-toggle">
+        <input type="checkbox" name="hideTasks" ${team.hide_tasks ? "checked" : ""} />
+        <span>Hide Tasks</span>
+        <small class="form-hint">Hide the Tasks section from the sidebar.</small>
+      </label>
+      <label class="settings-toggle">
+        <input type="checkbox" name="hideCrm" ${team.hide_crm ? "checked" : ""} />
+        <span>Hide CRM</span>
+        <small class="form-hint">Hide the CRM section from the sidebar.</small>
+      </label>
+      <div class="settings-form-actions">
+        <button type="submit" class="primary">Save Changes</button>
+      </div>
+    </form>
+  </section>`;
 }
 
 function renderTeamInfoSection(team: Team, isOwner: boolean) {
@@ -332,8 +357,10 @@ function renderAddMemberModal() {
       </header>
       <form class="teams-form" data-add-member-form>
         <label>
-          <span>Nostr Public Key (npub)</span>
-          <input type="text" name="npub" required placeholder="npub1..." pattern="npub1[a-z0-9]{58}" />
+          <span>Search User</span>
+          <input type="text" name="npub" required placeholder="Search by name or paste npub..." list="team-user-suggestions" data-team-member-input />
+          <datalist id="team-user-suggestions" data-team-user-suggestions></datalist>
+          <small class="form-hint">Start typing to search known users, or paste a full npub.</small>
         </label>
         <label>
           <span>Role</span>

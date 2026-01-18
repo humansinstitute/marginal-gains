@@ -25,7 +25,9 @@ import {
   setLastSync,
   updateChannel,
   deleteChannel,
+  clearAllData,
 } from "../db/chatDB.js";
+import { getTeamSlug } from "../api.js";
 
 // Store reference (set via init)
 let store = null;
@@ -46,7 +48,7 @@ let messageSubscription = null;
  * @param {Object} alpineStore - The Alpine chat store instance
  * @param {Object} options - Configuration options
  */
-export function init(alpineStore, options = {}) {
+export async function init(alpineStore, options = {}) {
   store = alpineStore;
 
   if (options.processMessage) {
@@ -59,10 +61,43 @@ export function init(alpineStore, options = {}) {
     currentUserNpub = options.currentUserNpub;
   }
 
+  // Clear stale data if team changed (multi-tenant isolation)
+  await clearCacheOnTeamChange();
+
   // Setup cross-tab sync
   setupCrossTabSync();
 
   console.log("[ChatSync] Initialized");
+}
+
+/**
+ * Check if the team has changed and clear the Dexie cache if so.
+ * This prevents stale data from a previous team from being shown.
+ */
+async function clearCacheOnTeamChange() {
+  const currentTeam = getTeamSlug() || "__no_team__";
+  const TEAM_KEY = "currentTeamSlug";
+
+  try {
+    const stored = await chatDb.meta.get(TEAM_KEY);
+    const storedTeam = stored?.value || null;
+
+    if (storedTeam !== currentTeam) {
+      console.log(`[ChatSync] Team changed from "${storedTeam}" to "${currentTeam}" - clearing cache`);
+      await clearAllData();
+      // Store the new team slug
+      await chatDb.meta.put({ key: TEAM_KEY, value: currentTeam });
+    }
+  } catch (err) {
+    console.error("[ChatSync] Error checking team change:", err);
+    // On error, clear cache to be safe
+    try {
+      await clearAllData();
+      await chatDb.meta.put({ key: TEAM_KEY, value: currentTeam });
+    } catch (clearErr) {
+      console.error("[ChatSync] Failed to clear cache:", clearErr);
+    }
+  }
 }
 
 /**

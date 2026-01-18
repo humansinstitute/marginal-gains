@@ -10,6 +10,7 @@
  */
 
 import { isAdmin } from "../config";
+import { updateSession } from "../db";
 import { getTeamDb } from "../db-router";
 import { jsonResponse, forbidden, unauthorized } from "../http";
 import {
@@ -44,6 +45,20 @@ import type { InviteGroupOption } from "../render/teams";
 import type { Session } from "../types";
 
 // ============================================================================
+// Helper to persist session team data
+// ============================================================================
+
+function persistSessionTeamData(session: Session) {
+  const teamMemberships = session.teamMemberships ? JSON.stringify(session.teamMemberships) : null;
+  updateSession(
+    session.token,
+    session.currentTeamId ?? null,
+    session.currentTeamSlug ?? null,
+    teamMemberships
+  );
+}
+
+// ============================================================================
 // Team List & Selection
 // ============================================================================
 
@@ -73,6 +88,7 @@ export function handleTeamsPage(session: Session | null, url?: URL): Response {
     session.currentTeamId = team.teamId;
     session.currentTeamSlug = team.teamSlug;
     session.teamMemberships = teams;
+    persistSessionTeamData(session);
 
     return new Response(null, {
       status: 302,
@@ -133,6 +149,7 @@ export async function handleSwitchTeam(
 
   // Re-fetch memberships to ensure they're current
   session.teamMemberships = getUserTeams(session.npub);
+  persistSessionTeamData(session);
 
   return jsonResponse({
     success: true,
@@ -201,6 +218,7 @@ export async function handleCreateTeam(
     session.currentTeamId = team.id;
     session.currentTeamSlug = team.slug;
     session.teamMemberships = getUserTeams(session.npub);
+    persistSessionTeamData(session);
 
     return jsonResponse({
       success: true,
@@ -252,6 +270,8 @@ export async function handleJoinTeam(
     session.currentTeamId = result.team.id;
     session.currentTeamSlug = result.team.slug;
   }
+
+  persistSessionTeamData(session);
 
   return jsonResponse({
     success: true,
@@ -371,6 +391,43 @@ export async function handleUpdateTeam(
 }
 
 /**
+ * PATCH /api/teams/:id/features - Update team feature visibility
+ */
+export async function handleUpdateTeamFeatures(
+  req: Request,
+  session: Session | null,
+  teamId: number
+): Promise<Response> {
+  if (!session) {
+    return unauthorized();
+  }
+
+  const team = getTeam(teamId);
+  if (!team) {
+    return jsonResponse({ error: "Team not found" }, 404);
+  }
+
+  // Check if user is a manager or super-admin
+  if (!isAdmin(session.npub) && !isUserTeamManager(team.id, session.npub)) {
+    return forbidden("You do not have permission to update team features");
+  }
+
+  const body = await req.json();
+  const { hideTasks, hideCrm } = body as {
+    hideTasks?: boolean;
+    hideCrm?: boolean;
+  };
+
+  const { updateTeamFeatureVisibility } = await import("../master-db");
+  const updated = updateTeamFeatureVisibility(teamId, { hideTasks, hideCrm });
+  if (!updated) {
+    return jsonResponse({ error: "Failed to update team features" }, 500);
+  }
+
+  return jsonResponse({ success: true, team: updated });
+}
+
+/**
  * DELETE /api/teams/:id - Deactivate/delete team
  */
 export function handleDeleteTeam(session: Session | null, teamId: number): Response {
@@ -403,6 +460,8 @@ export function handleDeleteTeam(session: Session | null, teamId: number): Respo
   if (session.teamMemberships) {
     session.teamMemberships = session.teamMemberships.filter((m) => m.teamId !== teamId);
   }
+
+  persistSessionTeamData(session);
 
   return jsonResponse({ success: true });
 }

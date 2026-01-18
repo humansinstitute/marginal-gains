@@ -24,6 +24,65 @@ export function initKanban() {
 
   // Also do initial load for server-rendered content (list view)
   loadAssigneeAvatars();
+
+  // Initialize top scrollbar sync
+  initTopScrollbar();
+}
+
+/**
+ * Initialize the top scrollbar that syncs with the kanban board's horizontal scroll.
+ * Only shows when content overflows horizontally.
+ */
+function initTopScrollbar() {
+  const topScroll = document.querySelector("[data-kanban-scroll-top]");
+  const kanbanBoard = document.querySelector("[data-kanban-board]");
+
+  if (!topScroll || !kanbanBoard) return;
+
+  const topInner = topScroll.querySelector(".kanban-scroll-top-inner");
+  if (!topInner) return;
+
+  // Check if horizontal scrolling is needed and update visibility
+  function updateVisibility() {
+    const needsScroll = kanbanBoard.scrollWidth > kanbanBoard.clientWidth;
+    topScroll.classList.toggle("visible", needsScroll);
+    topInner.style.width = kanbanBoard.scrollWidth + "px";
+  }
+
+  // Sync scroll positions between top scrollbar and kanban board
+  let isSyncing = false;
+
+  topScroll.addEventListener("scroll", () => {
+    if (isSyncing) return;
+    isSyncing = true;
+    kanbanBoard.scrollLeft = topScroll.scrollLeft;
+    isSyncing = false;
+  });
+
+  kanbanBoard.addEventListener("scroll", () => {
+    if (isSyncing) return;
+    isSyncing = true;
+    topScroll.scrollLeft = kanbanBoard.scrollLeft;
+    isSyncing = false;
+  });
+
+  // Initial check
+  updateVisibility();
+
+  // Re-check when content changes (e.g., Alpine renders cards, window resize)
+  const resizeObserver = new ResizeObserver(() => {
+    updateVisibility();
+  });
+  resizeObserver.observe(kanbanBoard);
+
+  // Also observe for column/card changes
+  const mutationObserver = new MutationObserver(() => {
+    updateVisibility();
+  });
+  mutationObserver.observe(kanbanBoard, { childList: true, subtree: true });
+
+  // Handle window resize
+  window.addEventListener("resize", updateVisibility);
 }
 
 function initContextSwitcher() {

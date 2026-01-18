@@ -107,6 +107,7 @@ import {
   handleFulfillKeyRequest,
   handleRejectKeyRequest,
 } from "./routes/key-requests";
+import { handleKeyTeleport } from "./routes/keyteleport";
 import {
   handleGetPushStatus,
   handleGetVapidPublicKey,
@@ -134,6 +135,7 @@ import {
 } from "./routes/tasks";
 import {
   handleTeamAddChannelGroups,
+  handleTeamArchiveDm,
   handleTeamChatPage,
   handleTeamCreateChannel,
   handleTeamCreateDm,
@@ -219,6 +221,7 @@ import {
   handleTeamTodoDelete,
   handleTeamApiTodoState,
   handleTeamApiTodoPosition,
+  handleTeamGetTodo,
   handleTeamGetSubtasks,
   handleTeamCreateSubtask,
 } from "./routes/team-todos";
@@ -231,6 +234,7 @@ import {
   handleJoinTeamPage,
   handleTeamSettingsPage,
   handleUpdateTeam,
+  handleUpdateTeamFeatures,
   handleDeleteTeam,
   handleListTeamMembers,
   handleAddTeamMember,
@@ -512,6 +516,10 @@ const server = Bun.serve({
         const teamTodosListMatch = pathname.match(/^\/t\/([^/]+)\/todo\/list$/);
         if (teamTodosListMatch) return handleTeamTodos(url, session, teamTodosListMatch[1], "list");
 
+        // Team-scoped single todo GET endpoint (for full task details)
+        const teamGetTodoMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)$/);
+        if (teamGetTodoMatch) return handleTeamGetTodo(req, session, teamGetTodoMatch[1], Number(teamGetTodoMatch[2]));
+
         // Team-scoped subtask API routes (GET)
         const teamSubtasksMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/subtasks$/);
         if (teamSubtasksMatch) return handleTeamGetSubtasks(req, session, teamSubtasksMatch[1], Number(teamSubtasksMatch[2]));
@@ -664,6 +672,9 @@ const server = Bun.serve({
         if (pathname === "/auth/login") return login(req);
         if (pathname === "/auth/logout") return logout(req);
 
+        // Key Teleport route (no auth required)
+        if (pathname === "/api/keyteleport") return handleKeyTeleport(req);
+
         // Team routes
         if (pathname === "/api/teams") return handleCreateTeam(req, session);
         if (pathname === "/teams/switch") return handleSwitchTeam(req, session);
@@ -682,6 +693,9 @@ const server = Bun.serve({
 
         const teamCreateDmMatch = pathname.match(/^\/t\/([^/]+)\/chat\/dm$/);
         if (teamCreateDmMatch) return handleTeamCreateDm(req, session, teamCreateDmMatch[1]);
+
+        const teamArchiveDmMatch = pathname.match(/^\/t\/([^/]+)\/api\/dm\/(\d+)\/archive$/);
+        if (teamArchiveDmMatch) return handleTeamArchiveDm(req, session, teamArchiveDmMatch[1], Number(teamArchiveDmMatch[2]));
 
         const teamUpdateUserMatch = pathname.match(/^\/t\/([^/]+)\/chat\/users$/);
         if (teamUpdateUserMatch) return handleTeamUpdateUser(req, session, teamUpdateUserMatch[1]);
@@ -892,6 +906,8 @@ const server = Bun.serve({
         // Team routes
         const updateTeamMatch = pathname.match(/^\/api\/teams\/(\d+)$/);
         if (updateTeamMatch) return handleUpdateTeam(req, session, Number(updateTeamMatch[1]));
+        const updateTeamFeaturesMatch = pathname.match(/^\/api\/teams\/(\d+)\/features$/);
+        if (updateTeamFeaturesMatch) return handleUpdateTeamFeatures(req, session, Number(updateTeamFeaturesMatch[1]));
         const updateTeamMemberMatch = pathname.match(/^\/api\/teams\/(\d+)\/members\/([^/]+)$/);
         if (updateTeamMemberMatch) {
           return handleUpdateTeamMember(

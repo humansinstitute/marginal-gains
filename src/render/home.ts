@@ -141,6 +141,10 @@ function renderHeader(session: Session | null) {
 
 function renderAuth(session: Session | null) {
   return `<section class="auth-panel" data-login-panel ${session ? "hidden" : ""}>
+    <div class="keyteleport-overlay" data-keyteleport-overlay hidden>
+      <div class="keyteleport-spinner"></div>
+      <p>Key Teleport in Progress</p>
+    </div>
     <h2>Sign in with Nostr to get started</h2>
     <p class="auth-description">Start with a quick Ephemeral ID or bring your own signer.</p>
     <div class="auth-actions">
@@ -502,7 +506,10 @@ function _renderKanbanBoard(todos: TodoDisplay[], _emptyMessage: string, groupId
     )
     .join("");
 
-  return `<div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""}>${columnHtml}</div>`;
+  return `<div class="kanban-scroll-container">
+    <div class="kanban-scroll-top" data-kanban-scroll-top><div class="kanban-scroll-top-inner"></div></div>
+    <div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""}>${columnHtml}</div>
+  </div>`;
 }
 
 function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isAllTasksView = false, teamSlug: string | null = null) {
@@ -631,26 +638,29 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
     </div>`).join("");
 
   return `
-    <div
-      class="kanban-board"
-      data-kanban-board
-      ${groupId ? `data-group-id="${groupId}"` : ""}
-      ${teamSlug ? `data-team-slug="${teamSlug}"` : ""}
-      x-data="createKanbanStore(window.__INITIAL_TODOS__, ${groupId ?? "null"}, ${teamSlug ? `'${teamSlug}'` : "null"})"
-      x-init="init()"
-    >
-      <!-- Sync indicator -->
-      <div x-show="syncing" class="sync-indicator">Syncing...</div>
+    <div class="kanban-scroll-container">
+      <div class="kanban-scroll-top" data-kanban-scroll-top><div class="kanban-scroll-top-inner"></div></div>
+      <div
+        class="kanban-board"
+        data-kanban-board
+        ${groupId ? `data-group-id="${groupId}"` : ""}
+        ${teamSlug ? `data-team-slug="${teamSlug}"` : ""}
+        x-data="createKanbanStore(window.__INITIAL_TODOS__, ${groupId ?? "null"}, ${teamSlug ? `'${teamSlug}'` : "null"})"
+        x-init="init()"
+      >
+        <!-- Sync indicator -->
+        <div x-show="syncing" class="sync-indicator">Syncing...</div>
 
-      <!-- Error state -->
-      <template x-if="error">
-        <div class="kanban-error" x-text="error"></div>
-      </template>
+        <!-- Error state -->
+        <template x-if="error">
+          <div class="kanban-error" x-text="error"></div>
+        </template>
 
-      <!-- Columns -->
-      <div class="kanban-columns-wrapper">
-        ${summaryColumn}
-        ${columnHtml}
+        <!-- Columns -->
+        <div class="kanban-columns-wrapper">
+          ${summaryColumn}
+          ${columnHtml}
+        </div>
       </div>
     </div>`;
 }
@@ -1298,7 +1308,10 @@ function _renderTeamKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: n
     )
     .join("");
 
-  return `<div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""} data-team-slug="${teamSlug}">${columnHtml}</div>`;
+  return `<div class="kanban-scroll-container">
+    <div class="kanban-scroll-top" data-kanban-scroll-top><div class="kanban-scroll-top-inner"></div></div>
+    <div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""} data-team-slug="${teamSlug}">${columnHtml}</div>
+  </div>`;
 }
 
 function renderTeamKanbanCard(todo: Todo, groupId: number | null, teamSlug: string) {

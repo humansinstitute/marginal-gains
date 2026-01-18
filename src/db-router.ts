@@ -25,6 +25,8 @@ export type Team = {
   created_at: string;
   created_by: string;
   is_active: number;
+  hide_tasks: number;
+  hide_crm: number;
 };
 
 export type TeamMembership = {
@@ -121,6 +123,10 @@ function initMasterSchema(db: Database): void {
     )
   `);
   db.run("CREATE INDEX IF NOT EXISTS idx_teams_slug ON teams(slug)");
+
+  // Feature visibility toggles (allow team admins to hide features)
+  addColumn(db, "ALTER TABLE teams ADD COLUMN hide_tasks INTEGER DEFAULT 0");
+  addColumn(db, "ALTER TABLE teams ADD COLUMN hide_crm INTEGER DEFAULT 0");
 
   // Team memberships
   db.run(`
