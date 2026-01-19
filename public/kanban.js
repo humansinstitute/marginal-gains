@@ -50,20 +50,31 @@ function initTopScrollbar() {
   }
 
   // Sync scroll positions between top scrollbar and kanban board
+  // Use requestAnimationFrame for debouncing to reduce jitter
   let isSyncing = false;
+  let topScrollRAF = null;
+  let boardScrollRAF = null;
 
   topScroll.addEventListener("scroll", () => {
     if (isSyncing) return;
-    isSyncing = true;
-    kanbanBoard.scrollLeft = topScroll.scrollLeft;
-    isSyncing = false;
+    if (topScrollRAF) cancelAnimationFrame(topScrollRAF);
+    topScrollRAF = requestAnimationFrame(() => {
+      isSyncing = true;
+      kanbanBoard.scrollLeft = topScroll.scrollLeft;
+      isSyncing = false;
+      topScrollRAF = null;
+    });
   });
 
   kanbanBoard.addEventListener("scroll", () => {
     if (isSyncing) return;
-    isSyncing = true;
-    topScroll.scrollLeft = kanbanBoard.scrollLeft;
-    isSyncing = false;
+    if (boardScrollRAF) cancelAnimationFrame(boardScrollRAF);
+    boardScrollRAF = requestAnimationFrame(() => {
+      isSyncing = true;
+      topScroll.scrollLeft = kanbanBoard.scrollLeft;
+      isSyncing = false;
+      boardScrollRAF = null;
+    });
   });
 
   // Initial check

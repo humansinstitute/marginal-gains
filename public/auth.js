@@ -659,15 +659,19 @@ const wireSecretToggle = () => {
 
 /**
  * Check for Key Teleport login via URL parameter
- * Flow: ?keyteleport=<blob> -> POST to server -> receive ncryptsec -> prompt PIN -> decrypt -> login
+ * Flow: ?keyteleport=<blob>&ic=<invite_code> -> POST to server -> receive ncryptsec -> prompt PIN -> decrypt -> login -> auto-redeem invite
  */
 const checkKeyTeleport = async () => {
   const url = new URL(window.location.href);
   const blob = url.searchParams.get("keyteleport");
   if (!blob) return false;
 
-  // Clear the URL parameter immediately to prevent replay
+  // Capture invite code before clearing URL params
+  const inviteCode = url.searchParams.get("ic");
+
+  // Clear the URL parameters immediately to prevent replay
   url.searchParams.delete("keyteleport");
+  url.searchParams.delete("ic");
   history.replaceState(null, "", url.pathname + url.search);
 
   authLog.info("Key Teleport: Processing teleport request");
@@ -741,9 +745,38 @@ const checkKeyTeleport = async () => {
 
     // Sign login event and complete login
     const signedEvent = pure.finalizeEvent(buildUnsignedEvent("secret"), secretBytes);
-    await completeLogin("secret", signedEvent);
+    authLog.info("Key Teleport: Completing login");
+    await completeLogin("secret", signedEvent, { skipRedirect: true }); // Don't redirect yet
 
-    authLog.info("Key Teleport: Login complete");
+    // If we have an invite code, auto-redeem it
+    if (inviteCode) {
+      authLog.info("Key Teleport: Auto-redeeming invite code");
+      try {
+        const redeemResponse = await fetch("/api/team-invites/redeem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: inviteCode }),
+        });
+        const redeemData = await redeemResponse.json();
+        if (redeemData.success && redeemData.team) {
+          authLog.info(`Key Teleport: Joined team ${redeemData.team.slug}`);
+          // Redirect to the team chat
+          window.location.href = `/t/${redeemData.team.slug}/chat`;
+          return true;
+        } else if (redeemData.alreadyMember && redeemData.team) {
+          authLog.info(`Key Teleport: Already a member of ${redeemData.team.slug}`);
+          window.location.href = `/t/${redeemData.team.slug}/chat`;
+          return true;
+        } else {
+          authLog.warn("Key Teleport: Invite redemption failed", redeemData.error);
+        }
+      } catch (err) {
+        authLog.error("Key Teleport: Invite redemption error", err);
+      }
+    }
+
+    // Default redirect if no invite code or redemption failed
+    window.location.href = "/";
     return true;
   } catch (err) {
     console.error("Key Teleport failed", err);
@@ -996,7 +1029,9 @@ const signLoginEvent = async (method, supplemental) => {
   throw new Error("Unsupported login method.");
 };
 
-const completeLogin = async (method, event) => {
+const completeLogin = async (method, event, options = {}) => {
+  const { skipRedirect = false } = options;
+
   const response = await fetch("/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1057,6 +1092,11 @@ const completeLogin = async (method, event) => {
   }
 
   await fetchSummaries();
+
+  // If skipRedirect is true, return session without redirecting
+  if (skipRedirect) {
+    return session;
+  }
 
   // Redirect priority: 1) return path, 2) team context, 3) default
   const returnPath = window.__RETURN_PATH__;

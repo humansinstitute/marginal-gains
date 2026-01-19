@@ -108,6 +108,7 @@ import {
   handleRejectKeyRequest,
 } from "./routes/key-requests";
 import { handleKeyTeleport } from "./routes/keyteleport";
+import { handleGetWelcomeGroups, handleGetWelcomeInviteCode } from "./routes/welcome";
 import {
   handleGetPushStatus,
   handleGetVapidPublicKey,
@@ -327,6 +328,10 @@ const server = Bun.serve({
         const teamInvitationsMatch = pathname.match(/^\/api\/teams\/(\d+)\/invitations$/);
         if (teamInvitationsMatch) return handleListTeamInvitations(session, Number(teamInvitationsMatch[1]));
         if (pathname === "/api/team-managers") return handleListTeamManagers(session);
+
+        // Welcome API routes (for fetching user groups and invite codes from Welcome)
+        if (pathname === "/api/welcome/groups") return handleGetWelcomeGroups(session);
+        if (pathname === "/api/welcome/invite-code") return handleGetWelcomeInviteCode(session);
 
         // Team-scoped chat page and SSE events
         const teamChatPageMatch = pathname.match(/^\/t\/([^/]+)\/chat$/);

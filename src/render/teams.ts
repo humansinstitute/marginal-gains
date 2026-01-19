@@ -100,6 +100,19 @@ function renderNoTeams() {
   </div>`;
 }
 
+function renderJoinTeamSection() {
+  return `<section class="teams-section teams-join">
+    <div class="teams-section-header">
+      <h2>Join a Team</h2>
+    </div>
+    <form class="teams-join-form" data-join-team-form>
+      <input type="text" name="code" placeholder="Enter invite code" required />
+      <button type="submit" class="primary">Join</button>
+    </form>
+    <p class="teams-join-error" data-join-error hidden></p>
+  </section>`;
+}
+
 function renderTeamsList(teams: SessionTeamMembership[]) {
   const teamCards = teams
     .map(
@@ -128,18 +141,6 @@ function renderTeamsList(teams: SessionTeamMembership[]) {
   return `<div class="teams-list">${teamCards}</div>`;
 }
 
-function renderJoinTeamSection() {
-  return `<section class="teams-section teams-join">
-    <div class="teams-section-header">
-      <h2>Join a Team</h2>
-    </div>
-    <form class="teams-join-form" data-join-team-form>
-      <input type="text" name="code" placeholder="Enter invite code" required />
-      <button type="submit" class="primary">Join</button>
-    </form>
-    <p class="teams-join-error" data-join-error hidden></p>
-  </section>`;
-}
 
 function renderCreateTeamModal() {
   return `<div class="teams-modal" data-create-team-modal hidden>
