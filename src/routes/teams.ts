@@ -9,6 +9,10 @@
  * - Team settings (for managers)
  */
 
+import { createHash } from "crypto";
+
+import { nip19 } from "nostr-tools";
+
 import { isAdmin } from "../config";
 import { updateSession } from "../db";
 import { getTeamDb } from "../db-router";
@@ -17,6 +21,8 @@ import {
   createTeam,
   getTeam,
   getTeamBySlug,
+  getTeamInvitationByCode,
+  getInviteGroups,
   updateTeam,
   deactivateTeam,
   getUserTeams,
@@ -38,6 +44,7 @@ import {
   addInviteGroups,
 } from "../master-db";
 import { renderTeamsPage, renderTeamSettingsPage } from "../render/teams";
+import { broadcast } from "../services/events";
 import { TeamDatabase } from "../team-db";
 import { isValidImage, processImageFromFile } from "../utils/images";
 
@@ -256,10 +263,101 @@ export async function handleJoinTeam(
     return jsonResponse({ error: "Invite code is required" }, 400);
   }
 
+  // Get full invite details before redemption (needed for group lookup)
+  const invitation = getTeamInvitationByCode(code);
+  if (!invitation) {
+    return jsonResponse({ error: "Invalid invite code" }, 400);
+  }
+
+  const team = getTeam(invitation.team_id);
+  if (!team) {
+    return jsonResponse({ error: "Team not found" }, 404);
+  }
+
+  // Check if already a member
+  if (isUserTeamMember(team.id, session.npub)) {
+    return jsonResponse({
+      success: true,
+      alreadyMember: true,
+      team: {
+        id: team.id,
+        slug: team.slug,
+        displayName: team.display_name,
+      },
+    });
+  }
+
   const result = redeemTeamInvitation(code, session.npub);
 
   if (!result.success) {
     return jsonResponse({ error: result.error }, 400);
+  }
+
+  // Get groups associated with invite and add user to them
+  const inviteGroupsList = getInviteGroups(invitation.id);
+  console.log(`[Teams/Join] Invite ${invitation.id} has ${inviteGroupsList.length} groups:`, inviteGroupsList);
+
+  let keyRequestsCreated = 0;
+  if (inviteGroupsList.length > 0) {
+    try {
+      const db = getTeamDb(team.slug);
+      const teamDb = new TeamDatabase(db);
+
+      // Hash the invite code for tracking
+      const codeHash = createHash("sha256").update(code).digest("hex").slice(0, 16);
+
+      // Get hex pubkey - use session.pubkey if available, otherwise decode from npub
+      let requesterPubkey = session.pubkey || "";
+      if (!requesterPubkey && session.npub) {
+        try {
+          const decoded = nip19.decode(session.npub);
+          if (decoded.type === "npub") {
+            requesterPubkey = decoded.data;
+          }
+        } catch (e) {
+          console.warn("[Teams/Join] Failed to decode npub:", e);
+        }
+      }
+
+      for (const ig of inviteGroupsList) {
+        console.log(`[Teams/Join] Adding user ${session.npub.slice(0, 12)}... to group ${ig.group_id}`);
+        teamDb.addGroupMember(ig.group_id, session.npub);
+
+        // Create key requests for encrypted channels in this group
+        const encryptedChannels = teamDb.getEncryptedChannelsForGroup(ig.group_id);
+        for (const channel of encryptedChannels) {
+          const created = teamDb.createKeyRequest({
+            channelId: channel.id,
+            requesterNpub: session.npub,
+            requesterPubkey,
+            targetNpub: invitation.created_by,
+            inviteCodeHash: codeHash,
+            groupId: ig.group_id,
+          });
+          if (created) {
+            keyRequestsCreated++;
+            console.log(`[Teams/Join] Created key request for channel ${channel.id} (${channel.name})`);
+          }
+        }
+      }
+      console.log(`[Teams/Join] Successfully added user to ${inviteGroupsList.length} groups`);
+
+      // Notify the invite creator via SSE if any key requests were created
+      if (keyRequestsCreated > 0) {
+        console.log(`[Teams/Join] Created ${keyRequestsCreated} key requests, notifying ${invitation.created_by.slice(0, 12)}...`);
+        broadcast(team.slug, db, {
+          type: "key_request:new",
+          data: {
+            requesterNpub: session.npub,
+            count: keyRequestsCreated,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("[Teams/Join] Error adding user to groups:", err);
+    }
+  } else {
+    console.log("[Teams/Join] No groups associated with this invite");
   }
 
   // Update session with new team memberships
