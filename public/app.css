@@ -3397,12 +3397,19 @@ body.chat-page {
   background: var(--muted);
 }
 
+/* Hide top scrollbar on touch devices - they use native scroll */
+@media (pointer: coarse) {
+  .kanban-scroll-top {
+    display: none !important;
+  }
+}
+
 .kanban-board {
   display: flex;
   gap: 1rem;
   min-height: 400px;
   overflow-x: auto;
-  scroll-snap-type: x mandatory;
+  scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 1rem;
   /* Hide native scrollbar - scrolling handled by synced top scrollbar */
@@ -3459,6 +3466,7 @@ body.chat-page {
   max-width: 320px;
   flex-shrink: 0;
   scroll-snap-align: start;
+  scroll-snap-stop: normal;
 }
 .kanban-column-header {
   display: flex;

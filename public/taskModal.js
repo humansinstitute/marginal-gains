@@ -501,6 +501,37 @@ async function handleSubmit(e) {
     title: el.title?.value
   });
 
+  // When creating a subtask, use fetch so we can return to parent modal
+  if (isCreateMode && createParentId) {
+    const formData = new FormData(el.form);
+    try {
+      const res = await fetch(el.form.action, {
+        method: "POST",
+        body: formData,
+        redirect: "manual", // Don't follow redirects
+      });
+
+      // Success (redirect response means it worked)
+      if (res.type === "opaqueredirect" || res.ok || res.status === 302 || res.status === 303) {
+        const parentId = createParentId;
+        closeModal();
+        // Return to parent task modal for quick subtask creation
+        setTimeout(() => {
+          openModalForTaskById(String(parentId));
+        }, 100);
+        return;
+      }
+
+      // Handle errors
+      console.error("[TaskModal] Failed to create subtask:", res.status);
+      alert("Failed to create subtask. Please try again.");
+    } catch (err) {
+      console.error("[TaskModal] Error creating subtask:", err);
+      alert("Failed to create subtask. Please try again.");
+    }
+    return;
+  }
+
   // Submit the form normally (will redirect)
   el.form.submit();
 }
