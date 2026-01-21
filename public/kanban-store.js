@@ -93,6 +93,7 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
     error: null,
     draggedCard: null,
     draggedFromColumn: null,
+    textFilter: '',
 
     // Parent/subtask relationship tracking
     parentMap: {},
@@ -273,12 +274,23 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
     },
 
     // Column helpers
+    getFilteredCards: function(columnName) {
+      var cards = this.columns[columnName] || [];
+      if (!this.textFilter || this.textFilter.trim() === '') {
+        return cards;
+      }
+      var filterText = this.textFilter.toLowerCase().trim();
+      return cards.filter(function(card) {
+        return card.title && card.title.toLowerCase().indexOf(filterText) !== -1;
+      });
+    },
+
     getColumnCount: function(columnName) {
-      return this.columns[columnName] ? this.columns[columnName].length : 0;
+      return this.getFilteredCards(columnName).length;
     },
 
     isColumnEmpty: function(columnName) {
-      return !this.columns[columnName] || this.columns[columnName].length === 0;
+      return this.getFilteredCards(columnName).length === 0;
     },
 
     // Card helpers

@@ -13,7 +13,7 @@
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 import { escapeHtml } from "../utils/html";
 
-import { renderPinModal } from "./components";
+import { renderPinModal, renderUnlockCodeModal } from "./components";
 
 export type InvitePreview = {
   valid: boolean;
@@ -68,6 +68,7 @@ export function renderOnboardingPage({
       </div>
     </div>
     ${renderPinModal()}
+    ${renderUnlockCodeModal()}
   </main>
   ${renderOnboardingScript(inviteCode, preview, isLoggedIn)}
   <script type="module" src="/onboarding.js"></script>

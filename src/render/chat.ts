@@ -1,6 +1,6 @@
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
-import { renderAppMenu, renderPinModal } from "./components";
+import { renderAppMenu, renderPinModal, renderUnlockCodeModal } from "./components";
 
 import type { TeamBranding } from "../routes/app-settings";
 import type { DeepLink, Session } from "../types";
@@ -719,6 +719,7 @@ function renderAuthRequired() {
     </div>
     ${renderQrModal()}
     ${renderPinModal()}
+    ${renderUnlockCodeModal()}
   </section>`;
 }
 

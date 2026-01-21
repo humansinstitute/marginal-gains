@@ -10,7 +10,7 @@ import { getAppName, getFaviconUrl } from "../routes/app-settings";
 import { TeamDatabase } from "../team-db";
 import { escapeHtml } from "../utils/html";
 
-import { renderAppMenu, renderPinModal } from "./components";
+import { renderAppMenu, renderPinModal, renderUnlockCodeModal } from "./components";
 
 import type { TeamBranding } from "../routes/app-settings";
 import type { Session } from "../types";
@@ -206,6 +206,7 @@ function renderCrmContent(
     ${renderActivityModal()}
     ${renderTaskLinkModal()}
     ${renderPinModal()}
+    ${renderUnlockCodeModal()}
   </section>`;
 }
 

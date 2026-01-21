@@ -1,7 +1,7 @@
 import { NOSTR_RELAYS } from "../config";
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
-import { renderPinModal } from "./components";
+import { renderPinModal, renderUnlockCodeModal } from "./components";
 
 export function renderLandingPage() {
   return `<!doctype html>
@@ -15,6 +15,7 @@ ${renderHead()}
     ${renderQrModal()}
     ${renderNostrConnectModal()}
     ${renderPinModal()}
+    ${renderUnlockCodeModal()}
   </main>
   ${renderSessionSeed()}
   <script type="module" src="/app.js?v=3"></script>
