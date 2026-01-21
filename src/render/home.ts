@@ -528,7 +528,7 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
         @dragleave="onDragLeave($event)"
         @drop.prevent="onDrop($event, 'summary')"
       >
-        <template x-for="card in columns.summary" :key="card.id">
+        <template x-for="card in getFilteredCards('summary')" :key="card.id">
           <div
             class="kanban-card is-parent"
             :class="'state-' + card.state"
@@ -583,7 +583,7 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
         @dragleave="onDragLeave($event)"
         @drop.prevent="onDrop($event, '${col.state}')"
       >
-        <template x-for="card in columns['${col.state}']" :key="card.id">
+        <template x-for="card in getFilteredCards('${col.state}')" :key="card.id">
           <div
             class="kanban-card"
             :class="{ 'is-subtask': card.parent_id }"
@@ -639,15 +639,36 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
     </div>`).join("");
 
   return `
-    <div class="kanban-scroll-container">
+    <div
+      class="kanban-scroll-container"
+      x-data="createKanbanStore(window.__INITIAL_TODOS__, ${groupId ?? "null"}, ${teamSlug ? `'${teamSlug}'` : "null"})"
+      x-init="init()"
+    >
+      <!-- Text filter -->
+      <div class="text-filter-bar">
+        <label class="label" for="task-text-filter">Filter by title:</label>
+        <input
+          type="text"
+          id="task-text-filter"
+          class="text-filter-input"
+          placeholder="Type to filter tasks..."
+          x-model="textFilter"
+        />
+        <button
+          type="button"
+          class="clear-text-filter"
+          x-show="textFilter.length > 0"
+          @click="textFilter = ''"
+          title="Clear filter"
+        >&times;</button>
+      </div>
+
       <div class="kanban-scroll-top" data-kanban-scroll-top><div class="kanban-scroll-top-inner"></div></div>
       <div
         class="kanban-board"
         data-kanban-board
         ${groupId ? `data-group-id="${groupId}"` : ""}
         ${teamSlug ? `data-team-slug="${teamSlug}"` : ""}
-        x-data="createKanbanStore(window.__INITIAL_TODOS__, ${groupId ?? "null"}, ${teamSlug ? `'${teamSlug}'` : "null"})"
-        x-init="init()"
       >
         <!-- Sync indicator -->
         <div x-show="syncing" class="sync-indicator">Syncing...</div>
