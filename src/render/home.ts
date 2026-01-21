@@ -3,7 +3,7 @@ import { ALLOWED_STATE_TRANSITIONS, formatPriorityLabel, formatStateLabel } from
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 import { escapeHtml } from "../utils/html";
 
-import { renderAppMenu, renderPinModal } from "./components";
+import { renderAppMenu, renderPinModal, renderUnlockCodeModal } from "./components";
 
 import type { Group, GroupMember, Todo } from "../db";
 import type { TeamBranding } from "../routes/app-settings";
@@ -84,6 +84,7 @@ ${renderHead()}
     ${renderQrModal()}
     ${renderProfileModal()}
     ${renderPinModal()}
+    ${renderUnlockCodeModal()}
     ${renderTaskEditModal(pageState.groupId, pageState.groupMembers, pageState.userGroups)}
   </main>
   ${renderSessionSeed(session, pageState.groupId, pageState.activeTodos)}
@@ -1059,6 +1060,7 @@ ${renderTeamHead(branding)}
     ${renderQrModal()}
     ${renderProfileModal()}
     ${renderPinModal()}
+    ${renderUnlockCodeModal()}
     ${renderTeamTaskEditModal(pageState.groupId, teamSlug)}
   </main>
   ${renderTeamSessionSeed(session, pageState.groupId, teamSlug, pageState.activeTodos)}
