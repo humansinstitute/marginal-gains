@@ -52,7 +52,7 @@ export function renderUnlockCodeModal() {
         type="password"
         class="unlock-input"
         data-unlock-input
-        placeholder="nsec1..."
+        placeholder="paste code"
         autocomplete="off"
         spellcheck="false"
       />
