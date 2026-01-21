@@ -1,6 +1,6 @@
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
-import { renderAppMenu, renderPinModal } from "./components";
+import { renderAppMenu, renderPinModal, renderUnlockCodeModal } from "./components";
 
 import type { Session } from "../types";
 
@@ -14,6 +14,7 @@ ${renderHead()}
     ${renderWalletContent()}
   </main>
   ${renderPinModal()}
+  ${renderUnlockCodeModal()}
   ${renderSessionSeed(session)}
   <script type="module" src="/wallet.js"></script>
 </body>
