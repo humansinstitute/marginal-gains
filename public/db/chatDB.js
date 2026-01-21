@@ -1,26 +1,78 @@
 /**
  * Client-side IndexedDB database using Dexie.js for chat
  * This is for local state caching only - server SQLite remains source of truth
+ *
+ * IMPORTANT: Database is team-scoped to prevent cross-team data leakage.
+ * Each team gets its own IndexedDB database: "MarginalGainsChat-{teamSlug}"
  */
 import { Dexie } from "/lib/dexie.mjs";
+import { getTeamSlug } from "../api.js";
 
-// Create database instance
-export const chatDb = new Dexie("MarginalGainsChat");
+// Cached database instance (per team)
+let _chatDb = null;
+let _currentTeamSlug = null;
 
-// Define schema - indexes enable efficient queries
-chatDb.version(1).stores({
-  // Channels (regular, DM, personal)
-  channels: "id, type, name",
+/**
+ * Get the team-scoped Dexie database instance.
+ * Lazily initializes on first call, and reinitializes if team changes.
+ * @returns {Dexie} The Dexie database instance for the current team
+ * @throws {Error} If no team context is available
+ */
+export function getChatDb() {
+  const teamSlug = getTeamSlug();
 
-  // Messages with compound index for windowed queries
-  messages: "id, channelId, parentId, createdAt, [channelId+createdAt]",
+  if (!teamSlug) {
+    throw new Error("[ChatDB] No team context - cannot access IndexedDB without team slug");
+  }
 
-  // Sync queue for offline message sending
-  syncQueue: "++id, channelId, action, timestamp",
+  // If team changed, close old db and create new one
+  if (_chatDb && _currentTeamSlug !== teamSlug) {
+    console.log(`[ChatDB] Team changed from "${_currentTeamSlug}" to "${teamSlug}" - switching database`);
+    _chatDb.close();
+    _chatDb = null;
+  }
 
-  // Metadata (lastSync per channel, unread counts)
-  meta: "key",
-});
+  if (!_chatDb) {
+    const dbName = `MarginalGainsChat-${teamSlug}`;
+    console.log(`[ChatDB] Initializing database: ${dbName}`);
+
+    _chatDb = new Dexie(dbName);
+    _chatDb.version(1).stores({
+      // Channels (regular, DM, personal)
+      channels: "id, type, name",
+
+      // Messages with compound index for windowed queries
+      messages: "id, channelId, parentId, createdAt, [channelId+createdAt]",
+
+      // Sync queue for offline message sending
+      syncQueue: "++id, channelId, action, timestamp",
+
+      // Metadata (lastSync per channel, unread counts)
+      meta: "key",
+    });
+
+    _currentTeamSlug = teamSlug;
+  }
+
+  return _chatDb;
+}
+
+/**
+ * Delete the old shared database that was used before team isolation.
+ * Call this once on app init to clean up stale cross-team data.
+ */
+export async function deleteOldSharedDatabase() {
+  const OLD_DB_NAME = "MarginalGainsChat";
+  try {
+    // Don't check if exists - just try to delete. Dexie.delete() is safe to call
+    // even if the database doesn't exist.
+    console.log(`[ChatDB] Attempting to delete old shared database: ${OLD_DB_NAME}`);
+    await Dexie.delete(OLD_DB_NAME);
+    console.log(`[ChatDB] Old shared database deletion complete`);
+  } catch (err) {
+    console.warn("[ChatDB] Failed to delete old shared database:", err);
+  }
+}
 
 // ========== Channel Operations ==========
 
@@ -32,9 +84,10 @@ chatDb.version(1).stores({
 export async function hydrateChannels(channels, type = "channel") {
   if (!channels || channels.length === 0) return;
 
-  await chatDb.transaction("rw", chatDb.channels, async () => {
+  const db = getChatDb();
+  await db.transaction("rw", db.channels, async () => {
     // Clear existing channels of this type
-    await chatDb.channels.where("type").equals(type).delete();
+    await db.channels.where("type").equals(type).delete();
 
     // Add new channels
     const toAdd = channels.map((ch) => ({
@@ -42,7 +95,7 @@ export async function hydrateChannels(channels, type = "channel") {
       id: String(ch.id),
       type,
     }));
-    await chatDb.channels.bulkPut(toAdd);
+    await db.channels.bulkPut(toAdd);
   });
 }
 
@@ -52,7 +105,7 @@ export async function hydrateChannels(channels, type = "channel") {
  * @returns {Promise<Array>}
  */
 export async function getChannelsByType(type) {
-  return chatDb.channels.where("type").equals(type).toArray();
+  return getChatDb().channels.where("type").equals(type).toArray();
 }
 
 /**
@@ -61,7 +114,7 @@ export async function getChannelsByType(type) {
  * @returns {Promise<Object|undefined>}
  */
 export async function getChannel(channelId) {
-  return chatDb.channels.get(String(channelId));
+  return getChatDb().channels.get(String(channelId));
 }
 
 /**
@@ -70,7 +123,7 @@ export async function getChannel(channelId) {
  * @param {Object} changes
  */
 export async function updateChannel(channelId, changes) {
-  await chatDb.channels.update(String(channelId), changes);
+  await getChatDb().channels.update(String(channelId), changes);
 }
 
 /**
@@ -79,9 +132,10 @@ export async function updateChannel(channelId, changes) {
  */
 export async function deleteChannel(channelId) {
   const id = String(channelId);
-  await chatDb.transaction("rw", [chatDb.channels, chatDb.messages], async () => {
-    await chatDb.channels.delete(id);
-    await chatDb.messages.where("channelId").equals(id).delete();
+  const db = getChatDb();
+  await db.transaction("rw", [db.channels, db.messages], async () => {
+    await db.channels.delete(id);
+    await db.messages.where("channelId").equals(id).delete();
   });
 }
 
@@ -96,10 +150,11 @@ export async function hydrateMessages(channelId, messages) {
   if (!messages || messages.length === 0) return;
 
   const id = String(channelId);
+  const db = getChatDb();
 
-  await chatDb.transaction("rw", [chatDb.messages, chatDb.meta], async () => {
+  await db.transaction("rw", [db.messages, db.meta], async () => {
     // Clear existing messages for this channel
-    await chatDb.messages.where("channelId").equals(id).delete();
+    await db.messages.where("channelId").equals(id).delete();
 
     // Add new messages
     const toAdd = messages.map((msg) => ({
@@ -109,10 +164,10 @@ export async function hydrateMessages(channelId, messages) {
       parentId: msg.parentId ? String(msg.parentId) : null,
       createdAt: msg.createdAt || msg.created_at,
     }));
-    await chatDb.messages.bulkPut(toAdd);
+    await db.messages.bulkPut(toAdd);
 
     // Update last sync time for this channel
-    await chatDb.meta.put({ key: `lastSync:${id}`, value: Date.now() });
+    await db.meta.put({ key: `lastSync:${id}`, value: Date.now() });
   });
 }
 
@@ -128,7 +183,7 @@ export async function addMessage(message) {
     parentId: message.parentId ? String(message.parentId) : null,
     createdAt: message.createdAt || message.created_at,
   };
-  await chatDb.messages.put(toAdd);
+  await getChatDb().messages.put(toAdd);
 }
 
 /**
@@ -137,7 +192,7 @@ export async function addMessage(message) {
  * @param {Object} changes
  */
 export async function updateMessage(messageId, changes) {
-  await chatDb.messages.update(String(messageId), changes);
+  await getChatDb().messages.update(String(messageId), changes);
 }
 
 /**
@@ -145,7 +200,7 @@ export async function updateMessage(messageId, changes) {
  * @param {string} messageId
  */
 export async function deleteMessage(messageId) {
-  await chatDb.messages.delete(String(messageId));
+  await getChatDb().messages.delete(String(messageId));
 }
 
 /**
@@ -154,7 +209,7 @@ export async function deleteMessage(messageId) {
  * @returns {Promise<Array>}
  */
 export async function getMessagesForChannel(channelId) {
-  const messages = await chatDb.messages
+  const messages = await getChatDb().messages
     .where("channelId")
     .equals(String(channelId))
     .toArray();
@@ -173,7 +228,7 @@ export async function getMessagesForChannel(channelId) {
  * @returns {Promise<Array>}
  */
 export async function getMessagesWindow(channelId, offset, limit) {
-  const messages = await chatDb.messages
+  const messages = await getChatDb().messages
     .where("channelId")
     .equals(String(channelId))
     .toArray();
@@ -193,7 +248,7 @@ export async function getMessagesWindow(channelId, offset, limit) {
  * @returns {Promise<number>}
  */
 export async function getChannelMessageCount(channelId) {
-  return chatDb.messages.where("channelId").equals(String(channelId)).count();
+  return getChatDb().messages.where("channelId").equals(String(channelId)).count();
 }
 
 /**
@@ -202,7 +257,7 @@ export async function getChannelMessageCount(channelId) {
  * @returns {Promise<Array>}
  */
 export async function getThreadMessages(parentId) {
-  const messages = await chatDb.messages
+  const messages = await getChatDb().messages
     .where("parentId")
     .equals(String(parentId))
     .toArray();
@@ -218,7 +273,7 @@ export async function getThreadMessages(parentId) {
  * @returns {Promise<Object|undefined>}
  */
 export async function getMessage(messageId) {
-  return chatDb.messages.get(String(messageId));
+  return getChatDb().messages.get(String(messageId));
 }
 
 // ========== Sync Queue Operations ==========
@@ -228,7 +283,7 @@ export async function getMessage(messageId) {
  * @param {Object} item - { channelId, action, body, parentId, ... }
  */
 export async function addToSyncQueue(item) {
-  await chatDb.syncQueue.add({
+  await getChatDb().syncQueue.add({
     ...item,
     timestamp: Date.now(),
   });
@@ -239,7 +294,7 @@ export async function addToSyncQueue(item) {
  * @returns {Promise<Array>}
  */
 export async function getPendingSyncs() {
-  return chatDb.syncQueue.toArray();
+  return getChatDb().syncQueue.toArray();
 }
 
 /**
@@ -247,7 +302,7 @@ export async function getPendingSyncs() {
  * @param {number} id - Sync queue item ID
  */
 export async function removeSyncItem(id) {
-  await chatDb.syncQueue.delete(id);
+  await getChatDb().syncQueue.delete(id);
 }
 
 // ========== Metadata Operations ==========
@@ -258,7 +313,7 @@ export async function removeSyncItem(id) {
  * @returns {Promise<number|null>}
  */
 export async function getLastSync(channelId) {
-  const meta = await chatDb.meta.get(`lastSync:${channelId}`);
+  const meta = await getChatDb().meta.get(`lastSync:${channelId}`);
   return meta?.value ?? null;
 }
 
@@ -268,7 +323,7 @@ export async function getLastSync(channelId) {
  * @param {number} timestamp
  */
 export async function setLastSync(channelId, timestamp = Date.now()) {
-  await chatDb.meta.put({ key: `lastSync:${channelId}`, value: timestamp });
+  await getChatDb().meta.put({ key: `lastSync:${channelId}`, value: timestamp });
 }
 
 /**
@@ -277,7 +332,7 @@ export async function setLastSync(channelId, timestamp = Date.now()) {
  * @returns {Promise<number>}
  */
 export async function getUnreadCount(channelId) {
-  const meta = await chatDb.meta.get(`unread:${channelId}`);
+  const meta = await getChatDb().meta.get(`unread:${channelId}`);
   return meta?.value ?? 0;
 }
 
@@ -287,7 +342,7 @@ export async function getUnreadCount(channelId) {
  * @param {number} count
  */
 export async function setUnreadCount(channelId, count) {
-  await chatDb.meta.put({ key: `unread:${channelId}`, value: count });
+  await getChatDb().meta.put({ key: `unread:${channelId}`, value: count });
 }
 
 /**
@@ -313,14 +368,15 @@ export async function clearUnread(channelId) {
  * Clear all local chat data (for logout or reset)
  */
 export async function clearAllData() {
-  await chatDb.transaction(
+  const db = getChatDb();
+  await db.transaction(
     "rw",
-    [chatDb.channels, chatDb.messages, chatDb.syncQueue, chatDb.meta],
+    [db.channels, db.messages, db.syncQueue, db.meta],
     async () => {
-      await chatDb.channels.clear();
-      await chatDb.messages.clear();
-      await chatDb.syncQueue.clear();
-      await chatDb.meta.clear();
+      await db.channels.clear();
+      await db.messages.clear();
+      await db.syncQueue.clear();
+      await db.meta.clear();
     }
   );
 }
@@ -331,7 +387,7 @@ export async function clearAllData() {
  * @returns {Promise<boolean>}
  */
 export async function hasChannelData(channelId) {
-  const count = await chatDb.messages
+  const count = await getChatDb().messages
     .where("channelId")
     .equals(String(channelId))
     .count();
