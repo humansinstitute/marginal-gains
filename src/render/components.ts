@@ -39,6 +39,32 @@ export function renderPinModal() {
   </div>`;
 }
 
+/**
+ * Render unlock code modal for Key Teleport v2
+ * User pastes throwaway nsec to decrypt their key
+ */
+export function renderUnlockCodeModal() {
+  return `<div class="unlock-modal-overlay" data-unlock-modal hidden>
+    <div class="unlock-modal">
+      <h2 data-unlock-title>Paste Unlock Code</h2>
+      <p data-unlock-subtitle>Paste the unlock code from your clipboard to complete login</p>
+      <input
+        type="password"
+        class="unlock-input"
+        data-unlock-input
+        placeholder="nsec1..."
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <p class="unlock-error" data-unlock-error hidden>Invalid unlock code. Please try again.</p>
+      <div class="unlock-actions">
+        <button type="button" class="unlock-cancel" data-unlock-cancel>Cancel</button>
+        <button type="button" class="unlock-submit" data-unlock-submit>Unlock</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 export type FeatureVisibility = {
   hideTasks?: boolean;
   hideCrm?: boolean;
