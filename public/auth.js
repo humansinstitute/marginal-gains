@@ -23,6 +23,7 @@ import { clearError, showError } from "./ui.js";
 import { setSession, setSummaries, state } from "./state.js";
 import { encryptWithPin, decryptWithPin, isSecureContext } from "./pinCrypto.js";
 import { initPinModal, promptForPin, promptForNewPin } from "./pinModal.js";
+import { initUnlockModal, promptForUnlockCode, showUnlockError } from "./unlockModal.js";
 
 let autoLoginAttempted = false;
 
@@ -55,6 +56,7 @@ export const initAuth = () => {
   wireNostrConnectModal();
   wireSecretToggle();
   initPinModal();
+  initUnlockModal();
 
   if (state.session) {
     void fetchSummaries();
@@ -659,7 +661,8 @@ const wireSecretToggle = () => {
 
 /**
  * Check for Key Teleport login via URL parameter
- * Flow: ?keyteleport=<blob>&ic=<invite_code> -> POST to server -> receive ncryptsec -> prompt PIN -> decrypt -> login -> auto-redeem invite
+ * Flow v2: ?keyteleport=<blob>&ic=<invite_code> -> POST to server -> receive encryptedNsec+npub
+ *          -> prompt for unlock code (paste nsec) -> NIP-44 decrypt -> login -> auto-redeem invite
  */
 const checkKeyTeleport = async () => {
   const url = new URL(window.location.href);
@@ -681,7 +684,7 @@ const checkKeyTeleport = async () => {
   if (overlay) show(overlay);
 
   try {
-    // Check for secure context before PIN operations
+    // Check for secure context before crypto operations
     if (!isSecureContext()) {
       showError("Key Teleport requires HTTPS. Please access via https:// or localhost.");
       if (overlay) hide(overlay);
@@ -700,47 +703,97 @@ const checkKeyTeleport = async () => {
       throw new Error(data.error || "Key Teleport failed");
     }
 
-    const { ncryptsec } = await response.json();
-    if (!ncryptsec) {
+    const { encryptedNsec, npub } = await response.json();
+    if (!encryptedNsec || !npub) {
       throw new Error("No key received from teleport");
     }
 
-    // Hide overlay before showing PIN prompt
+    // Hide overlay before showing unlock prompt
     if (overlay) hide(overlay);
 
-    authLog.info("Key Teleport: Received ncryptsec, prompting for PIN");
+    authLog.info("Key Teleport: Received encrypted key, prompting for unlock code");
 
-    // Prompt for 6-digit PIN to decrypt the ncryptsec
-    const pin = await promptForPin({
+    // Prompt user to paste the unlock code (throwaway nsec)
+    const unlockCode = await promptForUnlockCode({
       title: "Key Teleport",
-      subtitle: "Enter your 6-digit PIN to unlock",
+      subtitle: "Paste the unlock code from your clipboard",
     });
 
-    if (!pin) {
-      showError("PIN is required to complete key teleport.");
+    if (!unlockCode) {
+      showError("Unlock code is required to complete key teleport.");
       return true;
     }
 
-    // Decrypt the ncryptsec using NIP-49
-    const { nip49, pure, nip19 } = await loadNostrLibs();
+    // Validate unlock code format (should be nsec)
+    if (!unlockCode.startsWith("nsec1")) {
+      showError("Invalid unlock code format.");
+      return true;
+    }
 
+    // Load nostr libraries
+    const { nip44, nip19, pure } = await loadNostrLibs();
+
+    // Decode the throwaway nsec
+    let throwawaySecretKey;
+    try {
+      const decoded = nip19.decode(unlockCode);
+      if (decoded.type !== "nsec") {
+        throw new Error("Invalid nsec");
+      }
+      throwawaySecretKey = decoded.data;
+    } catch (err) {
+      authLog.error("Key Teleport: Invalid unlock code", err);
+      showError("Invalid unlock code. Please try again.");
+      return true;
+    }
+
+    // Decode the user's npub to get their pubkey
+    let userPubkey;
+    try {
+      const decoded = nip19.decode(npub);
+      if (decoded.type !== "npub") {
+        throw new Error("Invalid npub");
+      }
+      userPubkey = decoded.data;
+    } catch (err) {
+      authLog.error("Key Teleport: Invalid npub from server", err);
+      showError("Key Teleport failed: invalid key data.");
+      return true;
+    }
+
+    // Decrypt using NIP-44 with conversation key(throwaway_privkey, user_pubkey)
+    let decryptedNsec;
+    try {
+      const conversationKey = nip44.v2.utils.getConversationKey(
+        bytesToHex(throwawaySecretKey),
+        userPubkey
+      );
+      decryptedNsec = nip44.v2.decrypt(encryptedNsec, conversationKey);
+    } catch (err) {
+      authLog.error("Key Teleport: Decryption failed", err);
+      showError("Invalid unlock code. Please try again.");
+      return true;
+    }
+
+    // Decode the decrypted nsec to get the actual secret key
     let secretBytes;
     try {
-      secretBytes = nip49.decrypt(ncryptsec, pin);
+      const decoded = nip19.decode(decryptedNsec);
+      if (decoded.type !== "nsec") {
+        throw new Error("Decryption produced invalid nsec");
+      }
+      secretBytes = decoded.data;
     } catch (err) {
-      authLog.error("Key Teleport: PIN decryption failed", err);
-      showError("Wrong PIN. Please try again.");
+      authLog.error("Key Teleport: Invalid decrypted key", err);
+      showError("Decryption failed. Invalid unlock code.");
       return true;
     }
 
     const secretHex = bytesToHex(secretBytes);
     authLog.info("Key Teleport: Successfully decrypted key");
 
-    // Store the ncryptsec (already encrypted with PIN) for auto-login
-    localStorage.setItem(ENCRYPTED_SECRET_KEY, ncryptsec);
-    localStorage.setItem(AUTO_LOGIN_METHOD_KEY, "secret");
-
-    // Store unencrypted in sessionStorage for current session operations
+    // Store the secret for session operations
+    // Note: For persistent storage, user can set up PIN-based encryption later
     sessionStorage.setItem(EPHEMERAL_SECRET_KEY, secretHex);
 
     // Sign login event and complete login
