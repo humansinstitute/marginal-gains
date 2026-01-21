@@ -12,7 +12,7 @@
 
 import { liveQuery } from "/lib/dexie.mjs";
 import {
-  chatDb,
+  getChatDb,
   addMessage,
   updateMessage,
   deleteMessage,
@@ -26,8 +26,8 @@ import {
   updateChannel,
   deleteChannel,
   clearAllData,
+  deleteOldSharedDatabase,
 } from "../db/chatDB.js";
-import { getTeamSlug } from "../api.js";
 
 // Store reference (set via init)
 let store = null;
@@ -61,43 +61,15 @@ export async function init(alpineStore, options = {}) {
     currentUserNpub = options.currentUserNpub;
   }
 
-  // Clear stale data if team changed (multi-tenant isolation)
-  await clearCacheOnTeamChange();
+  // Clean up old shared database in background (don't block init)
+  deleteOldSharedDatabase().catch(err =>
+    console.warn("[ChatSync] Failed to delete old shared database:", err)
+  );
 
-  // Setup cross-tab sync
+  // Setup cross-tab sync (now team-scoped via getChatDb())
   setupCrossTabSync();
 
   console.log("[ChatSync] Initialized");
-}
-
-/**
- * Check if the team has changed and clear the Dexie cache if so.
- * This prevents stale data from a previous team from being shown.
- */
-async function clearCacheOnTeamChange() {
-  const currentTeam = getTeamSlug() || "__no_team__";
-  const TEAM_KEY = "currentTeamSlug";
-
-  try {
-    const stored = await chatDb.meta.get(TEAM_KEY);
-    const storedTeam = stored?.value || null;
-
-    if (storedTeam !== currentTeam) {
-      console.log(`[ChatSync] Team changed from "${storedTeam}" to "${currentTeam}" - clearing cache`);
-      await clearAllData();
-      // Store the new team slug
-      await chatDb.meta.put({ key: TEAM_KEY, value: currentTeam });
-    }
-  } catch (err) {
-    console.error("[ChatSync] Error checking team change:", err);
-    // On error, clear cache to be safe
-    try {
-      await clearAllData();
-      await chatDb.meta.put({ key: TEAM_KEY, value: currentTeam });
-    } catch (clearErr) {
-      console.error("[ChatSync] Failed to clear cache:", clearErr);
-    }
-  }
 }
 
 /**
@@ -110,9 +82,9 @@ function setupCrossTabSync() {
   // Cleanup any existing subscriptions
   cleanupSubscriptions();
 
-  // Subscribe to channel changes
+  // Subscribe to channel changes (for cross-tab sync only)
   try {
-    channelSubscription = liveQuery(() => chatDb.channels.toArray()).subscribe({
+    channelSubscription = liveQuery(() => getChatDb().channels.toArray()).subscribe({
       next: (channels) => {
         if (!store) return;
 
@@ -122,9 +94,11 @@ function setupCrossTabSync() {
         const personal = channels.find((c) => c.type === "personal");
 
         // Only update if data has actually changed (compare by serialization)
+        // IMPORTANT: Don't overwrite existing store data with empty IndexedDB data
+        // This prevents wiping server-loaded channels when the team DB is new/empty
         const currentRegularIds = store.channels.map((c) => c.id).join(",");
         const newRegularIds = regular.map((c) => c.id).join(",");
-        if (currentRegularIds !== newRegularIds) {
+        if (currentRegularIds !== newRegularIds && (regular.length > 0 || store.channels.length === 0)) {
           console.log("[ChatSync] Cross-tab: channels updated");
           store.channels = regular.map((c) => ({
             ...c,
@@ -134,7 +108,7 @@ function setupCrossTabSync() {
 
         const currentDmIds = store.dmChannels.map((c) => c.id).join(",");
         const newDmIds = dms.map((c) => c.id).join(",");
-        if (currentDmIds !== newDmIds) {
+        if (currentDmIds !== newDmIds && (dms.length > 0 || store.dmChannels.length === 0)) {
           console.log("[ChatSync] Cross-tab: DM channels updated");
           store.dmChannels = dms.map((c) => ({
             ...c,
@@ -163,7 +137,7 @@ function setupCrossTabSync() {
     messageSubscription = liveQuery(() => {
       const channelId = store?.selectedChannelId;
       if (!channelId) return [];
-      return chatDb.messages.where("channelId").equals(channelId).toArray();
+      return getChatDb().messages.where("channelId").equals(channelId).toArray();
     }).subscribe({
       next: (messages) => {
         if (!store || !store.selectedChannelId) return;
