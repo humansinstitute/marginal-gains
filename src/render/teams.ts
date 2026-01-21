@@ -7,6 +7,8 @@
 import { isAdmin } from "../config";
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
+import { renderPinModal, renderUnlockCodeModal } from "./components";
+
 import type { Team, TeamMembership, TeamInvitation } from "../db-router";
 import type { Session, SessionTeamMembership } from "../types";
 
@@ -29,6 +31,8 @@ ${renderHead("Teams")}
     ${renderTeamsHeader(session)}
     ${renderTeamsContent(session, teams)}
   </main>
+  ${renderPinModal()}
+  ${renderUnlockCodeModal()}
   ${renderTeamsSessionSeed(session, teams)}
   <script type="module" src="/app.js?v=3"></script>
 </body>
