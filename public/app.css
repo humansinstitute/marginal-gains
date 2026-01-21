@@ -1218,6 +1218,100 @@ button.danger:hover {
   color: var(--chat-text);
 }
 
+/* Unlock Code Modal (Key Teleport v2) */
+.unlock-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(8px);
+}
+.unlock-modal-overlay[hidden] {
+  display: none;
+}
+.unlock-modal {
+  background: var(--chat-surface);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  text-align: center;
+  max-width: 400px;
+  width: 90%;
+  color: var(--chat-text);
+}
+.unlock-modal h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  color: var(--chat-text);
+}
+.unlock-modal p {
+  margin: 0 0 1.25rem;
+  color: var(--chat-text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.unlock-input {
+  width: 100%;
+  padding: 0.875rem 1rem;
+  font-size: 1rem;
+  font-family: monospace;
+  border: 1px solid var(--chat-border);
+  border-radius: var(--radius-md);
+  background: var(--chat-bg);
+  color: var(--chat-text);
+  margin-bottom: 1rem;
+  box-sizing: border-box;
+}
+.unlock-input:focus {
+  outline: none;
+  border-color: var(--chat-accent);
+}
+.unlock-input::placeholder {
+  color: var(--chat-text-muted);
+}
+.unlock-error {
+  color: #ef4444;
+  font-size: 0.85rem;
+  margin: -0.5rem 0 1rem;
+}
+.unlock-error[hidden] {
+  display: none;
+}
+.unlock-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+.unlock-cancel {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+  border: 1px solid var(--chat-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--chat-text-muted);
+  cursor: pointer;
+}
+.unlock-cancel:hover {
+  background: var(--chat-border);
+  color: var(--chat-text);
+}
+.unlock-submit {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--chat-accent);
+  color: white;
+  cursor: pointer;
+  font-weight: 500;
+}
+.unlock-submit:hover {
+  opacity: 0.9;
+}
+
 /* Profile modal */
 .profile-modal-overlay {
   position: fixed;
