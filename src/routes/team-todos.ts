@@ -10,7 +10,7 @@ import { isAllowedTransition } from "../domain/todos";
 import { redirect } from "../http";
 import { renderTeamTodosPage } from "../render/home";
 import { TeamDatabase } from "../team-db";
-import { normalizeStateInput, validateTodoForm, validateTodoTitle } from "../validation";
+import { normalizeStateInput, validateTaskInput, validateTodoForm, validateTodoTitle } from "../validation";
 
 import { getTeamBranding } from "./app-settings";
 
@@ -632,4 +632,406 @@ export async function handleTeamCreateSubtask(
       headers: jsonHeaders,
     });
   }
+}
+
+/**
+ * DELETE /t/:slug/api/todos/:id/parent - Detach a subtask from its parent
+ */
+export function handleTeamDetachFromParent(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const db = new TeamDatabase(result.ctx.teamDb);
+  const task = db.getTodoById(id);
+
+  if (!task) {
+    return new Response(JSON.stringify({ error: "Task not found" }), {
+      status: 404,
+      headers: jsonHeaders,
+    });
+  }
+
+  if (!task.parent_id) {
+    return new Response(JSON.stringify({ error: "Task is not a subtask" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+
+  const { task: updated, formerParentId } = db.detachFromParent(id);
+
+  // Check if former parent still has subtasks and update its state
+  let formerParentHasChildren = false;
+  let formerParentState: string | null = null;
+  if (formerParentId) {
+    formerParentHasChildren = db.hasSubtasks(formerParentId);
+    if (formerParentHasChildren) {
+      // Recalculate parent state based on remaining subtasks
+      const updatedParent = db.updateParentStateFromSubtasks(formerParentId);
+      formerParentState = updatedParent?.state ?? null;
+    }
+  }
+
+  return new Response(JSON.stringify({
+    success: true,
+    task: updated,
+    formerParentId,
+    formerParentHasChildren,
+    formerParentState,
+  }), {
+    status: 200,
+    headers: jsonHeaders,
+  });
+}
+
+/**
+ * GET /t/:slug/api/todos/:id/potential-parents - List tasks that can be parents
+ */
+export function handleTeamListPotentialParents(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const db = new TeamDatabase(result.ctx.teamDb);
+  const task = db.getTodoById(id);
+
+  if (!task) {
+    return new Response(JSON.stringify({ error: "Task not found" }), {
+      status: 404,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Can't set parent if task already has a parent or has subtasks
+  if (task.parent_id !== null) {
+    return new Response(JSON.stringify({
+      error: "Task already has a parent",
+      potentialParents: [],
+    }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+
+  if (db.hasSubtasks(id)) {
+    return new Response(JSON.stringify({
+      error: "Task has subtasks and cannot become a subtask",
+      potentialParents: [],
+    }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+
+  const potentialParents = db.listPotentialParents(id);
+
+  return new Response(JSON.stringify({
+    potentialParents: potentialParents.map((p) => ({
+      id: p.id,
+      title: p.title,
+      state: p.state,
+      priority: p.priority,
+    })),
+  }), {
+    status: 200,
+    headers: jsonHeaders,
+  });
+}
+
+/**
+ * PATCH /t/:slug/api/todos/:id/parent - Set a task's parent
+ */
+export async function handleTeamSetParent(
+  req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const db = new TeamDatabase(result.ctx.teamDb);
+
+  let body: { parent_id?: number };
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+
+  const parentId = body.parent_id;
+  if (!parentId || typeof parentId !== "number") {
+    return new Response(JSON.stringify({ error: "parent_id is required" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+
+  const updated = db.setParent(id, parentId);
+
+  if (!updated) {
+    return new Response(JSON.stringify({
+      error: "Cannot set parent. Task may already have a parent, be a parent itself, or target is invalid.",
+    }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Update the new parent's state based on its new subtask
+  db.updateParentStateFromSubtasks(parentId);
+  const parent = db.getTodoById(parentId);
+
+  return new Response(JSON.stringify({
+    success: true,
+    task: updated,
+    parent: parent ? {
+      id: parent.id,
+      title: parent.title,
+      state: parent.state,
+    } : null,
+  }), {
+    status: 200,
+    headers: jsonHeaders,
+  });
+}
+
+/**
+ * POST /t/:slug/api/todos - JSON API for creating a task (live hero form)
+ */
+export async function handleTeamApiTodoCreate(
+  req: Request,
+  session: Session | null,
+  teamSlug: string
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  try {
+    const body = await req.json();
+    const title = validateTodoTitle(String(body.title ?? ""));
+    const tags = String(body.tags ?? "");
+    const groupId = typeof body.group_id === "number" ? body.group_id : null;
+
+    if (!title) {
+      return new Response(JSON.stringify({ error: "Title is required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+
+    const db = new TeamDatabase(result.ctx.teamDb);
+
+    // Check permission for group todo
+    if (groupId) {
+      const membership = result.ctx.session.teamMemberships?.find(
+        (m) => m.teamSlug === teamSlug
+      );
+      if (!canManageTeamGroupTodo(db, result.ctx.session.npub, groupId, membership?.role)) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403,
+          headers: jsonHeaders,
+        });
+      }
+    }
+
+    const todo = db.addTodo(title, result.ctx.session.npub, tags, groupId);
+
+    if (!todo) {
+      return new Response(JSON.stringify({ error: "Failed to create task" }), {
+        status: 500,
+        headers: jsonHeaders,
+      });
+    }
+
+    return new Response(JSON.stringify({ success: true, todo }), {
+      status: 201,
+      headers: jsonHeaders,
+    });
+  } catch (_err) {
+    return new Response(JSON.stringify({ error: "Invalid request" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+}
+
+/**
+ * PATCH /t/:slug/api/todos/:id - JSON API for updating a task
+ */
+export async function handleTeamApiTodoUpdate(
+  req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  try {
+    const body = await req.json();
+    const fields = validateTaskInput(body);
+
+    if (!fields) {
+      return new Response(JSON.stringify({ error: "Invalid task data" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+
+    const db = new TeamDatabase(result.ctx.teamDb);
+
+    // Verify the todo exists
+    const existing = db.getTodoById(id);
+    if (!existing) {
+      return new Response(JSON.stringify({ error: "Task not found" }), {
+        status: 404,
+        headers: jsonHeaders,
+      });
+    }
+
+    // Use the task's actual group_id from the database
+    const groupId = existing.group_id;
+
+    if (groupId && Number.isInteger(groupId) && groupId > 0) {
+      const membership = result.ctx.session.teamMemberships?.find(
+        (m) => m.teamSlug === teamSlug
+      );
+      if (!canManageTeamGroupTodo(db, result.ctx.session.npub, groupId, membership?.role)) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403,
+          headers: jsonHeaders,
+        });
+      }
+      db.updateGroupTodo({
+        id,
+        groupId,
+        title: fields.title,
+        description: fields.description,
+        priority: fields.priority,
+        state: fields.state,
+        scheduledFor: fields.scheduled_for,
+        tags: fields.tags,
+        assignedTo: fields.assigned_to,
+      });
+    } else {
+      db.updateTodo({
+        id,
+        owner: existing.owner || result.ctx.session.npub,
+        title: fields.title,
+        description: fields.description,
+        priority: fields.priority,
+        state: fields.state,
+        scheduledFor: fields.scheduled_for,
+        tags: fields.tags,
+        assignedTo: fields.assigned_to,
+      });
+    }
+
+    // Propagate tags to children if this is a parent task
+    if (db.hasSubtasks(id)) {
+      db.propagateTagsToChildren(id, fields.tags);
+    }
+
+    // Return the updated task
+    const updated = db.getTodoById(id);
+    return new Response(JSON.stringify({ success: true, todo: updated }), {
+      status: 200,
+      headers: jsonHeaders,
+    });
+  } catch (_err) {
+    return new Response(JSON.stringify({ error: "Invalid request" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+}
+
+/**
+ * DELETE /t/:slug/api/todos/:id - JSON API for deleting a task
+ */
+export function handleTeamApiTodoDelete(
+  _req: Request,
+  session: Session | null,
+  teamSlug: string,
+  id: number
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: jsonHeaders,
+    });
+  }
+
+  const db = new TeamDatabase(result.ctx.teamDb);
+
+  // Verify the todo exists
+  const existing = db.getTodoById(id);
+  if (!existing) {
+    return new Response(JSON.stringify({ error: "Task not found" }), {
+      status: 404,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Use the task's actual group_id from the database
+  const groupId = existing.group_id;
+
+  if (groupId && Number.isInteger(groupId) && groupId > 0) {
+    const membership = result.ctx.session.teamMemberships?.find(
+      (m) => m.teamSlug === teamSlug
+    );
+    if (!canManageTeamGroupTodo(db, result.ctx.session.npub, groupId, membership?.role)) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: jsonHeaders,
+      });
+    }
+    db.deleteGroupTodo(id, groupId);
+  } else {
+    db.deleteTodo(id, existing.owner || result.ctx.session.npub);
+  }
+
+  return new Response(JSON.stringify({ success: true, id }), {
+    status: 200,
+    headers: jsonHeaders,
+  });
 }

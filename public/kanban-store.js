@@ -100,8 +100,19 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
     childMap: {},
 
     init: function() {
+      var self = this;
+
+      // Expose store globally for other modules (e.g., taskModal)
+      window.__kanbanStore = this;
+
       // Build parent/child relationships for progress tracking
       this.buildRelationships();
+
+      // Intercept hero form submission for live updates
+      this.setupHeroForm();
+
+      // Intercept state button forms for live updates
+      this.setupStateButtonForms();
 
       console.log('[KanbanStore] Initialized - columns:', {
         summary: this.columns.summary.length,
@@ -110,6 +121,386 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
         in_progress: this.columns.in_progress.length,
         review: this.columns.review.length,
         done: this.columns.done.length
+      });
+    },
+
+    // Set up hero form interception for live task creation
+    setupHeroForm: function() {
+      var self = this;
+      var heroForm = document.querySelector('.todo-form');
+      var heroInput = document.querySelector('[data-hero-input]');
+
+      if (!heroForm || !heroInput) {
+        console.log('[KanbanStore] Hero form not found, skipping setup');
+        return;
+      }
+
+      heroForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        var title = heroInput.value.trim();
+        if (!title) return;
+
+        // Clear input immediately for better UX
+        heroInput.value = '';
+        heroInput.focus();
+
+        // Add task via API
+        self.addTask(title);
+      });
+
+      console.log('[KanbanStore] Hero form intercepted for live updates');
+    },
+
+    // Set up state button form interception for live state changes
+    setupStateButtonForms: function() {
+      var self = this;
+
+      // Find all state change forms (matching the pattern /todos/:id/state or /t/:slug/todos/:id/state)
+      var stateForms = document.querySelectorAll('form[action*="/todos/"][action*="/state"]');
+
+      if (stateForms.length === 0) {
+        console.log('[KanbanStore] No state forms found, skipping setup');
+        return;
+      }
+
+      stateForms.forEach(function(form) {
+        form.addEventListener('submit', function(event) {
+          event.preventDefault();
+
+          // Extract task ID from form action URL
+          var actionUrl = form.getAttribute('action');
+          var match = actionUrl.match(/\/todos\/(\d+)\/state/);
+          if (!match) {
+            console.error('[KanbanStore] Could not extract task ID from:', actionUrl);
+            form.submit(); // Fallback to normal submit
+            return;
+          }
+
+          var taskId = Number(match[1]);
+          var stateInput = form.querySelector('input[name="state"]');
+          var newState = stateInput ? stateInput.value : null;
+
+          if (!newState) {
+            console.error('[KanbanStore] Could not find state input');
+            form.submit();
+            return;
+          }
+
+          console.log('[KanbanStore] Intercepted state form:', { taskId: taskId, newState: newState });
+
+          // Use moveTask for live update
+          self.moveTask(taskId, newState).then(function(success) {
+            if (!success) {
+              // Fallback to form submit if live update failed
+              form.submit();
+            }
+          });
+        });
+      });
+
+      console.log('[KanbanStore] Intercepted', stateForms.length, 'state button forms');
+    },
+
+    // Add a new task via API and update the board
+    addTask: async function(title, tags) {
+      var self = this;
+      tags = tags || '';
+
+      // Generate temporary ID for optimistic update
+      var tempId = 'temp-' + Date.now();
+      var optimisticTask = {
+        id: tempId,
+        title: title,
+        owner: '', // Will be set by server
+        description: '',
+        priority: 'sand',
+        state: 'new',
+        done: 0,
+        deleted: 0,
+        created_at: new Date().toISOString(),
+        scheduled_for: null,
+        tags: tags,
+        group_id: self.groupId,
+        assigned_to: null,
+        position: null,
+        parent_id: null,
+        isParent: false,
+        _optimistic: true
+      };
+
+      // Optimistically add to 'new' column
+      self.columns['new'].unshift(optimisticTask);
+      console.log('[KanbanStore] Optimistically added task:', title);
+
+      // Sync to server
+      self.syncing = true;
+      try {
+        var apiUrl = self.teamSlug
+          ? '/t/' + self.teamSlug + '/api/todos'
+          : '/api/todos';
+
+        var body = { title: title, tags: tags };
+        if (self.groupId) body.group_id = self.groupId;
+
+        var res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (!res.ok) {
+          var errorData = await res.json().catch(function() { return { error: 'Unknown error' }; });
+          console.error('[KanbanStore] Failed to create task:', errorData);
+          throw new Error(errorData.error || 'Failed to create task');
+        }
+
+        var data = await res.json();
+        console.log('[KanbanStore] Task created on server:', data.todo);
+
+        // Replace optimistic task with real one
+        var idx = self.columns['new'].findIndex(function(c) { return c.id === tempId; });
+        if (idx > -1) {
+          self.columns['new'][idx] = data.todo;
+        }
+      } catch (err) {
+        console.error('[KanbanStore] Error creating task:', err);
+        // Remove optimistic task on error
+        var idx = self.columns['new'].findIndex(function(c) { return c.id === tempId; });
+        if (idx > -1) {
+          self.columns['new'].splice(idx, 1);
+        }
+        self.error = err.message || 'Failed to create task';
+        // Clear error after a few seconds
+        setTimeout(function() { self.error = null; }, 3000);
+      }
+      self.syncing = false;
+    },
+
+    // Update an existing task via API and update the board
+    updateTask: async function(id, fields) {
+      var self = this;
+
+      // Find the task in the board
+      var task = self.findTodoById(id);
+      if (!task) {
+        console.error('[KanbanStore] Task not found for update:', id);
+        return false;
+      }
+
+      // Store old values for rollback
+      var oldValues = {};
+      Object.keys(fields).forEach(function(key) {
+        oldValues[key] = task[key];
+      });
+
+      // Optimistic update
+      Object.keys(fields).forEach(function(key) {
+        task[key] = fields[key];
+      });
+      console.log('[KanbanStore] Optimistically updated task:', id, fields);
+
+      // If state changed, move the card to the new column
+      if (fields.state && fields.state !== oldValues.state) {
+        self.moveTaskInBoard(id, oldValues.state, fields.state);
+      }
+
+      // Sync to server
+      self.syncing = true;
+      try {
+        var apiUrl = self.teamSlug
+          ? '/t/' + self.teamSlug + '/api/todos/' + id
+          : '/api/todos/' + id;
+
+        var res = await fetch(apiUrl, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fields)
+        });
+
+        if (!res.ok) {
+          var errorData = await res.json().catch(function() { return { error: 'Unknown error' }; });
+          console.error('[KanbanStore] Failed to update task:', errorData);
+          throw new Error(errorData.error || 'Failed to update task');
+        }
+
+        var data = await res.json();
+        console.log('[KanbanStore] Task updated on server:', data.todo);
+
+        // Update with server response
+        if (data.todo) {
+          Object.keys(data.todo).forEach(function(key) {
+            task[key] = data.todo[key];
+          });
+        }
+        return true;
+      } catch (err) {
+        console.error('[KanbanStore] Error updating task:', err);
+        // Rollback optimistic update
+        Object.keys(oldValues).forEach(function(key) {
+          task[key] = oldValues[key];
+        });
+        // Rollback column move if state changed
+        if (fields.state && fields.state !== oldValues.state) {
+          self.moveTaskInBoard(id, fields.state, oldValues.state);
+        }
+        self.error = err.message || 'Failed to update task';
+        setTimeout(function() { self.error = null; }, 3000);
+        return false;
+      } finally {
+        self.syncing = false;
+      }
+    },
+
+    // Remove a task via API and remove from the board
+    removeTask: async function(id) {
+      var self = this;
+
+      // Find the task and its column
+      var task = self.findTodoById(id);
+      if (!task) {
+        console.error('[KanbanStore] Task not found for removal:', id);
+        return false;
+      }
+
+      var columnName = task.isParent ? 'summary' : task.state;
+      var column = self.columns[columnName];
+      var taskIndex = column.findIndex(function(c) { return c.id === id; });
+
+      if (taskIndex === -1) {
+        console.error('[KanbanStore] Task not found in column:', columnName);
+        return false;
+      }
+
+      // Optimistically remove from board
+      var removedTask = column.splice(taskIndex, 1)[0];
+      console.log('[KanbanStore] Optimistically removed task:', id);
+
+      // Sync to server
+      self.syncing = true;
+      try {
+        var apiUrl = self.teamSlug
+          ? '/t/' + self.teamSlug + '/api/todos/' + id
+          : '/api/todos/' + id;
+
+        var res = await fetch(apiUrl, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!res.ok) {
+          var errorData = await res.json().catch(function() { return { error: 'Unknown error' }; });
+          console.error('[KanbanStore] Failed to delete task:', errorData);
+          throw new Error(errorData.error || 'Failed to delete task');
+        }
+
+        console.log('[KanbanStore] Task deleted on server:', id);
+
+        // If this was a parent task, also remove subtasks from the board
+        if (removedTask.isParent && self.parentMap[id]) {
+          self.parentMap[id].forEach(function(childId) {
+            self.removeTaskFromBoard(childId);
+          });
+        }
+        return true;
+      } catch (err) {
+        console.error('[KanbanStore] Error deleting task:', err);
+        // Rollback: add task back to column
+        column.splice(taskIndex, 0, removedTask);
+        self.error = err.message || 'Failed to delete task';
+        setTimeout(function() { self.error = null; }, 3000);
+        return false;
+      } finally {
+        self.syncing = false;
+      }
+    },
+
+    // Move a task to a new state column via API
+    moveTask: async function(id, newState) {
+      var self = this;
+
+      var task = self.findTodoById(id);
+      if (!task) {
+        console.error('[KanbanStore] Task not found for move:', id);
+        return false;
+      }
+
+      var oldState = task.state;
+      if (oldState === newState) return true;
+
+      // Optimistic update
+      self.moveTaskInBoard(id, task.isParent ? 'summary' : oldState, task.isParent ? 'summary' : newState);
+      task.state = newState;
+      console.log('[KanbanStore] Optimistically moved task:', id, 'from', oldState, 'to', newState);
+
+      // Sync to server
+      self.syncing = true;
+      try {
+        var apiUrl = self.teamSlug
+          ? '/t/' + self.teamSlug + '/api/todos/' + id + '/state'
+          : '/api/todos/' + id + '/state';
+
+        var body = { state: newState };
+        if (self.groupId) body.group_id = self.groupId;
+
+        var res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (!res.ok) {
+          var errorData = await res.json().catch(function() { return { error: 'Unknown error' }; });
+          console.error('[KanbanStore] Failed to move task:', errorData);
+          throw new Error(errorData.error || 'Failed to change state');
+        }
+
+        console.log('[KanbanStore] Task state changed on server:', id, newState);
+
+        // Update parent progress if this is a subtask
+        if (task.parent_id) {
+          self.updateParentProgress(task.parent_id);
+        }
+        return true;
+      } catch (err) {
+        console.error('[KanbanStore] Error moving task:', err);
+        // Rollback
+        self.moveTaskInBoard(id, task.isParent ? 'summary' : newState, task.isParent ? 'summary' : oldState);
+        task.state = oldState;
+        self.error = err.message || 'Failed to change state';
+        setTimeout(function() { self.error = null; }, 3000);
+        return false;
+      } finally {
+        self.syncing = false;
+      }
+    },
+
+    // Helper: move task between columns in the board (no API call)
+    moveTaskInBoard: function(id, fromColumn, toColumn) {
+      var self = this;
+      if (fromColumn === toColumn) return;
+
+      var fromCol = self.columns[fromColumn];
+      var toCol = self.columns[toColumn];
+      if (!fromCol || !toCol) return;
+
+      var idx = fromCol.findIndex(function(c) { return c.id === id; });
+      if (idx > -1) {
+        var task = fromCol.splice(idx, 1)[0];
+        toCol.unshift(task);
+      }
+    },
+
+    // Helper: remove task from board without API call (for cascading deletes)
+    removeTaskFromBoard: function(id) {
+      var self = this;
+      ['summary', 'new', 'ready', 'in_progress', 'review', 'done'].some(function(col) {
+        var column = self.columns[col];
+        var idx = column.findIndex(function(c) { return c.id === id; });
+        if (idx > -1) {
+          column.splice(idx, 1);
+          return true;
+        }
+        return false;
       });
     },
 
@@ -327,10 +718,197 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
         }
       });
 
+      // Move any tasks that are now parents to the summary column
+      var parentIds = Object.keys(self.parentMap);
+      parentIds.forEach(function(parentId) {
+        var id = Number(parentId);
+        // Check if parent is not already in summary
+        var inSummary = self.columns.summary.some(function(t) { return t.id === id; });
+        if (!inSummary) {
+          // Find and move the parent task to summary
+          self.promoteToParent(id);
+        }
+      });
+
       // Calculate progress for parent tasks
       self.columns.summary.forEach(function(parent) {
         parent.subtaskProgress = self.getSubtaskProgress(parent.id);
       });
+    },
+
+    // Promote a task to parent status (move to summary column)
+    promoteToParent: function(taskId) {
+      var self = this;
+      var task = null;
+      var sourceColumn = null;
+
+      // Find the task in non-summary columns
+      ['new', 'ready', 'in_progress', 'review', 'done'].some(function(col) {
+        var column = self.columns[col];
+        var idx = column.findIndex(function(t) { return t.id === taskId; });
+        if (idx > -1) {
+          task = column.splice(idx, 1)[0];
+          sourceColumn = col;
+          return true;
+        }
+        return false;
+      });
+
+      if (task) {
+        task.isParent = true;
+        self.columns.summary.unshift(task);
+        console.log('[KanbanStore] Promoted task to parent:', taskId, 'from', sourceColumn);
+      }
+    },
+
+    // Demote a parent back to regular task (move from summary to state column)
+    demoteFromParent: function(parentId) {
+      var self = this;
+      var idx = self.columns.summary.findIndex(function(t) { return t.id === parentId; });
+      if (idx === -1) return;
+
+      var task = self.columns.summary.splice(idx, 1)[0];
+      task.isParent = false;
+
+      // Move to the appropriate state column
+      var targetColumn = task.state || 'new';
+      if (self.columns[targetColumn]) {
+        self.columns[targetColumn].unshift(task);
+        console.log('[KanbanStore] Demoted parent to regular task:', parentId, 'to', targetColumn);
+      }
+    },
+
+    // Detach a subtask from its parent via API
+    detachFromParent: async function(taskId) {
+      var self = this;
+
+      var task = self.findTodoById(taskId);
+      if (!task || !task.parent_id) {
+        console.error('[KanbanStore] Task not found or not a subtask:', taskId);
+        return false;
+      }
+
+      var formerParentId = task.parent_id;
+
+      // Optimistic update
+      task.parent_id = null;
+      console.log('[KanbanStore] Optimistically detached task from parent:', taskId);
+
+      // Sync to server
+      self.syncing = true;
+      try {
+        var apiUrl = self.teamSlug
+          ? '/t/' + self.teamSlug + '/api/todos/' + taskId + '/parent'
+          : '/api/todos/' + taskId + '/parent';
+
+        var res = await fetch(apiUrl, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!res.ok) {
+          var errorData = await res.json().catch(function() { return { error: 'Unknown error' }; });
+          console.error('[KanbanStore] Failed to detach from parent:', errorData);
+          throw new Error(errorData.error || 'Failed to detach from parent');
+        }
+
+        var data = await res.json();
+        console.log('[KanbanStore] Task detached on server:', data);
+
+        // Update relationships and check if parent needs demotion
+        self.buildRelationships();
+
+        // If former parent has no more children, demote it
+        if (formerParentId && !data.formerParentHasChildren) {
+          self.demoteFromParent(formerParentId);
+        } else if (formerParentId && data.formerParentHasChildren) {
+          // Parent still has children - update its state from server response
+          var parent = self.columns.summary.find(function(p) { return p.id === formerParentId; });
+          if (parent) {
+            if (data.formerParentState) {
+              var oldState = parent.state;
+              parent.state = data.formerParentState;
+              console.log('[KanbanStore] Updated parent state after subtask detach:', { parentId: formerParentId, oldState: oldState, newState: data.formerParentState });
+            }
+            // Update progress squares
+            parent.subtaskProgress = self.getSubtaskProgress(formerParentId);
+          }
+        }
+
+        return true;
+      } catch (err) {
+        console.error('[KanbanStore] Error detaching from parent:', err);
+        // Rollback
+        task.parent_id = formerParentId;
+        self.error = err.message || 'Failed to detach from parent';
+        setTimeout(function() { self.error = null; }, 3000);
+        return false;
+      } finally {
+        self.syncing = false;
+      }
+    },
+
+    // Set a task's parent, making it a subtask
+    setParent: async function(taskId, parentId) {
+      var self = this;
+
+      var task = self.findTodoById(taskId);
+      if (!task) {
+        console.error('[KanbanStore] Task not found:', taskId);
+        return false;
+      }
+
+      if (task.parent_id) {
+        console.error('[KanbanStore] Task already has a parent:', taskId);
+        return false;
+      }
+
+      // Optimistic update
+      task.parent_id = parentId;
+      console.log('[KanbanStore] Optimistically set parent:', { taskId: taskId, parentId: parentId });
+
+      // Sync to server
+      self.syncing = true;
+      try {
+        var apiUrl = self.teamSlug
+          ? '/t/' + self.teamSlug + '/api/todos/' + taskId + '/parent'
+          : '/api/todos/' + taskId + '/parent';
+
+        var res = await fetch(apiUrl, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parent_id: parentId })
+        });
+
+        if (!res.ok) {
+          var errorData = await res.json().catch(function() { return { error: 'Unknown error' }; });
+          console.error('[KanbanStore] Failed to set parent:', errorData);
+          throw new Error(errorData.error || 'Failed to set parent');
+        }
+
+        var data = await res.json();
+        console.log('[KanbanStore] Parent set on server:', data);
+
+        // Rebuild relationships to update parentMap
+        self.buildRelationships();
+
+        // Promote the parent to the summary column if not already there
+        self.promoteToParent(parentId);
+
+        // Update parent's progress squares
+        self.updateParentProgress(parentId);
+
+        return true;
+      } catch (err) {
+        console.error('[KanbanStore] Error setting parent:', err);
+        // Rollback
+        task.parent_id = null;
+        self.error = err.message || 'Failed to set parent';
+        setTimeout(function() { self.error = null; }, 3000);
+        return false;
+      } finally {
+        self.syncing = false;
+      }
     },
 
     getSubtaskProgress: function(parentId) {

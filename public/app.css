@@ -4190,6 +4190,23 @@ body.chat-page {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.subtask-item-detach {
+  padding: 0.125rem 0.375rem;
+  font-size: 1rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.subtask-item:hover .subtask-item-detach {
+  opacity: 1;
+}
+.subtask-item-detach:hover {
+  color: #dc2626;
+}
 .task-modal-add-subtask {
   margin-top: 0.75rem;
   width: 100%;
@@ -4207,7 +4224,7 @@ body.chat-page {
 }
 
 /* Parent task indicator when editing a subtask */
-.task-modal-parent {
+.task-modal-parent-wrapper {
   background: var(--bg);
   padding: 0.5rem 0.75rem;
   border-radius: var(--radius-sm);
@@ -4216,11 +4233,6 @@ body.chat-page {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.task-modal-parent:hover {
-  background: var(--surface);
 }
 .task-modal-parent-label {
   color: var(--muted);
@@ -4231,6 +4243,141 @@ body.chat-page {
 .task-modal-parent-title {
   color: #9333ea;
   font-weight: 500;
+  flex: 1;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.task-modal-parent-title:hover {
+  opacity: 0.8;
+}
+.task-modal-detach-parent {
+  padding: 0.125rem 0.375rem;
+  font-size: 1rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.task-modal-detach-parent:hover {
+  color: #dc2626;
+}
+
+/* Assign parent button (when no parent) */
+.task-modal-assign-parent {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.task-modal-assign-parent:hover {
+  border-color: var(--text);
+  color: var(--text);
+  background: var(--surface);
+}
+
+/* Parent Picker Modal */
+.parent-picker-modal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  width: min(400px, 90%);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+}
+.parent-picker-modal[hidden] {
+  display: none;
+}
+.parent-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+.parent-picker-close {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color 0.15s;
+}
+.parent-picker-close:hover {
+  color: var(--text);
+}
+.parent-picker-search {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.parent-picker-search input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.parent-picker-search input:focus {
+  outline: none;
+  border-color: var(--link);
+}
+.parent-picker-list {
+  overflow-y: auto;
+  max-height: 300px;
+  padding: 0.5rem;
+}
+.parent-picker-loading,
+.parent-picker-error,
+.parent-picker-empty {
+  padding: 1rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.parent-picker-error {
+  color: #dc2626;
+}
+.parent-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.parent-picker-item:hover {
+  background: var(--bg);
+}
+.parent-picker-item-state {
+  font-size: 0.7rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.parent-picker-item-title {
+  flex: 1;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ========== Task-Thread Linking Styles ========== */

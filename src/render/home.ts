@@ -975,9 +975,11 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
         <label>Description
           <textarea name="description" data-task-modal-description rows="8"></textarea>
         </label>
-        <div class="task-modal-parent" data-task-modal-parent hidden>
+        <div class="task-modal-parent-wrapper" data-task-modal-parent-wrapper hidden>
           <span class="task-modal-parent-label">Parent:</span>
-          <span class="task-modal-parent-title" data-task-modal-parent-title></span>
+          <span class="task-modal-parent-title" data-task-modal-parent-title hidden></span>
+          <button type="button" class="task-modal-detach-parent" data-task-modal-detach-parent title="Remove from parent" hidden>&times;</button>
+          <button type="button" class="task-modal-assign-parent" data-task-modal-assign-parent hidden>(none) - click to assign</button>
         </div>
         <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
           <div class="task-modal-subtasks-header">Subtasks</div>
@@ -1030,6 +1032,18 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
           </div>
         </div>
       </form>
+      <div class="parent-picker-modal" data-parent-picker hidden>
+        <div class="parent-picker-header">
+          <span>Select Parent Task</span>
+          <button type="button" class="parent-picker-close" data-parent-picker-close>&times;</button>
+        </div>
+        <div class="parent-picker-search">
+          <input type="text" placeholder="Filter tasks..." data-parent-picker-filter />
+        </div>
+        <div class="parent-picker-list" data-parent-picker-list>
+          <div class="parent-picker-loading">Loading...</div>
+        </div>
+      </div>
     </div>
   </div>`;
 }
@@ -1499,9 +1513,11 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
         <label>Description
           <textarea name="description" data-task-modal-description rows="8"></textarea>
         </label>
-        <div class="task-modal-parent" data-task-modal-parent hidden>
+        <div class="task-modal-parent-wrapper" data-task-modal-parent-wrapper hidden>
           <span class="task-modal-parent-label">Parent:</span>
-          <span class="task-modal-parent-title" data-task-modal-parent-title></span>
+          <span class="task-modal-parent-title" data-task-modal-parent-title hidden></span>
+          <button type="button" class="task-modal-detach-parent" data-task-modal-detach-parent title="Remove from parent" hidden>&times;</button>
+          <button type="button" class="task-modal-assign-parent" data-task-modal-assign-parent hidden>(none) - click to assign</button>
         </div>
         <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
           <div class="task-modal-subtasks-header">Subtasks</div>
@@ -1549,6 +1565,18 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
           </div>
         </div>
       </form>
+      <div class="parent-picker-modal" data-parent-picker hidden>
+        <div class="parent-picker-header">
+          <span>Select Parent Task</span>
+          <button type="button" class="parent-picker-close" data-parent-picker-close>&times;</button>
+        </div>
+        <div class="parent-picker-search">
+          <input type="text" placeholder="Filter tasks..." data-parent-picker-filter />
+        </div>
+        <div class="parent-picker-list" data-parent-picker-list>
+          <div class="parent-picker-loading">Loading...</div>
+        </div>
+      </div>
     </div>
   </div>`;
 }

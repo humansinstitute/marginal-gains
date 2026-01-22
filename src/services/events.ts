@@ -93,7 +93,6 @@ export function registerClient(
     connectedAt: new Date(),
   });
 
-  console.log(`[SSE] Client connected: ${npub.slice(0, 12)}... to team '${teamSlug}' (${getTotalClientCount()} total)`);
 }
 
 /**
@@ -108,7 +107,6 @@ export function unregisterClient(teamSlug: string, npub: string): void {
       connectedClients.delete(teamSlug);
     }
   }
-  console.log(`[SSE] Client disconnected: ${npub.slice(0, 12)}... from team '${teamSlug}' (${getTotalClientCount()} total)`);
 }
 
 /**
