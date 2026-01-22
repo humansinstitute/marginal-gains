@@ -339,6 +339,55 @@ export class TeamDatabase {
     this.db.run("UPDATE todos SET parent_id = NULL WHERE parent_id = ?", [parentId]);
   }
 
+  /**
+   * Detach a single subtask from its parent, making it a regular task.
+   * Returns the updated task and the former parent ID.
+   */
+  detachFromParent(subtaskId: number): { task: Todo | null; formerParentId: number | null } {
+    const task = this.getTodoById(subtaskId);
+    if (!task || !task.parent_id) {
+      return { task, formerParentId: null };
+    }
+    const formerParentId = task.parent_id;
+    this.db.run("UPDATE todos SET parent_id = NULL WHERE id = ?", [subtaskId]);
+    const updated = this.getTodoById(subtaskId);
+    return { task: updated, formerParentId };
+  }
+
+  /**
+   * Set a task's parent, making it a subtask.
+   * Returns null if the operation is invalid (e.g., task is already a parent, target is a subtask).
+   */
+  setParent(taskId: number, parentId: number): Todo | null {
+    const task = this.getTodoById(taskId);
+    const parent = this.getTodoById(parentId);
+
+    // Validate the operation
+    if (!task || !parent) return null;
+    if (task.id === parent.id) return null; // Can't be own parent
+    if (task.parent_id !== null) return null; // Already has a parent
+    if (parent.parent_id !== null) return null; // Parent is itself a subtask (2-level max)
+    if (this.hasSubtasks(taskId)) return null; // Task has subtasks (can't become subtask)
+
+    this.db.run("UPDATE todos SET parent_id = ? WHERE id = ?", [parentId, taskId]);
+    return this.getTodoById(taskId);
+  }
+
+  /**
+   * List tasks that can be potential parents for the given task.
+   * A task can be a parent if: not deleted, not archived, not a subtask itself, and not the task.
+   */
+  listPotentialParents(excludeTaskId: number): Todo[] {
+    return this.db.query<Todo, [number]>(
+      `SELECT * FROM todos
+       WHERE deleted = 0
+         AND state != 'archived'
+         AND parent_id IS NULL
+         AND id != ?
+       ORDER BY updated_at DESC`
+    ).all(excludeTaskId);
+  }
+
   getSubtaskProgress(parentId: number): { total: number; done: number; inProgress: number } {
     const subtasks = this.listSubtasks(parentId);
     return {

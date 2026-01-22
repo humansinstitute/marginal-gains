@@ -28,11 +28,18 @@ const el = {
   linksSection: null,
   linksList: null,
   // Subtask elements
-  parentSection: null,
+  parentWrapper: null,
   parentTitle: null,
+  detachParentBtn: null,
+  assignParentBtn: null,
   subtasksSection: null,
   subtasksList: null,
   addSubtaskBtn: null,
+  // Parent picker elements
+  parentPicker: null,
+  parentPickerClose: null,
+  parentPickerFilter: null,
+  parentPickerList: null,
 };
 
 export function initTaskModal() {
@@ -58,11 +65,18 @@ export function initTaskModal() {
   el.linksSection = document.querySelector("[data-task-modal-links]");
   el.linksList = document.querySelector("[data-task-modal-links-list]");
   // Subtask elements
-  el.parentSection = document.querySelector("[data-task-modal-parent]");
+  el.parentWrapper = document.querySelector("[data-task-modal-parent-wrapper]");
   el.parentTitle = document.querySelector("[data-task-modal-parent-title]");
+  el.detachParentBtn = document.querySelector("[data-task-modal-detach-parent]");
+  el.assignParentBtn = document.querySelector("[data-task-modal-assign-parent]");
   el.subtasksSection = document.querySelector("[data-task-modal-subtasks]");
   el.subtasksList = document.querySelector("[data-task-modal-subtasks-list]");
   el.addSubtaskBtn = document.querySelector("[data-task-modal-add-subtask]");
+  // Parent picker elements
+  el.parentPicker = document.querySelector("[data-parent-picker]");
+  el.parentPickerClose = document.querySelector("[data-parent-picker-close]");
+  el.parentPickerFilter = document.querySelector("[data-parent-picker-filter]");
+  el.parentPickerList = document.querySelector("[data-parent-picker-list]");
 
   if (!el.overlay) return;
 
@@ -82,8 +96,18 @@ export function initTaskModal() {
   // Add subtask handler
   el.addSubtaskBtn?.addEventListener("click", handleAddSubtask);
 
-  // Parent indicator click handler - opens parent task modal
-  el.parentSection?.addEventListener("click", handleParentClick);
+  // Parent title click handler - opens parent task modal
+  el.parentTitle?.addEventListener("click", handleParentClick);
+
+  // Detach from parent handler
+  el.detachParentBtn?.addEventListener("click", handleDetachFromParent);
+
+  // Assign parent handler - opens parent picker
+  el.assignParentBtn?.addEventListener("click", handleOpenParentPicker);
+
+  // Parent picker handlers
+  el.parentPickerClose?.addEventListener("click", closeParentPicker);
+  el.parentPickerFilter?.addEventListener("input", handleParentPickerFilter);
 
   // Form submit
   el.form?.addEventListener("submit", handleSubmit);
@@ -182,13 +206,18 @@ function openModalForCreate(options = {}) {
   if (el.linksSection) el.linksSection.hidden = true;
   if (el.subtasksSection) el.subtasksSection.hidden = true;
 
+  // Hide parent wrapper (not relevant in create mode unless creating subtask)
+  if (el.parentWrapper) el.parentWrapper.hidden = true;
+  if (el.parentTitle) el.parentTitle.hidden = true;
+  if (el.detachParentBtn) el.detachParentBtn.hidden = true;
+  if (el.assignParentBtn) el.assignParentBtn.hidden = true;
+
   // Show parent info if creating a subtask
-  if (el.parentSection) {
-    if (createParentId && options.parentTitle) {
-      el.parentSection.hidden = false;
-      if (el.parentTitle) el.parentTitle.textContent = options.parentTitle;
-    } else {
-      el.parentSection.hidden = true;
+  if (createParentId && options.parentTitle) {
+    if (el.parentWrapper) el.parentWrapper.hidden = false;
+    if (el.parentTitle) {
+      el.parentTitle.hidden = false;
+      el.parentTitle.textContent = options.parentTitle;
     }
   }
 
@@ -212,6 +241,10 @@ async function openModalForTask(todoId, card) {
 
   // Show edit-only elements
   if (el.deleteBtn) el.deleteBtn.hidden = false;
+
+  // Reset parent/subtask sections (will be properly set by fetchAndDisplaySubtasks)
+  if (el.parentWrapper) el.parentWrapper.hidden = true;
+  if (el.subtasksSection) el.subtasksSection.hidden = true;
 
   // Fetch full task details from server
   const teamSlug = el.form?.dataset.teamSlug;
@@ -300,6 +333,10 @@ async function openModalFromListItem(todoId, details) {
 
   // Show edit-only elements
   if (el.deleteBtn) el.deleteBtn.hidden = false;
+
+  // Reset parent/subtask sections (will be properly set by fetchAndDisplaySubtasks)
+  if (el.parentWrapper) el.parentWrapper.hidden = true;
+  if (el.subtasksSection) el.subtasksSection.hidden = true;
 
   // Fetch full task details from server
   const teamSlug = el.form?.dataset.teamSlug;
@@ -503,17 +540,30 @@ async function handleSubmit(e) {
 
   // When creating a subtask, use fetch so we can return to parent modal
   if (isCreateMode && createParentId) {
-    const formData = new FormData(el.form);
+    const store = window.__kanbanStore;
+    const teamSlug = el.form?.dataset.teamSlug;
+    const subtaskUrl = teamSlug
+      ? `/t/${teamSlug}/api/todos/${createParentId}/subtasks`
+      : `/api/todos/${createParentId}/subtasks`;
+
     try {
-      const res = await fetch(el.form.action, {
+      const res = await fetch(subtaskUrl, {
         method: "POST",
-        body: formData,
-        redirect: "manual", // Don't follow redirects
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: el.title?.value }),
       });
 
-      // Success (redirect response means it worked)
-      if (res.type === "opaqueredirect" || res.ok || res.status === 302 || res.status === 303) {
+      if (res.ok) {
+        const data = await res.json();
         const parentId = createParentId;
+
+        // Add subtask to kanban store if available
+        if (store && data.subtask) {
+          store.columns['new'].unshift(data.subtask);
+          // Update parent progress
+          store.buildRelationships();
+        }
+
         closeModal();
         // Return to parent task modal for quick subtask creation
         setTimeout(() => {
@@ -523,8 +573,9 @@ async function handleSubmit(e) {
       }
 
       // Handle errors
-      console.error("[TaskModal] Failed to create subtask:", res.status);
-      alert("Failed to create subtask. Please try again.");
+      const errorData = await res.json().catch(() => ({}));
+      console.error("[TaskModal] Failed to create subtask:", errorData);
+      alert(errorData.error || "Failed to create subtask. Please try again.");
     } catch (err) {
       console.error("[TaskModal] Error creating subtask:", err);
       alert("Failed to create subtask. Please try again.");
@@ -532,7 +583,30 @@ async function handleSubmit(e) {
     return;
   }
 
-  // Submit the form normally (will redirect)
+  // Edit mode: use kanban store for live update if available
+  if (!isCreateMode && currentTaskId) {
+    const store = window.__kanbanStore;
+    if (store) {
+      const fields = {
+        title: el.title?.value || "",
+        description: el.description?.value || "",
+        priority: el.priority?.value || "sand",
+        state: el.state?.value || "new",
+        scheduled_for: el.scheduled?.value || null,
+        tags: el.tagsHidden?.value || "",
+        assigned_to: el.assignee?.value || null,
+      };
+
+      const success = await store.updateTask(Number(currentTaskId), fields);
+      if (success) {
+        closeModal();
+        return;
+      }
+      // Fall through to legacy behavior if store update fails
+    }
+  }
+
+  // Legacy: Submit the form normally (will redirect)
   el.form.submit();
 }
 
@@ -565,7 +639,18 @@ async function handleDelete() {
     if (!confirm("Are you sure you want to delete this task?")) return;
   }
 
-  // Create and submit a delete form
+  // Use kanban store for live update if available
+  const store = window.__kanbanStore;
+  if (store) {
+    const success = await store.removeTask(Number(currentTaskId));
+    if (success) {
+      closeModal();
+      return;
+    }
+    // Fall through to legacy behavior if store update fails
+  }
+
+  // Legacy: Create and submit a delete form
   const deleteUrl = teamSlug
     ? `/t/${teamSlug}/todos/${currentTaskId}/delete`
     : `/todos/${currentTaskId}/delete`;
@@ -592,7 +677,18 @@ async function handleArchive() {
 
   if (!confirm("Are you sure you want to archive this task?")) return;
 
-  // Archive by transitioning to 'archived' state via API
+  // Use kanban store for live update if available
+  const store = window.__kanbanStore;
+  if (store) {
+    const success = await store.moveTask(Number(currentTaskId), "archived");
+    if (success) {
+      closeModal();
+      return;
+    }
+    // Fall through to legacy behavior if store update fails
+  }
+
+  // Legacy: Archive by transitioning to 'archived' state via API
   const teamSlug = el.form?.dataset.teamSlug;
   const stateUrl = teamSlug
     ? `/t/${teamSlug}/api/todos/${currentTaskId}/state`
@@ -606,7 +702,7 @@ async function handleArchive() {
     });
 
     if (res.ok) {
-      // Reload page to reflect the change
+      // Reload page to reflect the change (fallback when no store)
       window.location.reload();
     } else {
       const data = await res.json().catch(() => ({}));
@@ -838,9 +934,35 @@ function escapeHtml(str) {
 // ==================== Subtask Functions ====================
 
 async function fetchAndDisplaySubtasks(todoId) {
-  // Hide both sections initially
-  if (el.parentSection) el.parentSection.hidden = true;
+  // Hide all sections initially
+  if (el.parentWrapper) el.parentWrapper.hidden = true;
   if (el.subtasksSection) el.subtasksSection.hidden = true;
+
+  // Helper to set parent wrapper state
+  function setParentState(mode, parentData = null) {
+    // mode: 'has-parent', 'no-parent', or 'hidden'
+    if (mode === 'hidden') {
+      if (el.parentWrapper) el.parentWrapper.hidden = true;
+      return;
+    }
+
+    if (el.parentWrapper) el.parentWrapper.hidden = false;
+
+    if (mode === 'has-parent' && parentData) {
+      if (el.parentTitle) {
+        el.parentTitle.hidden = false;
+        el.parentTitle.textContent = parentData.title;
+      }
+      if (el.detachParentBtn) el.detachParentBtn.hidden = false;
+      if (el.assignParentBtn) el.assignParentBtn.hidden = true;
+      // Store parent ID for navigation
+      if (el.parentWrapper) el.parentWrapper.dataset.parentId = parentData.id;
+    } else if (mode === 'no-parent') {
+      if (el.parentTitle) el.parentTitle.hidden = true;
+      if (el.detachParentBtn) el.detachParentBtn.hidden = true;
+      if (el.assignParentBtn) el.assignParentBtn.hidden = false;
+    }
+  }
 
   try {
     // Use team-scoped URL if on team page
@@ -858,21 +980,27 @@ async function fetchAndDisplaySubtasks(todoId) {
 
     // If this is a subtask, show parent info
     if (data.parent) {
-      if (el.parentSection) {
-        el.parentSection.hidden = false;
-        el.parentSection.dataset.parentId = data.parent.id;
-      }
-      if (el.parentTitle) el.parentTitle.textContent = data.parent.title;
+      setParentState('has-parent', data.parent);
       // Hide add subtask button for subtasks (2-level max)
       if (el.addSubtaskBtn) el.addSubtaskBtn.hidden = true;
       return;
     }
 
-    // If this can have children, show subtasks section
-    if (data.canAddSubtask || (data.subtasks && data.subtasks.length > 0)) {
+    // If this has subtasks, show subtasks section (can't become a subtask)
+    if (data.subtasks && data.subtasks.length > 0) {
+      setParentState('hidden'); // Can't assign parent to a task that has subtasks
       if (el.subtasksSection) el.subtasksSection.hidden = false;
       if (el.addSubtaskBtn) el.addSubtaskBtn.hidden = !data.canAddSubtask;
-      renderSubtasksList(data.subtasks || []);
+      renderSubtasksList(data.subtasks);
+      return;
+    }
+
+    // Task has no parent and no subtasks - show "no parent" option and subtasks section
+    setParentState('no-parent');
+    if (data.canAddSubtask) {
+      if (el.subtasksSection) el.subtasksSection.hidden = false;
+      if (el.addSubtaskBtn) el.addSubtaskBtn.hidden = false;
+      renderSubtasksList([]);
     }
   } catch (err) {
     console.error("[TaskModal] Failed to fetch subtasks:", err);
@@ -891,16 +1019,45 @@ function renderSubtasksList(subtasks) {
     <div class="subtask-item" data-subtask-id="${s.id}">
       <span class="subtask-item-state state-${s.state}">${formatState(s.state)}</span>
       <span class="subtask-item-title">${escapeHtml(s.title)}</span>
+      <button type="button" class="subtask-item-detach" data-detach-subtask="${s.id}" title="Remove from parent">&times;</button>
     </div>
   `).join("");
 
   // Make subtasks clickable to open their modal
   el.subtasksList.querySelectorAll("[data-subtask-id]").forEach((item) => {
-    item.addEventListener("click", () => {
+    item.addEventListener("click", (e) => {
+      // Don't navigate if clicking the detach button
+      if (e.target.matches("[data-detach-subtask]")) return;
       const subtaskId = item.dataset.subtaskId;
       closeModal();
       // Small delay to allow modal to close before reopening
       setTimeout(() => openModalForTaskById(subtaskId), 100);
+    });
+  });
+
+  // Wire up detach buttons
+  el.subtasksList.querySelectorAll("[data-detach-subtask]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const subtaskId = btn.dataset.detachSubtask;
+      if (!confirm("Remove this subtask from the parent? It will become a regular task.")) return;
+
+      const store = window.__kanbanStore;
+      if (store) {
+        const success = await store.detachFromParent(Number(subtaskId));
+        if (success) {
+          // Remove the subtask item from the list
+          const item = btn.closest("[data-subtask-id]");
+          if (item) item.remove();
+          // Check if list is now empty
+          if (el.subtasksList.querySelectorAll("[data-subtask-id]").length === 0) {
+            el.subtasksList.innerHTML = '<div class="subtask-empty">No subtasks yet</div>';
+          }
+          return;
+        }
+      }
+      // Fallback: reload
+      window.location.reload();
     });
   });
 }
@@ -939,7 +1096,7 @@ function handleAddSubtask() {
 }
 
 function handleParentClick() {
-  const parentId = el.parentSection?.dataset.parentId;
+  const parentId = el.parentWrapper?.dataset.parentId;
   if (!parentId) return;
 
   // Close current modal and open parent task modal
@@ -951,6 +1108,33 @@ function handleParentClick() {
   }, 100);
 }
 
+async function handleDetachFromParent(e) {
+  e.stopPropagation(); // Don't trigger parent click
+
+  if (!currentTaskId) return;
+
+  if (!confirm("Remove this task from its parent? It will become a regular task.")) return;
+
+  // Use kanban store for live update if available
+  const store = window.__kanbanStore;
+  if (store) {
+    const success = await store.detachFromParent(Number(currentTaskId));
+    if (success) {
+      // Switch parent wrapper to "no parent" mode
+      if (el.parentTitle) el.parentTitle.hidden = true;
+      if (el.detachParentBtn) el.detachParentBtn.hidden = true;
+      if (el.assignParentBtn) el.assignParentBtn.hidden = false;
+      // Show add subtask button and subtasks section since this task can now have children
+      if (el.addSubtaskBtn) el.addSubtaskBtn.hidden = false;
+      if (el.subtasksSection) el.subtasksSection.hidden = false;
+      return;
+    }
+  }
+
+  // Fallback: reload page
+  window.location.reload();
+}
+
 async function openModalForTaskById(taskId) {
   // Find the card on the page
   const card = document.querySelector(`[data-todo-id="${taskId}"]`);
@@ -959,5 +1143,129 @@ async function openModalForTaskById(taskId) {
   } else {
     // Card not visible - reload page to see it
     window.location.reload();
+  }
+}
+
+// ==================== Parent Picker Functions ====================
+
+let potentialParentsList = [];
+
+async function handleOpenParentPicker() {
+  if (!currentTaskId) return;
+
+  // Show the picker
+  if (el.parentPicker) el.parentPicker.hidden = false;
+  if (el.parentPickerFilter) {
+    el.parentPickerFilter.value = "";
+    el.parentPickerFilter.focus();
+  }
+
+  // Fetch potential parents
+  const teamSlug = el.form?.dataset.teamSlug;
+  const url = teamSlug
+    ? `/t/${teamSlug}/api/todos/${currentTaskId}/potential-parents`
+    : `/api/todos/${currentTaskId}/potential-parents`;
+
+  try {
+    if (el.parentPickerList) {
+      el.parentPickerList.innerHTML = '<div class="parent-picker-loading">Loading...</div>';
+    }
+
+    const res = await fetch(url);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (el.parentPickerList) {
+        el.parentPickerList.innerHTML = `<div class="parent-picker-error">${escapeHtml(data.error || "Failed to load tasks")}</div>`;
+      }
+      return;
+    }
+
+    const data = await res.json();
+    potentialParentsList = data.potentialParents || [];
+    renderPotentialParents(potentialParentsList);
+  } catch (err) {
+    console.error("[TaskModal] Failed to fetch potential parents:", err);
+    if (el.parentPickerList) {
+      el.parentPickerList.innerHTML = '<div class="parent-picker-error">Failed to load tasks</div>';
+    }
+  }
+}
+
+function closeParentPicker() {
+  if (el.parentPicker) el.parentPicker.hidden = true;
+  potentialParentsList = [];
+}
+
+function handleParentPickerFilter() {
+  const filter = el.parentPickerFilter?.value?.toLowerCase() || "";
+  const filtered = potentialParentsList.filter((p) =>
+    p.title.toLowerCase().includes(filter)
+  );
+  renderPotentialParents(filtered);
+}
+
+function renderPotentialParents(parents) {
+  if (!el.parentPickerList) return;
+
+  if (parents.length === 0) {
+    el.parentPickerList.innerHTML = '<div class="parent-picker-empty">No matching tasks found</div>';
+    return;
+  }
+
+  el.parentPickerList.innerHTML = parents.map((p) => `
+    <div class="parent-picker-item" data-parent-id="${p.id}">
+      <span class="parent-picker-item-state state-${p.state}">${formatState(p.state)}</span>
+      <span class="parent-picker-item-title">${escapeHtml(p.title)}</span>
+    </div>
+  `).join("");
+
+  // Add click handlers
+  el.parentPickerList.querySelectorAll("[data-parent-id]").forEach((item) => {
+    item.addEventListener("click", () => {
+      const parentId = Number(item.dataset.parentId);
+      handleSelectParent(parentId);
+    });
+  });
+}
+
+async function handleSelectParent(parentId) {
+  if (!currentTaskId) return;
+
+  // Use kanban store for live update if available
+  const store = window.__kanbanStore;
+  if (store) {
+    const success = await store.setParent(Number(currentTaskId), parentId);
+    if (success) {
+      closeParentPicker();
+      // Refresh the subtasks display to show new parent
+      await fetchAndDisplaySubtasks(currentTaskId);
+      return;
+    }
+  }
+
+  // Fallback: use API directly
+  const teamSlug = el.form?.dataset.teamSlug;
+  const url = teamSlug
+    ? `/t/${teamSlug}/api/todos/${currentTaskId}/parent`
+    : `/api/todos/${currentTaskId}/parent`;
+
+  try {
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent_id: parentId }),
+    });
+
+    if (res.ok) {
+      closeParentPicker();
+      // Refresh to show the change
+      window.location.reload();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to set parent");
+    }
+  } catch (err) {
+    console.error("[TaskModal] Failed to set parent:", err);
+    alert("Failed to set parent");
   }
 }

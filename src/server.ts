@@ -222,6 +222,12 @@ import {
   handleTeamTodoDelete,
   handleTeamApiTodoState,
   handleTeamApiTodoPosition,
+  handleTeamApiTodoCreate,
+  handleTeamApiTodoUpdate,
+  handleTeamApiTodoDelete,
+  handleTeamDetachFromParent,
+  handleTeamListPotentialParents,
+  handleTeamSetParent,
   handleTeamGetTodo,
   handleTeamGetSubtasks,
   handleTeamCreateSubtask,
@@ -529,6 +535,10 @@ const server = Bun.serve({
         const teamSubtasksMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/subtasks$/);
         if (teamSubtasksMatch) return handleTeamGetSubtasks(req, session, teamSubtasksMatch[1], Number(teamSubtasksMatch[2]));
 
+        // Team-scoped potential parents API route (GET)
+        const teamPotentialParentsMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/potential-parents$/);
+        if (teamPotentialParentsMatch) return handleTeamListPotentialParents(req, session, teamPotentialParentsMatch[1], Number(teamPotentialParentsMatch[2]));
+
         // Team-scoped CRM page
         const teamCrmPageMatch = pathname.match(/^\/t\/([^/]+)\/crm$/);
         if (teamCrmPageMatch) return handleTeamCrmPage(session, teamCrmPageMatch[1]);
@@ -786,6 +796,8 @@ const server = Bun.serve({
         if (teamApiTodoPositionMatch) return handleTeamApiTodoPosition(req, session, teamApiTodoPositionMatch[1], Number(teamApiTodoPositionMatch[2]));
         const teamCreateSubtaskMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/subtasks$/);
         if (teamCreateSubtaskMatch) return handleTeamCreateSubtask(req, session, teamCreateSubtaskMatch[1], Number(teamCreateSubtaskMatch[2]));
+        const teamApiTodoCreateMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos$/);
+        if (teamApiTodoCreateMatch) return handleTeamApiTodoCreate(req, session, teamApiTodoCreateMatch[1]);
 
         // Team-scoped CRM POST routes
         const teamCreateCompanyMatch = pathname.match(/^\/t\/([^/]+)\/api\/crm\/companies$/);
@@ -968,6 +980,14 @@ const server = Bun.serve({
         if (updateCrmContactMatch) return handleUpdateContact(req, session, Number(updateCrmContactMatch[1]));
         const updateCrmOpportunityMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)$/);
         if (updateCrmOpportunityMatch) return handleUpdateOpportunity(req, session, Number(updateCrmOpportunityMatch[1]));
+
+        // Team-scoped todo API routes
+        const teamApiTodoUpdateMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)$/);
+        if (teamApiTodoUpdateMatch) return handleTeamApiTodoUpdate(req, session, teamApiTodoUpdateMatch[1], Number(teamApiTodoUpdateMatch[2]));
+
+        // Team-scoped set parent route (PATCH /t/:slug/api/todos/:id/parent)
+        const teamSetParentMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/parent$/);
+        if (teamSetParentMatch) return handleTeamSetParent(req, session, teamSetParentMatch[1], Number(teamSetParentMatch[2]));
       }
 
       if (req.method === "DELETE") {
@@ -1030,6 +1050,16 @@ const server = Bun.serve({
             Number(teamRemoveGroupMemberMatch[2]),
             decodeURIComponent(teamRemoveGroupMemberMatch[3])
           );
+        }
+
+        // Team-scoped todo DELETE routes
+        const teamDetachFromParentMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/parent$/);
+        if (teamDetachFromParentMatch) {
+          return handleTeamDetachFromParent(req, session, teamDetachFromParentMatch[1], Number(teamDetachFromParentMatch[2]));
+        }
+        const teamApiTodoDeleteMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)$/);
+        if (teamApiTodoDeleteMatch) {
+          return handleTeamApiTodoDelete(req, session, teamApiTodoDeleteMatch[1], Number(teamApiTodoDeleteMatch[2]));
         }
 
         // Team-scoped CRM DELETE routes
