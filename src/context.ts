@@ -227,13 +227,8 @@ export function createTeamRouteContext(
     };
   }
 
-  // Check team database exists
-  if (!teamDbExists(teamSlug)) {
-    return {
-      ok: false,
-      response: new Response("Team database not found", { status: 500 }),
-    };
-  }
+  // Note: Team database is created lazily by getTeamDb() if it doesn't exist.
+  // No need to check teamDbExists() here since getTeamDb() will create it.
 
   // Update session with team context
   session.currentTeamId = team.id;

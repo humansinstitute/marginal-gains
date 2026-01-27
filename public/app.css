@@ -3548,7 +3548,6 @@ body.chat-page {
   gap: 1rem;
   min-height: 400px;
   overflow-x: auto;
-  scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 1rem;
   /* Hide native scrollbar - scrolling handled by synced top scrollbar */
@@ -3604,8 +3603,6 @@ body.chat-page {
   min-width: 280px;
   max-width: 320px;
   flex-shrink: 0;
-  scroll-snap-align: start;
-  scroll-snap-stop: normal;
 }
 .kanban-column-header {
   display: flex;
