@@ -132,7 +132,7 @@ export function handleListGroupMembers(session: Session | null, groupId: number)
   }
 
   const members = listGroupMembers(groupId);
-  return jsonResponse(members);
+  return jsonResponse({ members });
 }
 
 // Add members to a group (admin only)

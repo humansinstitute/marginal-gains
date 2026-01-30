@@ -67,6 +67,8 @@ export function initTeamSchema(db: Database): void {
   addColumn(db, "ALTER TABLE todos ADD COLUMN position INTEGER DEFAULT NULL");
   addColumn(db, "ALTER TABLE todos ADD COLUMN parent_id INTEGER REFERENCES todos(id) ON DELETE SET NULL");
   addColumn(db, "ALTER TABLE todos ADD COLUMN updated_at TEXT DEFAULT NULL");
+  addColumn(db, "ALTER TABLE todos ADD COLUMN optikon_board_id INTEGER DEFAULT NULL");
+  addColumn(db, "ALTER TABLE todos ADD COLUMN optikon_board_url TEXT DEFAULT NULL");
   createIndex(db, "CREATE INDEX idx_todos_group_id ON todos(group_id)");
   createIndex(db, "CREATE INDEX idx_todos_assigned_to ON todos(assigned_to)");
   createIndex(db, "CREATE INDEX idx_todos_parent_id ON todos(parent_id)");
@@ -237,6 +239,7 @@ export function initTeamSchema(db: Database): void {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  addColumn(db, "ALTER TABLE groups ADD COLUMN optikon_workspace_id INTEGER DEFAULT NULL");
 
   db.run(`
     CREATE TABLE IF NOT EXISTS group_members (

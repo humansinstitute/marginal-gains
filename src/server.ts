@@ -206,6 +206,13 @@ import {
   handleTeamRemoveGroupMember,
 } from "./routes/team-groups";
 import {
+  handleSetTodoOptikonBoard,
+  handleClearTodoOptikonBoard,
+  handleGetGroupOptikonWorkspace,
+  handleSetGroupOptikonWorkspace,
+  handleGetOptikonConfig,
+} from "./routes/team-optikon";
+import {
   handleTeamSearchTasks,
   handleTeamGetTaskThreads,
   handleTeamGetThreadTasks,
@@ -518,6 +525,12 @@ const server = Bun.serve({
         if (teamGroupMatch) return handleTeamGetGroup(session, teamGroupMatch[1], Number(teamGroupMatch[2]));
         const teamGroupMembersMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/members$/);
         if (teamGroupMembersMatch) return handleTeamListGroupMembers(session, teamGroupMembersMatch[1], Number(teamGroupMembersMatch[2]));
+
+        // Team-scoped Optikon routes
+        const teamOptikonConfigMatch = pathname.match(/^\/t\/([^/]+)\/api\/optikon\/config$/);
+        if (teamOptikonConfigMatch) return handleGetOptikonConfig(session, teamOptikonConfigMatch[1]);
+        const teamGroupOptikonWorkspaceMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/optikon-workspace$/);
+        if (teamGroupOptikonWorkspaceMatch) return handleGetGroupOptikonWorkspace(session, teamGroupOptikonWorkspaceMatch[1], Number(teamGroupOptikonWorkspaceMatch[2]));
 
         // Team-scoped tasks page (with view mode routing)
         const teamTodosRedirectMatch = pathname.match(/^\/t\/([^/]+)\/todo$/);
@@ -988,6 +1001,12 @@ const server = Bun.serve({
         // Team-scoped set parent route (PATCH /t/:slug/api/todos/:id/parent)
         const teamSetParentMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/parent$/);
         if (teamSetParentMatch) return handleTeamSetParent(req, session, teamSetParentMatch[1], Number(teamSetParentMatch[2]));
+
+        // Team-scoped Optikon routes (PATCH)
+        const teamTodoOptikonMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/optikon$/);
+        if (teamTodoOptikonMatch) return handleSetTodoOptikonBoard(req, session, teamTodoOptikonMatch[1], Number(teamTodoOptikonMatch[2]));
+        const teamGroupOptikonWorkspacePatchMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/optikon-workspace$/);
+        if (teamGroupOptikonWorkspacePatchMatch) return handleSetGroupOptikonWorkspace(req, session, teamGroupOptikonWorkspacePatchMatch[1], Number(teamGroupOptikonWorkspacePatchMatch[2]));
       }
 
       if (req.method === "DELETE") {
@@ -1060,6 +1079,12 @@ const server = Bun.serve({
         const teamApiTodoDeleteMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)$/);
         if (teamApiTodoDeleteMatch) {
           return handleTeamApiTodoDelete(req, session, teamApiTodoDeleteMatch[1], Number(teamApiTodoDeleteMatch[2]));
+        }
+
+        // Team-scoped Optikon DELETE routes
+        const teamTodoOptikonDeleteMatch = pathname.match(/^\/t\/([^/]+)\/api\/todos\/(\d+)\/optikon$/);
+        if (teamTodoOptikonDeleteMatch) {
+          return handleClearTodoOptikonBoard(session, teamTodoOptikonDeleteMatch[1], Number(teamTodoOptikonDeleteMatch[2]));
         }
 
         // Team-scoped CRM DELETE routes

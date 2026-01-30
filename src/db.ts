@@ -18,6 +18,8 @@ export type Todo = {
   assigned_to: string | null;
   position: number | null;
   parent_id: number | null;
+  optikon_board_id: number | null;
+  optikon_board_url: string | null;
 };
 
 export type TodoWithBoard = Todo & {
