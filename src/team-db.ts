@@ -455,6 +455,45 @@ export class TeamDatabase {
   }
 
   // ============================================================================
+  // Optikon Integration
+  // ============================================================================
+
+  /**
+   * Set the Optikon board link for a todo
+   */
+  setTodoOptikonBoard(todoId: number, boardId: number, boardUrl: string): Todo | null {
+    return this.db.query<Todo, [number, string, number]>(
+      "UPDATE todos SET optikon_board_id = ?, optikon_board_url = ?, updated_at = datetime('now') WHERE id = ? AND deleted = 0 RETURNING *"
+    ).get(boardId, boardUrl, todoId) ?? null;
+  }
+
+  /**
+   * Remove the Optikon board link from a todo
+   */
+  clearTodoOptikonBoard(todoId: number): Todo | null {
+    return this.db.query<Todo, [number]>(
+      "UPDATE todos SET optikon_board_id = NULL, optikon_board_url = NULL, updated_at = datetime('now') WHERE id = ? AND deleted = 0 RETURNING *"
+    ).get(todoId) ?? null;
+  }
+
+  /**
+   * Get the default Optikon workspace ID for a group
+   */
+  getGroupOptikonWorkspace(groupId: number): number | null {
+    const group = this.getGroup(groupId);
+    return (group as Group & { optikon_workspace_id?: number | null })?.optikon_workspace_id ?? null;
+  }
+
+  /**
+   * Set the default Optikon workspace ID for a group
+   */
+  setGroupOptikonWorkspace(groupId: number, workspaceId: number | null): Group | null {
+    return this.db.query<Group, [number | null, number]>(
+      "UPDATE groups SET optikon_workspace_id = ? WHERE id = ? RETURNING *"
+    ).get(workspaceId, groupId) ?? null;
+  }
+
+  // ============================================================================
   // AI Summaries
   // ============================================================================
 
@@ -917,6 +956,14 @@ export class TeamDatabase {
   listGroupMembers(groupId: number): GroupMember[] {
     return this.db.query<GroupMember, [number]>(
       "SELECT * FROM group_members WHERE group_id = ?"
+    ).all(groupId);
+  }
+
+  listGroupMembersWithProfile(groupId: number): Array<GroupMember & { display_name: string | null; picture: string | null }> {
+    return this.db.query<GroupMember & { display_name: string | null; picture: string | null }, [number]>(
+      `SELECT gm.*, u.display_name, u.picture FROM group_members gm
+       LEFT JOIN users u ON gm.npub = u.npub
+       WHERE gm.group_id = ? ORDER BY gm.added_at ASC`
     ).all(groupId);
   }
 

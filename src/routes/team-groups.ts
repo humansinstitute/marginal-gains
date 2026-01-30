@@ -136,8 +136,8 @@ export function handleTeamListGroupMembers(
     return jsonResponse({ error: "Group not found" }, 404);
   }
 
-  const members = db.listGroupMembers(groupId);
-  return jsonResponse(members);
+  const members = db.listGroupMembersWithProfile(groupId);
+  return jsonResponse({ members });
 }
 
 // Add members to a group

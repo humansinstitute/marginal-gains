@@ -1,9 +1,19 @@
 import { show, hide } from "./dom.js";
+import {
+  fetchOptikonConfig,
+  getNostrSigner,
+  createOptikonBoard,
+  saveTodoOptikonBoard,
+  clearTodoOptikonBoard,
+  getGroupOptikonWorkspace,
+} from "./optikon.js";
 
 let currentTaskId = null;
 let currentTaskOwner = null;
 let isCreateMode = false;
 let createParentId = null;
+let currentOptikonBoardId = null;
+let currentOptikonBoardUrl = null;
 
 const el = {
   overlay: null,
@@ -17,8 +27,16 @@ const el = {
   board: null,
   groupId: null,
   parentId: null,
-  assignee: null,
+  assignee: null, // hidden input for npub
   assigneeLabel: null,
+  // Assignee autocomplete elements
+  assigneeAutocomplete: null,
+  assigneeInput: null,
+  assigneeSelected: null,
+  assigneeAvatar: null,
+  assigneeName: null,
+  assigneeClear: null,
+  assigneeSuggestions: null,
   tagsWrapper: null,
   tagsHidden: null,
   closeBtn: null,
@@ -40,7 +58,18 @@ const el = {
   parentPickerClose: null,
   parentPickerFilter: null,
   parentPickerList: null,
+  // Optikon elements
+  optikonSection: null,
+  optikonLink: null,
+  optikonLinkUrl: null,
+  optikonLinkText: null,
+  optikonUnlink: null,
+  optikonAttach: null,
+  optikonStatus: null,
 };
+
+// Cache for group members (keyed by groupId)
+let groupMembersCache = {};
 
 export function initTaskModal() {
   el.overlay = document.querySelector("[data-task-modal]");
@@ -56,6 +85,14 @@ export function initTaskModal() {
   el.parentId = document.querySelector("[data-task-modal-parent-id]");
   el.assignee = document.querySelector("[data-task-modal-assignee]");
   el.assigneeLabel = document.querySelector("[data-task-modal-assignee-label]");
+  // Assignee autocomplete elements
+  el.assigneeAutocomplete = document.querySelector("[data-assignee-autocomplete]");
+  el.assigneeInput = document.querySelector("[data-assignee-input]");
+  el.assigneeSelected = document.querySelector("[data-assignee-selected]");
+  el.assigneeAvatar = document.querySelector("[data-assignee-avatar]");
+  el.assigneeName = document.querySelector("[data-assignee-name]");
+  el.assigneeClear = document.querySelector("[data-assignee-clear]");
+  el.assigneeSuggestions = document.querySelector("[data-assignee-suggestions]");
   el.tagsWrapper = document.querySelector("[data-task-modal-tags-wrapper]");
   el.tagsHidden = document.querySelector("[data-task-modal-tags-hidden]");
   el.closeBtn = document.querySelector("[data-task-modal-close]");
@@ -77,6 +114,14 @@ export function initTaskModal() {
   el.parentPickerClose = document.querySelector("[data-parent-picker-close]");
   el.parentPickerFilter = document.querySelector("[data-parent-picker-filter]");
   el.parentPickerList = document.querySelector("[data-parent-picker-list]");
+  // Optikon elements
+  el.optikonSection = document.querySelector("[data-task-modal-optikon]");
+  el.optikonLink = document.querySelector("[data-optikon-link]");
+  el.optikonLinkUrl = document.querySelector("[data-optikon-link-url]");
+  el.optikonLinkText = document.querySelector("[data-optikon-link-text]");
+  el.optikonUnlink = document.querySelector("[data-optikon-unlink]");
+  el.optikonAttach = document.querySelector("[data-optikon-attach]");
+  el.optikonStatus = document.querySelector("[data-optikon-status]");
 
   if (!el.overlay) return;
 
@@ -109,6 +154,10 @@ export function initTaskModal() {
   el.parentPickerClose?.addEventListener("click", closeParentPicker);
   el.parentPickerFilter?.addEventListener("input", handleParentPickerFilter);
 
+  // Optikon handlers
+  el.optikonAttach?.addEventListener("click", handleAttachOptikonBoard);
+  el.optikonUnlink?.addEventListener("click", handleUnlinkOptikonBoard);
+
   // Form submit
   el.form?.addEventListener("submit", handleSubmit);
 
@@ -117,6 +166,9 @@ export function initTaskModal() {
 
   // Tag input handling
   initTagInput();
+
+  // Assignee autocomplete handling
+  initAssigneeAutocomplete();
 
   // Make kanban cards clickable
   document.addEventListener("click", (e) => {
@@ -177,7 +229,6 @@ function openModalForCreate(options = {}) {
   if (el.state) el.state.value = "new";
   if (el.scheduled) el.scheduled.value = "";
   if (el.tagsHidden) el.tagsHidden.value = "";
-  if (el.assignee) el.assignee.value = "";
   if (el.parentId) el.parentId.value = createParentId || "";
 
   // Set group_id from options or current context
@@ -185,11 +236,9 @@ function openModalForCreate(options = {}) {
   if (el.board) el.board.value = currentGroupId;
   if (el.groupId) el.groupId.value = currentGroupId;
 
-  // Update assignee visibility
+  // Update assignee visibility and clear selection
   updateAssigneeVisibility(currentGroupId);
-  if (currentGroupId) {
-    fetchGroupMembers(currentGroupId);
-  }
+  clearAssigneeSelection();
 
   // Clear tag chips
   renderTagChips("");
@@ -205,6 +254,7 @@ function openModalForCreate(options = {}) {
   if (el.archiveBtn) el.archiveBtn.hidden = true;
   if (el.linksSection) el.linksSection.hidden = true;
   if (el.subtasksSection) el.subtasksSection.hidden = true;
+  if (el.optikonSection) el.optikonSection.hidden = true;
 
   // Hide parent wrapper (not relevant in create mode unless creating subtask)
   if (el.parentWrapper) el.parentWrapper.hidden = true;
@@ -266,6 +316,8 @@ async function openModalForTask(todoId, card) {
         tags: task.tags || "",
         assigned_to: task.assigned_to || "",
         group_id: task.group_id ? String(task.group_id) : "",
+        optikon_board_id: task.optikon_board_id || null,
+        optikon_board_url: task.optikon_board_url || null,
       });
     } else {
       // Fallback to card data if fetch fails
@@ -318,7 +370,7 @@ function populateModalFromCard(card) {
   const tagChips = card.querySelectorAll(".kanban-card-meta .tag-chip");
   const tags = Array.from(tagChips).map(chip => chip.textContent.trim()).join(",");
 
-  populateModal({ title, description: desc, priority, state, scheduled_for: "", tags, assigned_to, group_id });
+  populateModal({ title, description: desc, priority, state, scheduled_for: "", tags, assigned_to, group_id, optikon_board_id: null, optikon_board_url: null });
 }
 
 async function openModalFromListItem(todoId, details) {
@@ -358,6 +410,8 @@ async function openModalFromListItem(todoId, details) {
         tags: task.tags || "",
         assigned_to: task.assigned_to || "",
         group_id: task.group_id ? String(task.group_id) : "",
+        optikon_board_id: task.optikon_board_id || null,
+        optikon_board_url: task.optikon_board_url || null,
       });
     } else {
       // Fallback to DOM data if fetch fails
@@ -393,10 +447,10 @@ function populateModalFromListItem(details) {
   const assigned_to = editForm.querySelector("[name='assigned_to']")?.value || "";
   const group_id = editForm.querySelector("[name='group_id']")?.value || "";
 
-  populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id });
+  populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id, optikon_board_id: null, optikon_board_url: null });
 }
 
-function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id }) {
+function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id, optikon_board_id, optikon_board_url }) {
   if (el.title) el.title.value = title;
   if (el.description) el.description.value = description;
   if (el.priority) el.priority.value = priority;
@@ -413,15 +467,14 @@ function populateModal({ title, description, priority, state, scheduled_for, tag
   if (el.board) el.board.value = group_id || "";
   if (el.groupId) el.groupId.value = group_id || "";
 
-  // Update assignee field visibility and value based on board
+  // Update assignee field visibility based on board
   updateAssigneeVisibility(group_id);
-  if (el.assignee) el.assignee.value = assigned_to || "";
 
-  // If switching to a group board, fetch members for assignee dropdown
-  if (group_id) {
-    fetchGroupMembers(group_id).then(() => {
-      if (el.assignee) el.assignee.value = assigned_to || "";
-    });
+  // Set assignee using autocomplete display
+  if (group_id && assigned_to) {
+    setAssigneeFromNpub(assigned_to, group_id);
+  } else {
+    clearAssigneeSelection();
   }
 
   // Update form action - use team-scoped URL if on team page
@@ -434,6 +487,203 @@ function populateModal({ title, description, priority, state, scheduled_for, tag
 
   // Render tag chips
   renderTagChips(tags);
+
+  // Update Optikon UI state
+  updateOptikonUI(optikon_board_id, optikon_board_url);
+}
+
+function updateOptikonUI(boardId, boardUrl) {
+  // Store current Optikon board info
+  currentOptikonBoardId = boardId || null;
+  currentOptikonBoardUrl = boardUrl || null;
+
+  // Hide Optikon section in create mode
+  if (isCreateMode) {
+    if (el.optikonSection) el.optikonSection.hidden = true;
+    return;
+  }
+
+  // Show Optikon section in edit mode
+  if (el.optikonSection) el.optikonSection.hidden = false;
+
+  // Reset status message
+  if (el.optikonStatus) {
+    el.optikonStatus.hidden = true;
+    el.optikonStatus.textContent = "";
+  }
+
+  if (boardId && boardUrl) {
+    // Has a linked board - show link, hide attach button
+    if (el.optikonLink) el.optikonLink.hidden = false;
+    if (el.optikonLinkUrl) {
+      el.optikonLinkUrl.href = boardUrl;
+    }
+    if (el.optikonLinkText) {
+      el.optikonLinkText.textContent = "Open in Optikon";
+    }
+    if (el.optikonAttach) el.optikonAttach.hidden = true;
+  } else {
+    // No linked board - hide link, show attach button
+    if (el.optikonLink) el.optikonLink.hidden = true;
+    if (el.optikonAttach) el.optikonAttach.hidden = false;
+  }
+}
+
+async function handleAttachOptikonBoard() {
+  if (!currentTaskId) return;
+
+  const teamSlug = el.form?.dataset.teamSlug;
+  if (!teamSlug) {
+    showOptikonStatus("Optikon is only available for team tasks", true);
+    return;
+  }
+
+  // Show loading state
+  if (el.optikonAttach) {
+    el.optikonAttach.disabled = true;
+    el.optikonAttach.textContent = "Creating board...";
+  }
+  showOptikonStatus("Creating Optikon board...", false);
+
+  try {
+    // Get Nostr signer for NIP-98 auth
+    const signer = await getNostrSigner();
+    if (!signer) {
+      showOptikonStatus("No Nostr signer available. Please sign in with a Nostr extension or ephemeral key.", true);
+      resetOptikonAttachButton();
+      return;
+    }
+
+    // Fetch Optikon config from server
+    const config = await fetchOptikonConfig(teamSlug);
+    if (!config || !config.optikonUrl) {
+      showOptikonStatus("Failed to fetch Optikon configuration", true);
+      resetOptikonAttachButton();
+      return;
+    }
+
+    // Get task details for board creation
+    const taskTitle = el.title?.value || "Untitled Task";
+    const taskDescription = el.description?.value || "";
+
+    // Get group's default workspace (if set)
+    const groupId = el.groupId?.value;
+    let workspaceId = null;
+    if (groupId) {
+      workspaceId = await getGroupOptikonWorkspace(teamSlug, Number(groupId));
+    }
+
+    // Create board via Optikon API (client-side NIP-98 signing)
+    const result = await createOptikonBoard({
+      title: taskTitle,
+      description: taskDescription,
+      workspaceId,
+      optikonUrl: config.optikonUrl,
+      nostrSigner: signer,
+    });
+
+    if (!result) {
+      showOptikonStatus("Failed to create Optikon board", true);
+      resetOptikonAttachButton();
+      return;
+    }
+
+    // Save board link to task via MG backend
+    const saved = await saveTodoOptikonBoard(teamSlug, Number(currentTaskId), result.boardId, result.boardUrl);
+    if (!saved) {
+      showOptikonStatus("Board created but failed to save link to task", true);
+      resetOptikonAttachButton();
+      return;
+    }
+
+    // Update UI to show the board link
+    updateOptikonUI(result.boardId, result.boardUrl);
+    showOptikonStatus("Board created successfully!", false);
+
+    // Update kanban store if available
+    const store = window.__kanbanStore;
+    if (store) {
+      const task = findTaskInStore(store, Number(currentTaskId));
+      if (task) {
+        task.optikon_board_id = result.boardId;
+        task.optikon_board_url = result.boardUrl;
+      }
+    }
+  } catch (err) {
+    console.error("[TaskModal] Error attaching Optikon board:", err);
+    showOptikonStatus(`Error: ${err.message || "Failed to create board"}`, true);
+    resetOptikonAttachButton();
+  }
+}
+
+async function handleUnlinkOptikonBoard() {
+  if (!currentTaskId) return;
+
+  const teamSlug = el.form?.dataset.teamSlug;
+  if (!teamSlug) return;
+
+  if (!confirm("Remove the Optikon board link from this task? The board will still exist in Optikon.")) {
+    return;
+  }
+
+  showOptikonStatus("Removing board link...", false);
+
+  try {
+    const cleared = await clearTodoOptikonBoard(teamSlug, Number(currentTaskId));
+    if (!cleared) {
+      showOptikonStatus("Failed to remove board link", true);
+      return;
+    }
+
+    // Update UI to show attach button
+    updateOptikonUI(null, null);
+    showOptikonStatus("Board link removed", false);
+
+    // Update kanban store if available
+    const store = window.__kanbanStore;
+    if (store) {
+      const task = findTaskInStore(store, Number(currentTaskId));
+      if (task) {
+        task.optikon_board_id = null;
+        task.optikon_board_url = null;
+      }
+    }
+  } catch (err) {
+    console.error("[TaskModal] Error unlinking Optikon board:", err);
+    showOptikonStatus(`Error: ${err.message || "Failed to remove link"}`, true);
+  }
+}
+
+function showOptikonStatus(message, isError) {
+  if (!el.optikonStatus) return;
+  el.optikonStatus.textContent = message;
+  el.optikonStatus.hidden = false;
+  el.optikonStatus.classList.toggle("error", isError);
+
+  // Auto-hide success messages after a delay
+  if (!isError) {
+    setTimeout(() => {
+      if (el.optikonStatus?.textContent === message) {
+        el.optikonStatus.hidden = true;
+      }
+    }, 3000);
+  }
+}
+
+function resetOptikonAttachButton() {
+  if (el.optikonAttach) {
+    el.optikonAttach.disabled = false;
+    el.optikonAttach.innerHTML = '<span class="optikon-icon">&#127919;</span> Attach Optikon Board';
+  }
+}
+
+function findTaskInStore(store, taskId) {
+  if (!store || !store.columns) return null;
+  for (const column of Object.values(store.columns)) {
+    const task = column.find((t) => t.id === taskId);
+    if (task) return task;
+  }
+  return null;
 }
 
 function renderTagChips(tags) {
@@ -741,11 +991,18 @@ function updateAssigneeVisibility(groupId) {
   } else {
     // Hide assignee field for personal board (auto-assigns to owner)
     el.assigneeLabel.hidden = true;
+    // Clear assignee when switching to personal board
+    clearAssigneeSelection();
   }
 }
 
 async function fetchGroupMembers(groupId) {
-  if (!el.assignee || !groupId) return;
+  if (!groupId) return [];
+
+  // Check cache first
+  if (groupMembersCache[groupId]) {
+    return groupMembersCache[groupId];
+  }
 
   try {
     // Use team-scoped URL if on team page
@@ -754,25 +1011,149 @@ async function fetchGroupMembers(groupId) {
       ? `/t/${teamSlug}/groups/${groupId}/members`
       : `/chat/groups/${groupId}/members`;
     const res = await fetch(membersUrl);
-    if (!res.ok) return;
+    if (!res.ok) return [];
 
     const data = await res.json();
     const members = data.members || [];
 
-    // Rebuild assignee dropdown options
-    const currentValue = el.assignee.value;
-    el.assignee.innerHTML = `<option value="">Unassigned</option>` +
-      members.map(m => {
-        const displayName = m.display_name || m.npub.slice(0, 12) + "...";
-        return `<option value="${m.npub}">${escapeHtml(displayName)}</option>`;
-      }).join("");
-
-    // Restore previous value if still valid
-    if (currentValue && members.some(m => m.npub === currentValue)) {
-      el.assignee.value = currentValue;
-    }
+    // Cache the result
+    groupMembersCache[groupId] = members;
+    return members;
   } catch (err) {
     console.error("Failed to fetch group members:", err);
+    return [];
+  }
+}
+
+function initAssigneeAutocomplete() {
+  if (!el.assigneeInput) return;
+
+  // Show suggestions on focus
+  el.assigneeInput.addEventListener("focus", async () => {
+    const groupId = el.groupId?.value;
+    if (!groupId) return;
+
+    const members = await fetchGroupMembers(groupId);
+    showAssigneeSuggestions(members, "");
+  });
+
+  // Filter suggestions on input
+  el.assigneeInput.addEventListener("input", async () => {
+    const groupId = el.groupId?.value;
+    if (!groupId) return;
+
+    const members = await fetchGroupMembers(groupId);
+    const query = el.assigneeInput.value.toLowerCase();
+    showAssigneeSuggestions(members, query);
+  });
+
+  // Hide suggestions on blur (with delay for click handling)
+  el.assigneeInput.addEventListener("blur", () => {
+    setTimeout(() => {
+      if (el.assigneeSuggestions) el.assigneeSuggestions.hidden = true;
+    }, 200);
+  });
+
+  // Clear button handler
+  el.assigneeClear?.addEventListener("click", () => {
+    clearAssigneeSelection();
+  });
+
+  // Handle keyboard navigation
+  el.assigneeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (el.assigneeSuggestions) el.assigneeSuggestions.hidden = true;
+      el.assigneeInput.blur();
+    }
+  });
+}
+
+function showAssigneeSuggestions(members, query) {
+  if (!el.assigneeSuggestions) return;
+
+  // Filter members by query
+  const filtered = members.filter(m => {
+    const name = (m.display_name || m.npub).toLowerCase();
+    return name.includes(query);
+  });
+
+  if (filtered.length === 0) {
+    el.assigneeSuggestions.innerHTML = `<div class="assignee-no-results">No matching members</div>`;
+    el.assigneeSuggestions.hidden = false;
+    return;
+  }
+
+  el.assigneeSuggestions.innerHTML = filtered.map(m => {
+    const displayName = m.display_name || m.npub.slice(0, 12) + "...";
+    const avatarUrl = m.picture || `https://robohash.org/${m.npub}.png?set=set3`;
+    return `
+      <div class="assignee-suggestion" data-npub="${escapeHtml(m.npub)}" data-name="${escapeHtml(displayName)}" data-picture="${escapeHtml(avatarUrl)}">
+        <img class="assignee-suggestion-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
+        <span class="assignee-suggestion-name">${escapeHtml(displayName)}</span>
+      </div>
+    `;
+  }).join("");
+
+  // Add click handlers
+  el.assigneeSuggestions.querySelectorAll(".assignee-suggestion").forEach(item => {
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // Prevent blur from firing first
+      selectAssignee(item.dataset.npub, item.dataset.name, item.dataset.picture);
+    });
+  });
+
+  el.assigneeSuggestions.hidden = false;
+}
+
+function selectAssignee(npub, displayName, avatarUrl) {
+  // Set hidden input value
+  if (el.assignee) el.assignee.value = npub;
+
+  // Show selected display
+  if (el.assigneeSelected) el.assigneeSelected.hidden = false;
+  if (el.assigneeAvatar) el.assigneeAvatar.src = avatarUrl;
+  if (el.assigneeName) el.assigneeName.textContent = displayName;
+
+  // Hide input and suggestions
+  if (el.assigneeInput) {
+    el.assigneeInput.value = "";
+    el.assigneeInput.hidden = true;
+  }
+  if (el.assigneeSuggestions) el.assigneeSuggestions.hidden = true;
+}
+
+function clearAssigneeSelection() {
+  // Clear hidden input
+  if (el.assignee) el.assignee.value = "";
+
+  // Hide selected display
+  if (el.assigneeSelected) el.assigneeSelected.hidden = true;
+
+  // Show input
+  if (el.assigneeInput) {
+    el.assigneeInput.value = "";
+    el.assigneeInput.hidden = false;
+  }
+}
+
+async function setAssigneeFromNpub(npub, groupId) {
+  if (!npub) {
+    clearAssigneeSelection();
+    return;
+  }
+
+  // Fetch members to find the profile data
+  const members = await fetchGroupMembers(groupId);
+  const member = members.find(m => m.npub === npub);
+
+  if (member) {
+    const displayName = member.display_name || member.npub.slice(0, 12) + "...";
+    const avatarUrl = member.picture || `https://robohash.org/${member.npub}.png?set=set3`;
+    selectAssignee(member.npub, displayName, avatarUrl);
+  } else {
+    // Member not found in group - just show npub
+    const avatarUrl = `https://robohash.org/${npub}.png?set=set3`;
+    selectAssignee(npub, npub.slice(0, 12) + "...", avatarUrl);
   }
 }
 

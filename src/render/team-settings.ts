@@ -160,6 +160,37 @@ function renderCreateGroupModal() {
         </div>
       </form>
     </div>
+  </div>
+
+  <div class="settings-modal" data-group-edit-modal hidden>
+    <div class="settings-modal-body">
+      <header class="settings-modal-header">
+        <h3 data-group-edit-title>Edit Group</h3>
+        <button type="button" class="ghost" data-close-group-edit>&times;</button>
+      </header>
+      <form class="settings-form" data-group-edit-form>
+        <input type="hidden" name="groupId" data-group-edit-id />
+        <label>
+          <span>Name</span>
+          <input name="name" required data-group-edit-name />
+        </label>
+        <label>
+          <span>Description</span>
+          <textarea name="description" rows="2" data-group-edit-description></textarea>
+        </label>
+        <label>
+          <span>Optikon Workspace</span>
+          <select name="optikonWorkspaceId" data-group-edit-workspace>
+            <option value="">No default workspace</option>
+          </select>
+          <small class="settings-field-hint">Tasks in this group will create boards in this Optikon workspace by default.</small>
+        </label>
+        <div class="settings-form-actions">
+          <button type="button" class="ghost" data-close-group-edit>Cancel</button>
+          <button type="submit" class="primary">Save</button>
+        </div>
+      </form>
+    </div>
   </div>`;
 }
 

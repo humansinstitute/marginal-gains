@@ -16,6 +16,11 @@ import {
 import { formatUnixDate } from "./dateUtils.js";
 import { elements as el, hide, show, escapeHtml } from "./dom.js";
 import { initNotifications } from "./notifications.js";
+import {
+  fetchOptikonConfig,
+  fetchOptikonWorkspaces,
+  getNostrSigner,
+} from "./optikon.js";
 import { state } from "./state.js";
 import { initWingmanSettings } from "./wingmanSettings.js";
 
@@ -179,6 +184,7 @@ function renderGroups() {
           <span class="settings-group-meta">${escapeHtml(group.description || "No description")}</span>
         </div>
         <div class="settings-group-actions">
+          <button type="button" class="ghost" data-edit-group="${group.id}" title="Edit group">Edit</button>
           <button type="button" class="ghost" data-delete-group="${group.id}" title="Delete group">Delete</button>
         </div>
       </div>`;
@@ -203,6 +209,15 @@ function renderGroups() {
       if (confirm("Delete this group? Members will lose access to associated channels.")) {
         await deleteGroup(groupId);
       }
+    });
+  });
+
+  // Wire up edit handlers
+  container.querySelectorAll("[data-edit-group]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const groupId = Number(btn.dataset.editGroup);
+      openEditGroupModal(groupId);
     });
   });
 }
@@ -313,6 +328,142 @@ async function deleteGroup(groupId) {
     }
   } catch (_err) {
     console.error("[Settings] Failed to delete group");
+  }
+}
+
+// Open edit modal for a group
+async function openEditGroupModal(groupId) {
+  const group = groups.find((g) => g.id === groupId);
+  if (!group) return;
+
+  const modal = document.querySelector("[data-group-edit-modal]");
+  const idInput = document.querySelector("[data-group-edit-id]");
+  const nameInput = document.querySelector("[data-group-edit-name]");
+  const descInput = document.querySelector("[data-group-edit-description]");
+  const workspaceSelect = document.querySelector("[data-group-edit-workspace]");
+  const titleEl = document.querySelector("[data-group-edit-title]");
+
+  if (!modal) return;
+
+  // Set form values
+  if (idInput) idInput.value = groupId;
+  if (nameInput) nameInput.value = group.name || "";
+  if (descInput) descInput.value = group.description || "";
+  if (titleEl) titleEl.textContent = `Edit ${group.name}`;
+
+  // Reset workspace select
+  if (workspaceSelect) {
+    workspaceSelect.innerHTML = '<option value="">Loading workspaces...</option>';
+    workspaceSelect.disabled = true;
+  }
+
+  show(modal);
+
+  // Fetch current workspace ID and available workspaces in parallel
+  let currentWorkspaceId = null;
+  let workspaces = [];
+
+  try {
+    // Get current workspace setting
+    const workspaceRes = await fetch(teamUrl(`/groups/${groupId}/optikon-workspace`));
+    if (workspaceRes.ok) {
+      const data = await workspaceRes.json();
+      currentWorkspaceId = data.workspaceId;
+    }
+  } catch (_err) {
+    console.error("[Settings] Failed to fetch current workspace");
+  }
+
+  // Fetch available workspaces from Optikon
+  try {
+    const teamSlug = window.__TEAM_SLUG__;
+    console.log("[Settings] Fetching workspaces, teamSlug:", teamSlug);
+
+    const signer = await getNostrSigner();
+    console.log("[Settings] Got signer:", signer ? "yes" : "no");
+
+    if (signer && teamSlug) {
+      const config = await fetchOptikonConfig(teamSlug);
+      console.log("[Settings] Optikon config:", config);
+
+      if (config?.optikonUrl) {
+        workspaces = await fetchOptikonWorkspaces(config.optikonUrl, signer) || [];
+        console.log("[Settings] Fetched workspaces:", workspaces);
+      } else {
+        console.warn("[Settings] No optikonUrl in config");
+      }
+    } else {
+      console.warn("[Settings] Missing signer or teamSlug");
+    }
+  } catch (err) {
+    console.error("[Settings] Failed to fetch Optikon workspaces:", err);
+  }
+
+  // Populate the select
+  if (workspaceSelect) {
+    workspaceSelect.innerHTML = '<option value="">No default workspace</option>';
+
+    if (workspaces.length > 0) {
+      workspaces.forEach((ws) => {
+        const option = document.createElement("option");
+        option.value = ws.id;
+        option.textContent = ws.name || `Workspace ${ws.id}`;
+        if (ws.id === currentWorkspaceId) {
+          option.selected = true;
+        }
+        workspaceSelect.appendChild(option);
+      });
+    } else {
+      // No workspaces available - show message
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "(No workspaces available)";
+      option.disabled = true;
+      workspaceSelect.appendChild(option);
+    }
+
+    workspaceSelect.disabled = false;
+  }
+}
+
+// Save group settings (name, description, and optikon workspace)
+async function saveGroupSettings(groupId, name, description, workspaceId) {
+  try {
+    // Update group name/description
+    const groupRes = await fetch(teamUrl(`/groups/${groupId}`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, description }),
+    });
+
+    if (!groupRes.ok) {
+      const err = await groupRes.json().catch(() => ({}));
+      alert(err.error || "Failed to update group");
+      return false;
+    }
+
+    // Update workspace ID
+    const workspaceRes = await fetch(teamUrl(`/groups/${groupId}/optikon-workspace`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
+    });
+
+    if (!workspaceRes.ok) {
+      console.warn("[Settings] Failed to update workspace ID");
+      // Don't fail completely - group update succeeded
+    }
+
+    // Update local groups array
+    const idx = groups.findIndex((g) => g.id === groupId);
+    if (idx >= 0) {
+      groups[idx] = { ...groups[idx], name, description };
+    }
+    renderGroups();
+    return true;
+  } catch (_err) {
+    console.error("[Settings] Failed to save group settings");
+    return false;
   }
 }
 
@@ -441,6 +592,36 @@ function wireEventListeners() {
       e.preventDefault();
       const npub = memberInput.value?.trim();
       if (npub) addMember(npub);
+    }
+  });
+
+  // Edit group modal
+  const editModal = document.querySelector("[data-group-edit-modal]");
+  const closeEditBtns = document.querySelectorAll("[data-close-group-edit]");
+  const editForm = document.querySelector("[data-group-edit-form]");
+
+  closeEditBtns?.forEach((btn) => btn.addEventListener("click", () => hide(editModal)));
+  editModal?.addEventListener("click", (e) => {
+    if (e.target === editModal) hide(editModal);
+  });
+
+  editForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const data = new FormData(e.currentTarget);
+    const groupId = Number(data.get("groupId"));
+    const name = String(data.get("name") || "").trim();
+    const description = String(data.get("description") || "").trim();
+    const workspaceIdStr = String(data.get("optikonWorkspaceId") || "").trim();
+    const workspaceId = workspaceIdStr ? Number(workspaceIdStr) : null;
+
+    if (!name) {
+      alert("Group name is required");
+      return;
+    }
+
+    const success = await saveGroupSettings(groupId, name, description, workspaceId);
+    if (success) {
+      hide(editModal);
     }
   });
 }

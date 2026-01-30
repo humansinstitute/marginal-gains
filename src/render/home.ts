@@ -554,6 +554,9 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
               <template x-for="(tag, idx) in getCardTags(card)" :key="card.id + '-tag-' + idx">
                 <span class="tag-chip" x-text="tag"></span>
               </template>
+              <template x-if="card.optikon_board_url">
+                <a :href="card.optikon_board_url" target="_blank" rel="noopener noreferrer" class="optikon-badge" title="Open Optikon board" @click.stop>&#127919;</a>
+              </template>
             </div>
           </div>
         </template>
@@ -630,6 +633,9 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
                 <button type="button" class="thread-link-badge" :data-view-threads="card.id" title="View linked threads">
                   &#128172; <span x-text="card.threadCount"></span>
                 </button>
+              </template>
+              <template x-if="card.optikon_board_url">
+                <a :href="card.optikon_board_url" target="_blank" rel="noopener noreferrer" class="optikon-badge" title="Open Optikon board" @click.stop>&#127919;</a>
               </template>
             </div>
           </div>
@@ -939,20 +945,11 @@ function renderTagsInput(tags: string) {
     </label>`;
 }
 
-function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWithProfile[] = [], userGroups: Group[] = []) {
+function renderTaskEditModal(groupId: number | null, _groupMembers: GroupMemberWithProfile[] = [], userGroups: Group[] = []) {
   // Board selector options - Personal + all user's groups
   const boardOptions = [
     `<option value="">Personal</option>`,
     ...userGroups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`),
-  ].join("");
-
-  // Assignee dropdown - populated dynamically by JS based on selected board
-  const assigneeOptions = [
-    `<option value="">Unassigned</option>`,
-    ...groupMembers.map((m) => {
-      const displayName = m.display_name || m.npub.slice(0, 12) + "...";
-      return `<option value="${m.npub}">${escapeHtml(displayName)}</option>`;
-    }),
   ].join("");
 
   return `<div class="task-modal-overlay" data-task-modal hidden>
@@ -1006,9 +1003,16 @@ function renderTaskEditModal(groupId: number | null, groupMembers: GroupMemberWi
           </label>
         </div>
         <label data-task-modal-assignee-label ${userGroups.length === 0 ? 'hidden' : ''}>Assignee
-          <select name="assigned_to" data-task-modal-assignee>
-            ${assigneeOptions}
-          </select>
+          <div class="assignee-autocomplete" data-assignee-autocomplete>
+            <div class="assignee-selected" data-assignee-selected hidden>
+              <img class="assignee-avatar" data-assignee-avatar src="" alt="" />
+              <span class="assignee-name" data-assignee-name></span>
+              <button type="button" class="assignee-clear" data-assignee-clear aria-label="Clear assignee">&times;</button>
+            </div>
+            <input type="text" class="assignee-input" data-assignee-input placeholder="Search members..." autocomplete="off" />
+            <input type="hidden" name="assigned_to" data-task-modal-assignee value="" />
+            <div class="assignee-suggestions" data-assignee-suggestions hidden></div>
+          </div>
         </label>
         <label>Scheduled For
           <input type="date" name="scheduled_for" data-task-modal-scheduled />
@@ -1555,6 +1559,21 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
         <div class="task-modal-links" data-task-modal-links hidden>
           <div class="task-modal-links-header">Links</div>
           <div class="task-modal-links-list" data-task-modal-links-list></div>
+        </div>
+        <div class="task-modal-optikon" data-task-modal-optikon hidden>
+          <div class="task-modal-optikon-header">Optikon Board</div>
+          <div class="task-modal-optikon-link" data-optikon-link hidden>
+            <a href="" target="_blank" rel="noopener noreferrer" data-optikon-link-url>
+              <span class="optikon-icon">&#127919;</span>
+              <span data-optikon-link-text>Open in Optikon</span>
+            </a>
+            <button type="button" class="task-modal-optikon-unlink" data-optikon-unlink title="Remove board link">&times;</button>
+          </div>
+          <button type="button" class="task-modal-optikon-attach" data-optikon-attach>
+            <span class="optikon-icon">&#127919;</span>
+            Attach Optikon Board
+          </button>
+          <p class="task-modal-optikon-status" data-optikon-status hidden></p>
         </div>
         <div class="task-modal-actions">
           <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>

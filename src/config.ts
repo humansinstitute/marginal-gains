@@ -129,6 +129,9 @@ export const KEYTELEPORT_WELCOME_PUBKEY = Bun.env.KEYTELEPORT_WELCOME_PUBKEY ?? 
 // Welcome API configuration (for fetching user groups and invite codes)
 export const WELCOME_API_URL = Bun.env.WELCOME_API_URL ?? "https://welcome.otherstuff.ai";
 
+// Optikon visual boards integration
+export const OPTIKON_URL = Bun.env.OPTIKON_URL ?? "https://optikon.otherstuff.ai";
+
 // Derive Key Teleport identity from nsec or hex private key
 export function getKeyTeleportIdentity(): {
   npub: string;
