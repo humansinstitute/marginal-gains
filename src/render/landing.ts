@@ -1,7 +1,7 @@
 import { NOSTR_RELAYS } from "../config";
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
-import { renderPinModal, renderUnlockCodeModal } from "./components";
+import { renderKeyTeleportSetupModal, renderPinModal, renderUnlockCodeModal } from "./components";
 
 export function renderLandingPage() {
   return `<!doctype html>
@@ -16,6 +16,7 @@ ${renderHead()}
     ${renderNostrConnectModal()}
     ${renderPinModal()}
     ${renderUnlockCodeModal()}
+    ${renderKeyTeleportSetupModal()}
   </main>
   ${renderSessionSeed()}
   <script type="module" src="/app.js?v=3"></script>
@@ -60,6 +61,10 @@ function renderWelcome() {
 
 function renderAuth() {
   return `<section class="auth-panel" data-login-panel>
+    <div class="keyteleport-overlay" data-keyteleport-overlay hidden>
+      <div class="keyteleport-spinner"></div>
+      <p>Key Teleport in Progress</p>
+    </div>
     <h2>Sign in with Nostr to get started</h2>
     <p class="auth-description">Start with a quick Ephemeral ID or bring your own signer.</p>
     <div class="auth-actions">
@@ -81,6 +86,10 @@ function renderAuth() {
         </div>
         <button class="bunker-submit" type="submit">Sign in with secret</button>
       </form>
+      <div class="keyteleport-setup-section">
+        <p class="keyteleport-setup-label">Have a Welcome key manager?</p>
+        <button class="keyteleport-setup-btn" type="button" data-keyteleport-setup>Setup Key Teleport</button>
+      </div>
     </details>
     <p class="auth-error" data-login-error hidden></p>
   </section>`;

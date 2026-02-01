@@ -1,6 +1,6 @@
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 
-import { renderAppMenu, renderPinModal, renderUnlockCodeModal } from "./components";
+import { renderAppMenu, renderKeyTeleportSetupModal, renderPinModal, renderUnlockCodeModal } from "./components";
 
 import type { TeamBranding } from "../routes/app-settings";
 import type { DeepLink, Session } from "../types";
@@ -695,6 +695,10 @@ function renderAuthRequired() {
       <h2>Welcome to ${appName}</h2>
       <p class="auth-description">A nostr native community chat app, think slack, but client side encrypted and with a service that respects its users.</p>
       <section class="auth-panel" data-login-panel>
+        <div class="keyteleport-overlay" data-keyteleport-overlay hidden>
+          <div class="keyteleport-spinner"></div>
+          <p>Key Teleport in Progress</p>
+        </div>
         <div class="auth-actions">
           <button class="auth-option" type="button" data-login-method="ephemeral">Sign Up</button>
           <button class="auth-option auth-extension" type="button" data-login-method="extension">Log in with Nostr Extension</button>
@@ -713,6 +717,10 @@ function renderAuthRequired() {
             </div>
             <button class="bunker-submit" type="submit">Sign in with secret</button>
           </form>
+          <div class="keyteleport-setup-section">
+            <p class="keyteleport-setup-label">Have a Welcome key manager?</p>
+            <button class="keyteleport-setup-btn" type="button" data-keyteleport-setup>Setup Key Teleport</button>
+          </div>
         </details>
         <p class="auth-error" data-login-error hidden></p>
       </section>
@@ -720,6 +728,7 @@ function renderAuthRequired() {
     ${renderQrModal()}
     ${renderPinModal()}
     ${renderUnlockCodeModal()}
+    ${renderKeyTeleportSetupModal()}
   </section>`;
 }
 

@@ -107,7 +107,7 @@ import {
   handleFulfillKeyRequest,
   handleRejectKeyRequest,
 } from "./routes/key-requests";
-import { handleKeyTeleport } from "./routes/keyteleport";
+import { handleKeyTeleport, handleKeyTeleportRegister } from "./routes/keyteleport";
 import { handleGetWelcomeGroups, handleGetWelcomeInviteCode } from "./routes/welcome";
 import {
   handleGetPushStatus,
@@ -345,6 +345,9 @@ const server = Bun.serve({
         // Welcome API routes (for fetching user groups and invite codes from Welcome)
         if (pathname === "/api/welcome/groups") return handleGetWelcomeGroups(session);
         if (pathname === "/api/welcome/invite-code") return handleGetWelcomeInviteCode(session);
+
+        // Key Teleport registration endpoint (no auth required)
+        if (pathname === "/api/keyteleport/register") return handleKeyTeleportRegister(req);
 
         // Team-scoped chat page and SSE events
         const teamChatPageMatch = pathname.match(/^\/t\/([^/]+)\/chat$/);

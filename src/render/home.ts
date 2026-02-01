@@ -3,7 +3,7 @@ import { ALLOWED_STATE_TRANSITIONS, formatPriorityLabel, formatStateLabel } from
 import { getAppName, getFaviconUrl } from "../routes/app-settings";
 import { escapeHtml } from "../utils/html";
 
-import { renderAppMenu, renderPinModal, renderUnlockCodeModal } from "./components";
+import { renderAppMenu, renderKeyTeleportSetupModal, renderPinModal, renderUnlockCodeModal } from "./components";
 
 import type { Group, GroupMember, Todo } from "../db";
 import type { TeamBranding } from "../routes/app-settings";
@@ -85,6 +85,7 @@ ${renderHead()}
     ${renderProfileModal()}
     ${renderPinModal()}
     ${renderUnlockCodeModal()}
+    ${renderKeyTeleportSetupModal()}
     ${renderTaskEditModal(pageState.groupId, pageState.groupMembers, pageState.userGroups)}
   </main>
   ${renderSessionSeed(session, pageState.groupId, pageState.activeTodos)}
@@ -166,6 +167,10 @@ function renderAuth(session: Session | null) {
         </div>
         <button class="bunker-submit" type="submit">Sign in with secret</button>
       </form>
+      <div class="keyteleport-setup-section">
+        <p class="keyteleport-setup-label">Have a Welcome key manager?</p>
+        <button class="keyteleport-setup-btn" type="button" data-keyteleport-setup>Setup Key Teleport</button>
+      </div>
     </details>
     <p class="auth-error" data-login-error hidden></p>
   </section>`;
@@ -233,7 +238,7 @@ function renderWork(state: PageState) {
       </div>
     </div>
     <p class="remaining-summary">${state.remainingText}</p>
-    ${state.tagFilterBar}
+    ${isList ? state.tagFilterBar : ""}
     ${viewContent}
     ${state.showArchive ? renderArchiveSection(state.doneTodos, state.emptyArchiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub) : ""}
   </section>`;
@@ -669,6 +674,26 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
         >&times;</button>
       </div>
 
+      <!-- Tag filter (reactive) -->
+      <div class="tag-filter-bar" x-show="getAllTags().length > 0">
+        <span class="label">Filter by tag:</span>
+        <template x-for="tag in getAllTags()" :key="tag">
+          <button
+            type="button"
+            class="tag-chip"
+            :class="{ 'active': isTagActive(tag) }"
+            @click="toggleTag(tag)"
+            x-text="tag"
+          ></button>
+        </template>
+        <button
+          type="button"
+          class="clear-filters"
+          x-show="activeTags.length > 0"
+          @click="clearTagFilters()"
+        >Clear filters</button>
+      </div>
+
       <div class="kanban-scroll-top" data-kanban-scroll-top><div class="kanban-scroll-top-inner"></div></div>
       <div
         class="kanban-board"
@@ -1100,6 +1125,7 @@ ${renderTeamHead(branding)}
     ${renderProfileModal()}
     ${renderPinModal()}
     ${renderUnlockCodeModal()}
+    ${renderKeyTeleportSetupModal()}
     ${renderTeamTaskEditModal(pageState.groupId, teamSlug)}
   </main>
   ${renderTeamSessionSeed(session, pageState.groupId, teamSlug, pageState.activeTodos)}
@@ -1308,7 +1334,7 @@ function renderTeamWork(state: TeamPageState) {
       </div>
     </div>
     <p class="remaining-summary">${state.remainingText}</p>
-    ${state.tagFilterBar}
+    ${isList ? state.tagFilterBar : ""}
     ${viewContent}
     ${state.showArchive ? renderTeamArchiveSection(state.doneTodos, state.emptyArchiveMessage, state.groupId, state.canManage, state.teamSlug) : ""}
   </section>`;
