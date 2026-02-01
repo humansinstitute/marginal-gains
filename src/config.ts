@@ -122,9 +122,9 @@ if (WINGMAN_KEY) {
   console.log("[Wingman] WINGMAN_KEY not configured");
 }
 
-// Key Teleport configuration
+// Key Teleport v2 configuration
+// Only KEYTELEPORT_PRIVKEY is needed - decryption success validates the recipient
 export const KEYTELEPORT_PRIVKEY = Bun.env.KEYTELEPORT_PRIVKEY ?? "";
-export const KEYTELEPORT_WELCOME_PUBKEY = Bun.env.KEYTELEPORT_WELCOME_PUBKEY ?? "";
 
 // Welcome API configuration (for fetching user groups and invite codes)
 export const WELCOME_API_URL = Bun.env.WELCOME_API_URL ?? "https://welcome.otherstuff.ai";
@@ -169,36 +169,12 @@ export function getKeyTeleportIdentity(): {
   }
 }
 
-// Get the welcome pubkey (trusted key manager) as hex
-export function getKeyTeleportWelcomePubkey(): string | null {
-  if (!KEYTELEPORT_WELCOME_PUBKEY) {
-    return null;
-  }
-
-  try {
-    if (KEYTELEPORT_WELCOME_PUBKEY.startsWith("npub")) {
-      const decoded = nip19.decode(KEYTELEPORT_WELCOME_PUBKEY);
-      if (decoded.type !== "npub") {
-        console.error("[KeyTeleport] KEYTELEPORT_WELCOME_PUBKEY is not a valid npub");
-        return null;
-      }
-      return decoded.data as string;
-    } else if (/^[0-9a-fA-F]{64}$/.test(KEYTELEPORT_WELCOME_PUBKEY)) {
-      return KEYTELEPORT_WELCOME_PUBKEY;
-    } else {
-      console.error("[KeyTeleport] KEYTELEPORT_WELCOME_PUBKEY must be npub or 64-char hex");
-      return null;
-    }
-  } catch (err) {
-    console.error("[KeyTeleport] Failed to decode KEYTELEPORT_WELCOME_PUBKEY:", err);
-    return null;
-  }
-}
-
 // Startup logging for Key Teleport config
-if (KEYTELEPORT_PRIVKEY && KEYTELEPORT_WELCOME_PUBKEY) {
-  console.log("[KeyTeleport] Key Teleport configured");
-  getKeyTeleportIdentity();
+if (KEYTELEPORT_PRIVKEY) {
+  const identity = getKeyTeleportIdentity();
+  if (identity) {
+    console.log(`[KeyTeleport] Configured with pubkey ${identity.pubkey.slice(0, 12)}...`);
+  }
 }
 
 // Startup logging for Welcome API config

@@ -75,7 +75,7 @@ export async function getNostrSigner() {
  * @param {Object} params.nostrSigner - Nostr signer object
  * @returns {Promise<{boardId: number, boardUrl: string}|null>}
  */
-export async function createOptikonBoard({ title, description, workspaceId, optikonUrl, nostrSigner }) {
+export async function createOptikonBoard({ title, description, workspaceId, optikonUrl, nostrSigner, taskUrl }) {
   const url = `${optikonUrl}/boards`;
   const method = "POST";
 
@@ -104,16 +104,60 @@ export async function createOptikonBoard({ title, description, workspaceId, opti
     }
 
     const data = await response.json();
+    const boardId = data.id;
+    const boardUrl = data.url || `${optikonUrl}/b/${boardId}`;
 
-    // Optikon returns the board object with id and url
-    return {
-      boardId: data.id,
-      boardUrl: data.url || `${optikonUrl}/b/${data.id}`,
-    };
+    // Add a sticky note linking back to the task
+    if (taskUrl) {
+      try {
+        await addBoardElement(optikonUrl, boardId, nostrSigner, {
+          id: crypto.randomUUID(),
+          type: "sticky",
+          x: 50,
+          y: 50,
+          width: 250,
+          height: 120,
+          text: `📋 Task: ${title}\n\n${taskUrl}`,
+          color: "#fef08a", // yellow sticky
+        });
+      } catch (err) {
+        // Don't fail board creation if element creation fails
+        console.warn("[Optikon] Failed to add task link element:", err);
+      }
+    }
+
+    return { boardId, boardUrl };
   } catch (err) {
     console.error("[Optikon] Error creating board:", err);
     return null;
   }
+}
+
+/**
+ * Add an element to an Optikon board
+ */
+async function addBoardElement(optikonUrl, boardId, nostrSigner, element) {
+  const url = `${optikonUrl}/boards/${boardId}/elements`;
+  const method = "POST";
+
+  const authHeader = await createNip98Auth(url, method, nostrSigner);
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": authHeader,
+    },
+    body: JSON.stringify({ element }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("[Optikon] Failed to add element:", response.status, errorText);
+    return null;
+  }
+
+  return await response.json();
 }
 
 /**

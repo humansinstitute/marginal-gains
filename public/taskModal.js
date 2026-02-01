@@ -573,6 +573,9 @@ async function handleAttachOptikonBoard() {
       workspaceId = await getGroupOptikonWorkspace(teamSlug, Number(groupId));
     }
 
+    // Build task URL for linking back from Optikon
+    const taskUrl = `${window.location.origin}/t/${teamSlug}/tasks?task=${currentTaskId}`;
+
     // Create board via Optikon API (client-side NIP-98 signing)
     const result = await createOptikonBoard({
       title: taskTitle,
@@ -580,6 +583,7 @@ async function handleAttachOptikonBoard() {
       workspaceId,
       optikonUrl: config.optikonUrl,
       nostrSigner: signer,
+      taskUrl,
     });
 
     if (!result) {

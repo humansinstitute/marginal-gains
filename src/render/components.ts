@@ -65,6 +65,31 @@ export function renderUnlockCodeModal() {
   </div>`;
 }
 
+/**
+ * Render Key Teleport setup modal
+ * Shows registration blob for user to copy and paste into Welcome
+ */
+export function renderKeyTeleportSetupModal() {
+  return `<div class="keyteleport-setup-overlay" data-keyteleport-setup-modal hidden>
+    <div class="keyteleport-setup-modal">
+      <h2>Setup Key Teleport</h2>
+      <p>Copy this registration code and paste it into your Welcome key manager to register this app.</p>
+      <textarea
+        class="keyteleport-setup-blob"
+        data-keyteleport-setup-blob
+        readonly
+        rows="4"
+        placeholder="Loading..."
+      ></textarea>
+      <p class="keyteleport-setup-status" data-keyteleport-setup-status hidden></p>
+      <div class="keyteleport-setup-actions">
+        <button type="button" class="keyteleport-setup-cancel" data-keyteleport-setup-cancel>Close</button>
+        <button type="button" class="keyteleport-setup-copy" data-keyteleport-setup-copy>Copy Code</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 export type FeatureVisibility = {
   hideTasks?: boolean;
   hideCrm?: boolean;

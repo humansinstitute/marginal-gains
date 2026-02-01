@@ -94,6 +94,7 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
     draggedCard: null,
     draggedFromColumn: null,
     textFilter: '',
+    activeTags: [],
 
     // Parent/subtask relationship tracking
     parentMap: {},
@@ -666,14 +667,70 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
 
     // Column helpers
     getFilteredCards: function(columnName) {
+      var self = this;
       var cards = this.columns[columnName] || [];
-      if (!this.textFilter || this.textFilter.trim() === '') {
-        return cards;
+
+      // Filter by text
+      if (this.textFilter && this.textFilter.trim() !== '') {
+        var filterText = this.textFilter.toLowerCase().trim();
+        cards = cards.filter(function(card) {
+          return card.title && card.title.toLowerCase().indexOf(filterText) !== -1;
+        });
       }
-      var filterText = this.textFilter.toLowerCase().trim();
-      return cards.filter(function(card) {
-        return card.title && card.title.toLowerCase().indexOf(filterText) !== -1;
+
+      // Filter by active tags
+      if (this.activeTags && this.activeTags.length > 0) {
+        cards = cards.filter(function(card) {
+          var cardTags = self.getCardTags(card).map(function(t) { return t.toLowerCase(); });
+          return self.activeTags.some(function(activeTag) {
+            return cardTags.indexOf(activeTag.toLowerCase()) !== -1;
+          });
+        });
+      }
+
+      return cards;
+    },
+
+    // Get all unique tags from all cards
+    getAllTags: function() {
+      var self = this;
+      var allTags = {};
+
+      ['summary', 'new', 'ready', 'in_progress', 'review', 'done'].forEach(function(columnName) {
+        var cards = self.columns[columnName] || [];
+        cards.forEach(function(card) {
+          var tags = self.getCardTags(card);
+          tags.forEach(function(tag) {
+            var normalizedTag = tag.toLowerCase();
+            if (!allTags[normalizedTag]) {
+              allTags[normalizedTag] = tag; // Store original casing
+            }
+          });
+        });
       });
+
+      return Object.keys(allTags).sort();
+    },
+
+    // Toggle a tag filter
+    toggleTag: function(tag) {
+      var normalizedTag = tag.toLowerCase();
+      var index = this.activeTags.indexOf(normalizedTag);
+      if (index === -1) {
+        this.activeTags.push(normalizedTag);
+      } else {
+        this.activeTags.splice(index, 1);
+      }
+    },
+
+    // Check if a tag is active
+    isTagActive: function(tag) {
+      return this.activeTags.indexOf(tag.toLowerCase()) !== -1;
+    },
+
+    // Clear all tag filters
+    clearTagFilters: function() {
+      this.activeTags = [];
     },
 
     getColumnCount: function(columnName) {

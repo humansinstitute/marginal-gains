@@ -55,6 +55,7 @@ export const initAuth = () => {
   wireQrModal();
   wireNostrConnectModal();
   wireSecretToggle();
+  wireKeyTeleportSetup();
   initPinModal();
   initUnlockModal();
 
@@ -62,7 +63,7 @@ export const initAuth = () => {
     void fetchSummaries();
   }
 
-  // Check for Key Teleport first (URL param), then fragment login, then auto-login
+  // Check for Key Teleport first (fragment URL), then fragment login, then auto-login
   void checkKeyTeleport().then((handled) => {
     if (handled) return;
     return checkFragmentLogin();
@@ -660,22 +661,113 @@ const wireSecretToggle = () => {
 };
 
 /**
- * Check for Key Teleport login via URL parameter
- * Flow v2: ?keyteleport=<blob>&ic=<invite_code> -> POST to server -> receive encryptedNsec+npub
+ * Wire up Key Teleport setup button and modal
+ * Fetches registration blob and allows user to copy it
+ */
+const wireKeyTeleportSetup = () => {
+  const setupBtn = document.querySelector("[data-keyteleport-setup]");
+  const modal = document.querySelector("[data-keyteleport-setup-modal]");
+  const blobTextarea = document.querySelector("[data-keyteleport-setup-blob]");
+  const statusEl = document.querySelector("[data-keyteleport-setup-status]");
+  const copyBtn = document.querySelector("[data-keyteleport-setup-copy]");
+  const cancelBtn = document.querySelector("[data-keyteleport-setup-cancel]");
+
+  if (!setupBtn || !modal) return;
+
+  const showStatus = (message, isError = false) => {
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.classList.toggle("error", isError);
+      show(statusEl);
+    }
+  };
+
+  const hideStatus = () => {
+    hide(statusEl);
+  };
+
+  const openSetupModal = async () => {
+    show(modal);
+    hideStatus();
+    if (blobTextarea) blobTextarea.value = "Loading...";
+
+    try {
+      const response = await fetch("/api/keyteleport/register");
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to generate registration");
+      }
+
+      const { blob } = await response.json();
+      if (blobTextarea) blobTextarea.value = blob;
+    } catch (err) {
+      console.error("Key Teleport setup failed:", err);
+      if (blobTextarea) blobTextarea.value = "";
+      showStatus(err?.message || "Failed to generate registration", true);
+    }
+  };
+
+  const closeSetupModal = () => {
+    hide(modal);
+    if (blobTextarea) blobTextarea.value = "";
+    hideStatus();
+  };
+
+  setupBtn.addEventListener("click", openSetupModal);
+
+  cancelBtn?.addEventListener("click", closeSetupModal);
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeSetupModal();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (modal.hidden) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeSetupModal();
+    }
+  });
+
+  copyBtn?.addEventListener("click", async () => {
+    const blob = blobTextarea?.value;
+    if (!blob || blob === "Loading...") return;
+
+    try {
+      await navigator.clipboard.writeText(blob);
+      showStatus("Copied to clipboard!");
+      setTimeout(hideStatus, 2000);
+    } catch (err) {
+      // Fallback for browsers without clipboard API
+      blobTextarea?.select();
+      document.execCommand("copy");
+      showStatus("Copied to clipboard!");
+      setTimeout(hideStatus, 2000);
+    }
+  });
+};
+
+/**
+ * Check for Key Teleport login via URL fragment
+ * Flow v2: #keyteleport=<blob>&ic=<invite_code> -> POST to server -> receive encryptedNsec+npub
  *          -> prompt for unlock code (paste nsec) -> NIP-44 decrypt -> login -> auto-redeem invite
+ *
+ * Note: Fragment URLs (#) are never sent to the server, so the blob stays client-side only
  */
 const checkKeyTeleport = async () => {
-  const url = new URL(window.location.href);
-  const blob = url.searchParams.get("keyteleport");
+  const hash = window.location.hash;
+  if (!hash.includes("keyteleport=")) return false;
+
+  // Parse fragment as URL params (remove leading #)
+  const params = new URLSearchParams(hash.slice(1));
+  const blob = params.get("keyteleport");
   if (!blob) return false;
 
-  // Capture invite code before clearing URL params
-  const inviteCode = url.searchParams.get("ic");
+  // Capture invite code before clearing fragment
+  const inviteCode = params.get("ic");
 
-  // Clear the URL parameters immediately to prevent replay
-  url.searchParams.delete("keyteleport");
-  url.searchParams.delete("ic");
-  history.replaceState(null, "", url.pathname + url.search);
+  // Clear the fragment immediately - server never sees this
+  history.replaceState(null, "", window.location.pathname + window.location.search);
 
   authLog.info("Key Teleport: Processing teleport request");
 
