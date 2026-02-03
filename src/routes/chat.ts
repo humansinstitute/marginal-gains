@@ -809,7 +809,7 @@ export async function handleToggleReaction(req: Request, session: Session | null
  * Pin a message to a channel
  * POST /api/channels/:id/messages/:messageId/pin
  */
-export async function handlePinMessage(
+export function handlePinMessage(
   _req: Request,
   session: Session | null,
   channelId: number,
@@ -859,7 +859,7 @@ export async function handlePinMessage(
  * Unpin a message from a channel
  * DELETE /api/channels/:id/messages/:messageId/pin
  */
-export async function handleUnpinMessage(
+export function handleUnpinMessage(
   _req: Request,
   session: Session | null,
   channelId: number,
@@ -899,7 +899,7 @@ export async function handleUnpinMessage(
  * Get all pinned messages for a channel
  * GET /api/channels/:id/pinned
  */
-export async function handleGetPinnedMessages(
+export function handleGetPinnedMessages(
   _req: Request,
   session: Session | null,
   channelId: number
@@ -928,7 +928,7 @@ export async function handleGetPinnedMessages(
  * Check if a specific message is pinned
  * GET /api/channels/:id/messages/:messageId/pinned
  */
-export async function handleCheckMessagePinned(
+export function handleCheckMessagePinned(
   _req: Request,
   session: Session | null,
   channelId: number,

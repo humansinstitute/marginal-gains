@@ -246,7 +246,8 @@ async function fetchGroupMembers(groupId) {
   try {
     const res = await fetch(teamUrl(`/groups/${groupId}/members`));
     if (!res.ok) return;
-    groupMembers = await res.json();
+    const data = await res.json();
+    groupMembers = data.members || [];
     renderMembers();
   } catch (_err) {
     console.error("[Settings] Failed to fetch group members");

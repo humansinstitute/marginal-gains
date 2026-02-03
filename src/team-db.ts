@@ -326,10 +326,10 @@ export class TeamDatabase {
   }
 
   addSubtask(title: string, parentId: number, assignedTo: string | null = null): Todo | null {
-    // Inherit group_id and owner from parent
+    // Inherit group_id, owner, and tags from parent
     return this.db.query<Todo, [string, string | null, number]>(
       `INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id, assigned_to, parent_id)
-       SELECT ?, '', 'sand', 'new', 0, owner, '', group_id, ?, ?
+       SELECT ?, '', 'sand', 'new', 0, owner, tags, group_id, ?, ?
        FROM todos WHERE id = ?
        RETURNING *`
     ).get(title, assignedTo, parentId, parentId) ?? null;

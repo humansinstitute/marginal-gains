@@ -83,7 +83,7 @@ export async function handleSetTodoOptikonBoard(
  * DELETE /t/:slug/api/todos/:id/optikon
  * Remove Optikon board link from a task
  */
-export async function handleClearTodoOptikonBoard(
+export function handleClearTodoOptikonBoard(
   session: Session | null,
   teamSlug: string,
   todoId: number
@@ -120,7 +120,7 @@ export async function handleClearTodoOptikonBoard(
  * GET /t/:slug/groups/:id/optikon-workspace
  * Get the default Optikon workspace for a group
  */
-export async function handleGetGroupOptikonWorkspace(
+export function handleGetGroupOptikonWorkspace(
   session: Session | null,
   teamSlug: string,
   groupId: number

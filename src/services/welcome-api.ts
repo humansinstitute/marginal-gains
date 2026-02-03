@@ -6,14 +6,8 @@
  */
 
 import { finalizeEvent } from "nostr-tools";
-import { getKeyTeleportIdentity, WELCOME_API_URL } from "../config";
 
-// Convert Uint8Array to hex string
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+import { getKeyTeleportIdentity, WELCOME_API_URL } from "../config";
 
 /**
  * Create a NIP-98 Authorization header for Welcome API requests

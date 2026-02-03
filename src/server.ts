@@ -108,7 +108,6 @@ import {
   handleRejectKeyRequest,
 } from "./routes/key-requests";
 import { handleKeyTeleport, handleKeyTeleportRegister } from "./routes/keyteleport";
-import { handleGetWelcomeGroups, handleGetWelcomeInviteCode } from "./routes/welcome";
 import {
   handleGetPushStatus,
   handleGetVapidPublicKey,
@@ -282,6 +281,7 @@ import {
   handleWalletInvoice,
   handleWalletPay,
 } from "./routes/wallet";
+import { handleGetWelcomeGroups, handleGetWelcomeInviteCode } from "./routes/welcome";
 import {
   handleGetSlashCommands,
   handleGetWingmanSettings,

@@ -996,13 +996,13 @@ export async function handleTeamToggleReaction(
  * Pin a message to a channel
  * POST /t/:teamSlug/api/channels/:id/messages/:messageId/pin
  */
-export async function handleTeamPinMessage(
+export function handleTeamPinMessage(
   _req: Request,
   session: Session | null,
   teamSlug: string,
   channelId: number,
   messageId: number
-): Promise<Response> {
+): Response {
   const result = requireTeamContext(session, teamSlug);
   if (!result.ok) return result.response;
 
@@ -1051,13 +1051,13 @@ export async function handleTeamPinMessage(
  * Unpin a message from a channel
  * DELETE /t/:teamSlug/api/channels/:id/messages/:messageId/pin
  */
-export async function handleTeamUnpinMessage(
+export function handleTeamUnpinMessage(
   _req: Request,
   session: Session | null,
   teamSlug: string,
   channelId: number,
   messageId: number
-): Promise<Response> {
+): Response {
   const result = requireTeamContext(session, teamSlug);
   if (!result.ok) return result.response;
 
@@ -1096,12 +1096,12 @@ export async function handleTeamUnpinMessage(
  * Get all pinned messages for a channel
  * GET /t/:teamSlug/api/channels/:id/pinned
  */
-export async function handleTeamGetPinnedMessages(
+export function handleTeamGetPinnedMessages(
   _req: Request,
   session: Session | null,
   teamSlug: string,
   channelId: number
-): Promise<Response> {
+): Response {
   const result = requireTeamContext(session, teamSlug);
   if (!result.ok) return result.response;
 
@@ -1132,13 +1132,13 @@ export async function handleTeamGetPinnedMessages(
  * Check if a specific message is pinned
  * GET /t/:teamSlug/api/channels/:id/messages/:messageId/pinned
  */
-export async function handleTeamCheckMessagePinned(
+export function handleTeamCheckMessagePinned(
   _req: Request,
   session: Session | null,
   teamSlug: string,
   channelId: number,
   messageId: number
-): Promise<Response> {
+): Response {
   const result = requireTeamContext(session, teamSlug);
   if (!result.ok) return result.response;
 

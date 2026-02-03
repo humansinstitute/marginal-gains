@@ -916,7 +916,7 @@ const countSubtasksStmt = db.query<{ count: number }>(
 );
 const insertSubtaskStmt = db.query<Todo>(
   `INSERT INTO todos (title, description, priority, state, done, owner, tags, group_id, assigned_to, parent_id)
-   SELECT ?, '', 'sand', 'new', 0, owner, '', group_id, ?, ?
+   SELECT ?, '', 'sand', 'new', 0, owner, tags, group_id, ?, ?
    FROM todos WHERE id = ?
    RETURNING *`
 );
