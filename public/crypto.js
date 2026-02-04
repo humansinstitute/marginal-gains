@@ -293,26 +293,64 @@ export async function unwrapKey(wrappedKeyJson) {
   const nip44 = await loadNip44();
   const senderPubkey = wrapped.created_by;
 
+  console.log("[Crypto] unwrapKey - attempting to decrypt key from sender:", senderPubkey?.slice(0, 16) + "...");
+
   // Check if using NIP-07 extension with NIP-44 support
   if (window.nostr?.nip44?.decrypt) {
-    return await window.nostr.nip44.decrypt(senderPubkey, wrapped.key);
+    console.log("[Crypto] unwrapKey - using NIP-07 extension");
+    try {
+      const result = await window.nostr.nip44.decrypt(senderPubkey, wrapped.key);
+      console.log("[Crypto] unwrapKey - NIP-07 decrypt succeeded");
+      return result;
+    } catch (err) {
+      console.error("[Crypto] unwrapKey - NIP-07 decrypt failed:", err.message);
+      console.error("[Crypto] This may indicate the key was wrapped for a different pubkey than your extension's");
+      throw new Error(`Extension NIP-44 decrypt failed: ${err.message}. The key may have been encrypted for a different identity.`);
+    }
   }
 
   // Check for bunker (NIP-46) connection
   if (isBunkerLogin()) {
-    console.log("[Crypto] Using bunker (NIP-46) for decryption");
-    return await bunkerNip44Decrypt(senderPubkey, wrapped.key);
+    console.log("[Crypto] unwrapKey - using bunker (NIP-46)");
+    try {
+      const result = await bunkerNip44Decrypt(senderPubkey, wrapped.key);
+      console.log("[Crypto] unwrapKey - bunker decrypt succeeded");
+      return result;
+    } catch (err) {
+      console.error("[Crypto] unwrapKey - bunker decrypt failed:", err.message);
+      throw new Error(`Bunker NIP-44 decrypt failed: ${err.message}. Check your remote signer connection.`);
+    }
   }
 
   // Fallback to ephemeral key
   const secretKey = getEphemeralSecretKey();
   if (!secretKey) {
+    console.error("[Crypto] unwrapKey - no decryption method available");
+    console.error("[Crypto] Debug info:", {
+      hasNostrExtension: !!window.nostr,
+      hasNip44: !!window.nostr?.nip44,
+      isBunker: isBunkerLogin(),
+      hasSessionKey: !!sessionStorage.getItem(EPHEMERAL_SECRET_KEY),
+      hasLocalKey: !!localStorage.getItem(EPHEMERAL_SECRET_KEY),
+    });
     throw new Error("No decryption method available. Use a NIP-07 extension, bunker, or ephemeral login.");
   }
 
-  // NIP-44 v2: privkeyA as Uint8Array, pubkeyB as hex string
-  const conversationKey = nip44.v2.utils.getConversationKey(secretKey, senderPubkey);
-  return nip44.v2.decrypt(wrapped.key, conversationKey);
+  console.log("[Crypto] unwrapKey - using ephemeral key");
+  try {
+    // NIP-44 v2: privkeyA as Uint8Array, pubkeyB as hex string
+    const conversationKey = nip44.v2.utils.getConversationKey(secretKey, senderPubkey);
+    const result = nip44.v2.decrypt(wrapped.key, conversationKey);
+    console.log("[Crypto] unwrapKey - ephemeral decrypt succeeded");
+    return result;
+  } catch (err) {
+    console.error("[Crypto] unwrapKey - ephemeral decrypt failed:", err.message);
+    const { pure } = await loadNostrLibs();
+    const myPubkey = pure.getPublicKey(secretKey);
+    console.error("[Crypto] My ephemeral pubkey:", myPubkey?.slice(0, 16) + "...");
+    console.error("[Crypto] Sender pubkey (created_by):", senderPubkey?.slice(0, 16) + "...");
+    throw new Error(`Ephemeral NIP-44 decrypt failed: ${err.message}. Your current identity may not match the one the key was encrypted for.`);
+  }
 }
 
 /**

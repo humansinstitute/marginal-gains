@@ -846,6 +846,32 @@ export function handleTeamGetPendingKeyMembers(
   });
 }
 
+/**
+ * Get all encrypted channels with pending key distributions.
+ * Returns channels where the current user (admin/owner) can distribute keys.
+ * Used for background key distribution on app load.
+ */
+export function handleTeamGetAllPendingKeys(
+  session: Session | null,
+  teamSlug: string
+): Response {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) return result.response;
+
+  const { ctx } = result;
+  const db = new TeamDatabase(ctx.teamDb);
+  const userIsAdmin = isAdmin(ctx.session.npub);
+
+  const channelsWithPending = db.getEncryptedChannelsWithPendingKeys(
+    ctx.session.npub,
+    userIsAdmin
+  );
+
+  return jsonResponse({
+    channels: channelsWithPending,
+  });
+}
+
 export function handleTeamListChannelGroups(
   session: Session | null,
   teamSlug: string,

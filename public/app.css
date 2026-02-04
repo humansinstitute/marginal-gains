@@ -2105,6 +2105,43 @@ details summary {
   font-weight: 600;
 }
 
+/* Decryption error styling */
+.chat-message-decryption-failed {
+  opacity: 0.8;
+}
+.chat-message-decryption-failed .chat-message-body {
+  color: var(--warning, #d97706);
+}
+.decryption-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--warning, #d97706);
+  font-style: italic;
+}
+.decryption-error-icon {
+  font-style: normal;
+}
+.btn-refetch-key {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--chat-accent, #3b82f6);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-refetch-key:hover {
+  background: var(--chat-accent, #3b82f6);
+  color: white;
+  border-color: var(--chat-accent, #3b82f6);
+}
+.btn-refetch-key:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Message action menu */
 .chat-message-content {
   position: relative;

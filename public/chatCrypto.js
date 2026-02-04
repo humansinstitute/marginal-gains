@@ -15,6 +15,7 @@ import {
   fetchCommunityKey,
   getCachedCommunityKey,
 } from "./communityCrypto.js";
+import { EPHEMERAL_SECRET_KEY } from "./constants.js";
 import {
   fetchTeamKey,
   getCachedTeamKey,
@@ -74,12 +75,18 @@ export function clearCachedChannelKey(channelId) {
 /**
  * Fetch and unwrap channel key from server
  * @param {string} channelId
+ * @param {boolean} forceRefresh - Skip cache and refetch from server
  * @returns {Promise<string|null>} Base64-encoded channel key
  */
-export async function fetchChannelKey(channelId) {
-  // Check cache first
-  const cached = getCachedChannelKey(channelId);
-  if (cached) return cached;
+export async function fetchChannelKey(channelId, forceRefresh = false) {
+  // Check cache first (unless forcing refresh)
+  if (!forceRefresh) {
+    const cached = getCachedChannelKey(channelId);
+    if (cached) return cached;
+  } else {
+    console.log("[ChatCrypto] Force refreshing key for channel", channelId);
+    clearCachedChannelKey(channelId);
+  }
 
   try {
     const res = await fetch(chatUrl(`/channels/${channelId}/keys`), {
@@ -87,10 +94,27 @@ export async function fetchChannelKey(channelId) {
     });
     if (!res.ok) {
       console.warn("[ChatCrypto] No key found for channel", channelId, "status:", res.status);
+      if (res.status === 404) {
+        console.warn("[ChatCrypto] This likely means your pubkey doesn't have an encrypted key stored.");
+        console.warn("[ChatCrypto] Session pubkey:", state.session?.pubkey?.slice(0, 16) + "...");
+      }
       return null;
     }
     const data = await res.json();
     const wrappedKey = data.encrypted_key;
+
+    // Log wrapped key metadata for debugging
+    try {
+      const wrapped = JSON.parse(wrappedKey);
+      console.log("[ChatCrypto] Wrapped key metadata:", {
+        version: wrapped.v,
+        algorithm: wrapped.alg,
+        createdBy: wrapped.created_by?.slice(0, 16) + "...",
+        createdAt: wrapped.created_at,
+      });
+    } catch (_e) {
+      console.warn("[ChatCrypto] Could not parse wrapped key metadata");
+    }
 
     // Unwrap the key using NIP-44
     const channelKey = await unwrapKey(wrappedKey);
@@ -101,8 +125,25 @@ export async function fetchChannelKey(channelId) {
     return channelKey;
   } catch (err) {
     console.error("[ChatCrypto] Failed to fetch/unwrap key:", err);
+    console.error("[ChatCrypto] Unwrap error details:", {
+      message: err.message,
+      name: err.name,
+      hasNostrExtension: !!window.nostr,
+      hasNip44Support: !!window.nostr?.nip44,
+      hasEphemeralKey: !!sessionStorage.getItem(EPHEMERAL_SECRET_KEY) || !!localStorage.getItem(EPHEMERAL_SECRET_KEY),
+    });
     return null;
   }
+}
+
+/**
+ * Force refetch channel key from server, clearing cache
+ * Useful when user suspects key issues
+ * @param {string} channelId
+ * @returns {Promise<string|null>} Base64-encoded channel key
+ */
+export async function refetchChannelKey(channelId) {
+  return fetchChannelKey(channelId, true);
 }
 
 /**
@@ -588,8 +629,10 @@ export async function processMessagesForDisplay(messages, channelId) {
 
   if (!key) {
     // Return messages with placeholder for encrypted content
+    // Include channelId so the refetch button knows which channel to target
     return messages.map((m) => ({
       ...m,
+      channelId,
       body: m.encrypted ? "[Unable to decrypt - no key available]" : m.body,
       decryptionFailed: m.encrypted,
     }));
@@ -598,13 +641,14 @@ export async function processMessagesForDisplay(messages, channelId) {
   // Decrypt each encrypted message
   const processed = await Promise.all(
     messages.map(async (m) => {
-      if (!m.encrypted) return m;
+      if (!m.encrypted) return { ...m, channelId };
 
       try {
         const result = await decryptAuthenticatedMessage(m.body, key);
         if (result.valid) {
           return {
             ...m,
+            channelId,
             body: result.content,
             decryptedSender: result.sender,
             isEncrypted: true,
@@ -612,6 +656,7 @@ export async function processMessagesForDisplay(messages, channelId) {
         } else {
           return {
             ...m,
+            channelId,
             body: "[Message signature invalid]",
             decryptionFailed: true,
           };
@@ -619,6 +664,7 @@ export async function processMessagesForDisplay(messages, channelId) {
       } catch (_err) {
         return {
           ...m,
+          channelId,
           body: "[Decryption failed]",
           decryptionFailed: true,
         };
@@ -740,4 +786,92 @@ export async function setupAllDmEncryption() {
   }
 
   console.log("[ChatCrypto] DM encryption setup complete");
+}
+
+/**
+ * Run background key distribution for all encrypted channels.
+ * This silently distributes keys to members who joined via invite codes
+ * but don't yet have their own NIP-44 wrapped copy of the channel key.
+ *
+ * Should be called on app load for admins/channel owners.
+ * @returns {Promise<{channelsProcessed: number, keysDistributed: number, errors: number}>}
+ */
+export async function runBackgroundKeyDistribution() {
+  console.log("[ChatCrypto] Starting background key distribution check...");
+
+  try {
+    // Fetch all encrypted channels with pending key distributions
+    const res = await fetch(chatUrl("/keys/pending-all"), {
+      credentials: "same-origin",
+    });
+
+    if (!res.ok) {
+      // User may not have permission (not admin/owner) - this is fine
+      if (res.status === 403) {
+        console.log("[ChatCrypto] User is not admin/owner, skipping background key distribution");
+        return { channelsProcessed: 0, keysDistributed: 0, errors: 0 };
+      }
+      console.warn("[ChatCrypto] Failed to fetch pending keys:", res.status);
+      return { channelsProcessed: 0, keysDistributed: 0, errors: 1 };
+    }
+
+    const data = await res.json();
+    const channelsWithPending = data.channels || [];
+
+    if (channelsWithPending.length === 0) {
+      console.log("[ChatCrypto] No channels with pending key distributions");
+      return { channelsProcessed: 0, keysDistributed: 0, errors: 0 };
+    }
+
+    console.log(`[ChatCrypto] Found ${channelsWithPending.length} channels with pending key distributions`);
+
+    let totalKeysDistributed = 0;
+    let totalErrors = 0;
+
+    // Process each channel
+    for (const channel of channelsWithPending) {
+      console.log(`[ChatCrypto] Distributing keys for channel "${channel.channelName}" (${channel.pendingMembers.length} pending)`);
+
+      // Get the channel key first
+      const channelKey = await fetchChannelKey(String(channel.channelId));
+      if (!channelKey) {
+        console.error(`[ChatCrypto] Cannot distribute keys for channel ${channel.channelId} - no key available`);
+        totalErrors++;
+        continue;
+      }
+
+      // Distribute to each pending member
+      for (const member of channel.pendingMembers) {
+        if (!member.pubkey) {
+          console.warn(`[ChatCrypto] Skipping member ${member.npub} - no pubkey`);
+          continue;
+        }
+
+        try {
+          const ok = await distributeKeyToMember(String(channel.channelId), member.pubkey);
+          if (ok) {
+            console.log(`[ChatCrypto] ✓ Distributed key to ${member.displayName || member.npub}`);
+            totalKeysDistributed++;
+          } else {
+            console.error(`[ChatCrypto] ✗ Failed to distribute key to ${member.displayName || member.npub}`);
+            totalErrors++;
+          }
+        } catch (err) {
+          console.error(`[ChatCrypto] Error distributing key to ${member.displayName || member.npub}:`, err);
+          totalErrors++;
+        }
+      }
+    }
+
+    console.log(`[ChatCrypto] Background key distribution complete: ${totalKeysDistributed} keys distributed, ${totalErrors} errors`);
+
+    return {
+      channelsProcessed: channelsWithPending.length,
+      keysDistributed: totalKeysDistributed,
+      errors: totalErrors,
+    };
+  } catch (err) {
+    console.error("[ChatCrypto] Error in background key distribution:", err);
+    return { channelsProcessed: 0, keysDistributed: 0, errors: 1 };
+  }
 }

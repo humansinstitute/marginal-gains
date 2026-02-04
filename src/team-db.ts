@@ -1020,6 +1020,64 @@ export class TeamDatabase {
     return rows.map(r => r.npub);
   }
 
+  /**
+   * Get all encrypted channels where the user (admin/owner) can distribute keys,
+   * along with pending members who need keys.
+   * Returns only channels that have at least one pending member.
+   */
+  getEncryptedChannelsWithPendingKeys(npub: string, isUserAdmin: boolean): Array<{
+    channelId: number;
+    channelName: string;
+    pendingMembers: Array<{ npub: string; pubkey: string | null; displayName: string | null }>;
+  }> {
+    // Get all encrypted channels where user is creator or is admin
+    const encryptedChannels = this.db.query<
+      { id: number; name: string; creator: string },
+      []
+    >(
+      `SELECT id, name, creator FROM channels WHERE encrypted = 1 AND owner_npub IS NULL`
+    ).all();
+
+    const results: Array<{
+      channelId: number;
+      channelName: string;
+      pendingMembers: Array<{ npub: string; pubkey: string | null; displayName: string | null }>;
+    }> = [];
+
+    for (const channel of encryptedChannels) {
+      // Only process if user is owner or admin
+      if (channel.creator !== npub && !isUserAdmin) {
+        continue;
+      }
+
+      const pendingNpubs = this.getChannelMembersWithoutKeys(channel.id);
+      if (pendingNpubs.length === 0) {
+        continue;
+      }
+
+      const pendingMembers = pendingNpubs
+        .map((memberNpub) => {
+          const user = this.getUserByNpub(memberNpub);
+          return {
+            npub: memberNpub,
+            pubkey: user?.pubkey || null,
+            displayName: user?.display_name || null,
+          };
+        })
+        .filter((m) => m.pubkey); // Only include members with pubkeys
+
+      if (pendingMembers.length > 0) {
+        results.push({
+          channelId: channel.id,
+          channelName: channel.name,
+          pendingMembers,
+        });
+      }
+    }
+
+    return results;
+  }
+
   getEncryptedChannelsForGroup(groupId: number): Channel[] {
     return this.db.query<Channel, [number]>(
       `SELECT c.* FROM channels c

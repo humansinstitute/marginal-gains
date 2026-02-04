@@ -148,6 +148,7 @@ import {
   handleTeamGetMe,
   handleTeamGetMessages,
   handleTeamGetPendingKeyMembers,
+  handleTeamGetAllPendingKeys,
   handleTeamGetPinnedMessages,
   handleTeamListChannelGroups,
   handleTeamListChannels,
@@ -428,6 +429,12 @@ const server = Bun.serve({
         const teamChannelKeysPendingMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels\/(\d+)\/keys\/pending$/);
         if (teamChannelKeysPendingMatch) {
           return handleTeamGetPendingKeyMembers(session, teamChannelKeysPendingMatch[1], Number(teamChannelKeysPendingMatch[2]));
+        }
+
+        // Get all encrypted channels with pending key distributions (for background distribution)
+        const teamAllPendingKeysMatch = pathname.match(/^\/t\/([^/]+)\/chat\/keys\/pending-all$/);
+        if (teamAllPendingKeysMatch) {
+          return handleTeamGetAllPendingKeys(session, teamAllPendingKeysMatch[1]);
         }
 
         // Team-level encryption routes (zero-knowledge key distribution)

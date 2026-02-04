@@ -32,6 +32,8 @@ import {
   setupAllDmEncryption,
   fetchChannelKey,
   clearCachedChannelKey,
+  runBackgroundKeyDistribution,
+  refetchChannelKey,
 } from "./chatCrypto.js";
 import { checkEncryptionSupport } from "./crypto.js";
 import { fetchCommunityKey, getCommunityStatus } from "./communityCrypto.js";
@@ -1008,6 +1010,13 @@ async function fetchChannels() {
         console.warn("[Chat] Failed to setup DM encryption:", err);
       });
     }
+
+    // Background key distribution: silently distribute keys to members who
+    // joined via invite codes but don't have their own NIP-44 wrapped key.
+    // Server-side checks admin/owner permission, so we can call unconditionally.
+    runBackgroundKeyDistribution().catch(err => {
+      console.warn("[Chat] Background key distribution error:", err);
+    });
   } catch (_err) {
     // Ignore fetch errors
   }
@@ -1890,6 +1899,35 @@ function renderThreads() {
       openThread(threadId, messages, byParent);
     };
     wireTouchAwareHandler(replySection, handler);
+  });
+
+  // Wire up refetch key buttons for decryption errors
+  el.chatThreadList.querySelectorAll("[data-refetch-channel]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const channelId = btn.dataset.refetchChannel;
+      btn.disabled = true;
+      btn.textContent = "Refetching...";
+
+      try {
+        console.log("[Chat] Manually refetching key for channel", channelId);
+        const key = await refetchChannelKey(channelId);
+        if (key) {
+          console.log("[Chat] Key refetch successful, re-rendering messages");
+          // Re-fetch and re-render messages
+          await fetchMessages(channelId);
+        } else {
+          console.error("[Chat] Key refetch returned null");
+          btn.textContent = "Key not found";
+          setTimeout(() => { btn.textContent = "Refetch key"; btn.disabled = false; }, 3000);
+        }
+      } catch (err) {
+        console.error("[Chat] Key refetch failed:", err);
+        btn.textContent = "Failed";
+        setTimeout(() => { btn.textContent = "Refetch key"; btn.disabled = false; }, 3000);
+      }
+    });
   });
 }
 

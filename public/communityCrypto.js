@@ -198,10 +198,11 @@ export async function fetchCommunityKey() {
 
 /**
  * Get the current user's ephemeral secret key or null
+ * Checks sessionStorage first (key teleport), then localStorage
  * @returns {Uint8Array|null}
  */
 function getEphemeralSecretKey() {
-  const stored = localStorage.getItem(EPHEMERAL_SECRET_KEY);
+  const stored = sessionStorage.getItem(EPHEMERAL_SECRET_KEY) || localStorage.getItem(EPHEMERAL_SECRET_KEY);
   if (!stored) return null;
 
   // Validate hex format (should be exactly 64 chars for 32 bytes)
@@ -218,6 +219,7 @@ function getEphemeralSecretKey() {
 
 /**
  * Get current user's public key (hex)
+ * Checks sessionStorage first (key teleport), then localStorage
  * @returns {Promise<string>}
  */
 async function getCurrentPubkey() {
@@ -228,8 +230,8 @@ async function getCurrentPubkey() {
     return pubkey;
   }
 
-  // Try ephemeral key from localStorage
-  const stored = localStorage.getItem(EPHEMERAL_SECRET_KEY);
+  // Try ephemeral key - sessionStorage first (key teleport), then localStorage
+  const stored = sessionStorage.getItem(EPHEMERAL_SECRET_KEY) || localStorage.getItem(EPHEMERAL_SECRET_KEY);
   if (stored) {
     console.log("[CommunityCrypto] getCurrentPubkey - stored hex length:", stored.length);
 

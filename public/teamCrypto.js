@@ -15,6 +15,7 @@
 import { loadNostrLibs, bytesToHex, hexToBytes } from "./nostr.js";
 import { wrapKeyForUser, unwrapKey, generateChannelKey } from "./crypto.js";
 import { state } from "./state.js";
+import { EPHEMERAL_SECRET_KEY } from "./constants.js";
 
 // Key cache in sessionStorage
 const TEAM_KEY_CACHE_PREFIX = "mg_team_key_";
@@ -256,8 +257,8 @@ export async function storeEncryptedKeyForInvite(inviteCode, codeHash) {
       // Extension wallet - we'll need to use window.nostr.nip44.encrypt
       creatorPubkey = await window.nostr.getPublicKey();
     } else {
-      // Ephemeral key - use stored secret key
-      const stored = localStorage.getItem("ephemeral_secret_key");
+      // Ephemeral key - check sessionStorage first (key teleport), then localStorage
+      const stored = sessionStorage.getItem(EPHEMERAL_SECRET_KEY) || localStorage.getItem(EPHEMERAL_SECRET_KEY);
       if (!stored) {
         return { success: false, error: "No signing key available" };
       }
@@ -391,12 +392,12 @@ export async function redeemInviteForTeamKey(inviteCode, teamSlug) {
     const teamKey = nip44.decrypt(encryptedTeamKey, conversationKey);
     console.log("[TeamCrypto] Decrypted team key, length:", teamKey.length);
 
-    // Get user's pubkey
+    // Get user's pubkey - check sessionStorage first (key teleport), then localStorage
     let userPubkey;
     if (window.nostr?.getPublicKey) {
       userPubkey = await window.nostr.getPublicKey();
     } else {
-      const stored = localStorage.getItem("ephemeral_secret_key");
+      const stored = sessionStorage.getItem(EPHEMERAL_SECRET_KEY) || localStorage.getItem(EPHEMERAL_SECRET_KEY);
       if (!stored) {
         return { success: false, error: "No signing key available" };
       }

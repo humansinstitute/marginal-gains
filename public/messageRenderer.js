@@ -33,8 +33,27 @@ export function getFileIcon(ext) {
   return icons[ext] || icons.default;
 }
 
+/**
+ * Render decryption error message with refetch button
+ * @param {string} channelId - Channel ID for refetch
+ * @returns {string} HTML for decryption error
+ */
+function renderDecryptionError(channelId) {
+  return `<span class="decryption-error">
+    <span class="decryption-error-icon">&#128274;</span>
+    Unable to decrypt message
+    <button class="btn-refetch-key" data-refetch-channel="${channelId}" title="Try to refetch encryption key">
+      Refetch key
+    </button>
+  </span>`;
+}
+
 // Parse message body and render mentions, images, and file links
-export function renderMessageBody(body) {
+export function renderMessageBody(body, options = {}) {
+  // Check if this is a decryption error message
+  if (options.decryptionFailed && options.channelId) {
+    return renderDecryptionError(options.channelId);
+  }
   // First escape the whole body
   let html = escapeHtml(body);
 
@@ -128,14 +147,19 @@ export function renderMessageCompact(message, { showAvatar = false, isThreadRoot
   const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
   const reactionsHtml = renderReactionPills(message.reactions, message.id, currentUserNpub);
   const quickReactHtml = renderQuickReactBar(message.id);
-  return `<div class="chat-message${showAvatar ? " chat-message-with-avatar" : ""}" data-message-id="${message.id}">
+  const decryptionClass = message.decryptionFailed ? " chat-message-decryption-failed" : "";
+  const bodyHtml = renderMessageBody(message.body, {
+    decryptionFailed: message.decryptionFailed,
+    channelId: message.channelId,
+  });
+  return `<div class="chat-message${showAvatar ? " chat-message-with-avatar" : ""}${decryptionClass}" data-message-id="${message.id}">
     ${avatarHtml}
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
         <time>${formatSmartTimestamp(message.createdAt)}</time>
       </div>
-      <p class="chat-message-body">${renderMessageBody(message.body)}</p>
+      <p class="chat-message-body">${bodyHtml}</p>
       ${reactionsHtml}
       ${menuHtml}
     </div>
@@ -151,14 +175,19 @@ export function renderMessageFull(message, { isThreadRoot = false, threadRootId 
   const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
   const reactionsHtml = renderReactionPills(message.reactions, message.id, currentUserNpub);
   const quickReactHtml = renderQuickReactBar(message.id);
-  return `<div class="chat-message chat-message-with-avatar" data-message-id="${message.id}">
+  const decryptionClass = message.decryptionFailed ? " chat-message-decryption-failed" : "";
+  const bodyHtml = renderMessageBody(message.body, {
+    decryptionFailed: message.decryptionFailed,
+    channelId: message.channelId,
+  });
+  return `<div class="chat-message chat-message-with-avatar${decryptionClass}" data-message-id="${message.id}">
     <img class="chat-thread-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
         <time>${formatSmartTimestamp(message.createdAt)}</time>
       </div>
-      <p class="chat-message-body">${renderMessageBody(message.body)}</p>
+      <p class="chat-message-body">${bodyHtml}</p>
       ${reactionsHtml}
       ${menuHtml}
     </div>
