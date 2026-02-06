@@ -48,7 +48,7 @@ export async function uploadFilesToInput(files, inputEl, sendBtn, defaultPlaceho
       }
 
       const payload = await res.json();
-      const markdown = payload.isImage
+      const markdown = (payload.isImage || payload.isVideo)
         ? `![${file.name}](${payload.url})`
         : `[${file.name}](${payload.url})`;
 

@@ -12,6 +12,12 @@ import { renderPinModal, renderUnlockCodeModal } from "./components";
 import type { Team, TeamMembership, TeamInvitation } from "../db-router";
 import type { Session, SessionTeamMembership } from "../types";
 
+// Enriched member type with optional profile data
+export type EnrichedTeamMember = TeamMembership & {
+  display_name: string | null;
+  picture: string | null;
+};
+
 // Group info for invite modal
 export type InviteGroupOption = {
   id: number;
@@ -196,7 +202,7 @@ function renderTeamsSessionSeed(session: Session, teams: SessionTeamMembership[]
 export function renderTeamSettingsPage(
   session: Session,
   team: Team,
-  members: TeamMembership[],
+  members: EnrichedTeamMember[],
   invitations: TeamInvitation[],
   isOwner: boolean,
   groups: InviteGroupOption[] = []
@@ -209,7 +215,7 @@ ${renderHead(`${team.display_name} Settings`)}
     ${renderTeamSettingsHeader(session, team)}
     ${renderTeamSettingsContent(session, team, members, invitations, isOwner, groups)}
   </main>
-  ${renderTeamSettingsSessionSeed(session, team, isOwner)}
+  ${renderTeamSettingsSessionSeed(session, team, isOwner, members)}
   <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>`;
@@ -229,7 +235,7 @@ function renderTeamSettingsHeader(session: Session, team: Team) {
 function renderTeamSettingsContent(
   session: Session,
   team: Team,
-  members: TeamMembership[],
+  members: EnrichedTeamMember[],
   invitations: TeamInvitation[],
   isOwner: boolean,
   groups: InviteGroupOption[] = []
@@ -313,11 +319,25 @@ function renderTeamInfoSection(team: Team, isOwner: boolean) {
   </section>`;
 }
 
-function renderTeamMembersSection(members: TeamMembership[], isOwner: boolean) {
+function renderTeamMembersSection(members: EnrichedTeamMember[], isOwner: boolean) {
   const memberRows = members
     .map(
-      (m) => `<tr>
-      <td class="member-npub" title="${m.user_npub}">${formatNpub(m.user_npub)}</td>
+      (m) => {
+        const displayName = m.display_name || null;
+        const avatarUrl = m.picture || `https://robohash.org/${encodeURIComponent(m.user_npub)}.png?set=set3`;
+        const nameHtml = displayName
+          ? `<span class="member-display-name">${escapeHtml(displayName)}</span><span class="member-npub-sub">${formatNpub(m.user_npub)}</span>`
+          : `<span class="member-display-name">${formatNpub(m.user_npub)}</span>`;
+
+        return `<tr>
+      <td class="member-user">
+        <div class="member-user-info">
+          <img class="member-avatar clickable-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" data-profile-npub="${m.user_npub}" />
+          <div class="member-name-block" data-profile-npub="${m.user_npub}">
+            ${nameHtml}
+          </div>
+        </div>
+      </td>
       <td class="member-role">
         ${isOwner ? `<select data-member-role="${m.user_npub}" ${m.role === "owner" ? "disabled" : ""}>
           <option value="member" ${m.role === "member" ? "selected" : ""}>Member</option>
@@ -328,7 +348,8 @@ function renderTeamMembersSection(members: TeamMembership[], isOwner: boolean) {
       <td class="member-actions">
         ${isOwner && m.role !== "owner" ? `<button type="button" class="ghost danger" data-remove-member="${m.user_npub}">Remove</button>` : ""}
       </td>
-    </tr>`
+    </tr>`;
+      }
     )
     .join("");
 
@@ -500,7 +521,12 @@ function renderTeamDangerZone(team: Team) {
   </section>`;
 }
 
-function renderTeamSettingsSessionSeed(session: Session, team: Team, isOwner: boolean) {
+function renderTeamSettingsSessionSeed(session: Session, team: Team, isOwner: boolean, members: EnrichedTeamMember[] = []) {
+  const memberProfiles = members.map((m) => ({
+    npub: m.user_npub,
+    display_name: m.display_name || null,
+    picture: m.picture || null,
+  }));
   return `<script>
     window.__NOSTR_SESSION__ = ${JSON.stringify(session)};
     window.__TEAM_SETTINGS_PAGE__ = true;
@@ -510,6 +536,7 @@ function renderTeamSettingsSessionSeed(session: Session, team: Team, isOwner: bo
       displayName: team.display_name,
     })};
     window.__IS_TEAM_OWNER__ = ${isOwner};
+    window.__TEAM_MEMBERS__ = ${JSON.stringify(memberProfiles)};
   </script>`;
 }
 

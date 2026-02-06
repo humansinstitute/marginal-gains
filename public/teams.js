@@ -11,6 +11,7 @@
 import { teamUrl } from "./api.js";
 import { fetchChannelKey } from "./chatCrypto.js";
 import { wrapKeyForUser } from "./crypto.js";
+import { initProfileCards } from "./profileCard.js";
 import { state, setSession } from "./state.js";
 import { hashInviteCode, storeEncryptedKeyForInvite, redeemInviteForTeamKey } from "./teamCrypto.js";
 
@@ -294,6 +295,9 @@ function initJoinTeamForm() {
 export function initTeamSettingsPage() {
   if (!window.__TEAM_SETTINGS_PAGE__) return;
 
+  // Only run on the actual team members/invites settings page (has __CURRENT_TEAM__)
+  if (!window.__CURRENT_TEAM__) return;
+
   const team = window.__CURRENT_TEAM__;
   const isOwner = window.__IS_TEAM_OWNER__;
 
@@ -315,6 +319,15 @@ export function initTeamSettingsPage() {
   if (isOwner) {
     initDeleteTeam(team);
   }
+
+  // Initialize profile cards for member avatars
+  const teamMembers = window.__TEAM_MEMBERS__ || [];
+  initProfileCards({
+    getUserInfo: (npub) => {
+      const member = teamMembers.find((m) => m.npub === npub);
+      return member || null;
+    },
+  });
 }
 
 function initTeamInfoForm(team, isOwner) {

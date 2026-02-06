@@ -38,6 +38,7 @@ import {
 import { checkEncryptionSupport } from "./crypto.js";
 import { fetchCommunityKey, getCommunityStatus } from "./communityCrypto.js";
 import { autoFulfillPendingKeyRequests } from "./teams.js";
+import { initProfileCards } from "./profileCard.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();
@@ -763,6 +764,29 @@ export const initChat = async () => {
     getAuthorAvatarUrl,
     getContext: () => ({ session: state.session, isAdmin: state.isAdmin, canPin: canPinMessages }),
     userCache: localUserCache,
+  });
+
+  // Initialize profile card popovers
+  initProfileCards({
+    getUserInfo: (npub) => {
+      const user = localUserCache.get(npub);
+      if (user) return user;
+      // Try relay cache
+      const pubkey = npubToPubkeyCache.get(npub);
+      if (pubkey) {
+        const profile = getCachedProfile(pubkey);
+        if (profile) {
+          return {
+            displayName: profile.displayName || profile.name,
+            picture: profile.picture,
+            about: profile.about,
+            nip05: profile.nip05,
+            npub,
+          };
+        }
+      }
+      return null;
+    },
   });
 
   // Initialize Alpine chat store if feature is enabled

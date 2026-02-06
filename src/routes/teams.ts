@@ -423,8 +423,9 @@ export function handleTeamSettingsPage(session: Session | null, teamSlug: string
   const invitations = getTeamInvitations(team.id);
   const isOwner = isUserTeamOwner(team.id, session.npub) || isAdmin(session.npub);
 
-  // Fetch groups for the invite modal
+  // Fetch groups and user profiles for the settings page
   let groups: InviteGroupOption[] = [];
+  const memberProfiles: Map<string, { display_name: string | null; picture: string | null }> = new Map();
   try {
     const teamDb = new TeamDatabase(getTeamDb(teamSlug));
     const allGroups = teamDb.listGroups();
@@ -433,12 +434,31 @@ export function handleTeamSettingsPage(session: Session | null, teamSlug: string
       id: g.id,
       name: g.name,
     }));
+
+    // Fetch profile data for all team members from team DB
+    const teamUsers = teamDb.listUsers();
+    for (const u of teamUsers) {
+      memberProfiles.set(u.npub, {
+        display_name: u.display_name || u.name || null,
+        picture: u.picture || null,
+      });
+    }
   } catch (err) {
     console.log("[Teams] Settings page - error fetching groups:", err);
     // Team DB might not exist yet, continue without groups
   }
 
-  return new Response(renderTeamSettingsPage(session, team, members, invitations, isOwner, groups), {
+  // Enrich members with profile data
+  const enrichedMembers = members.map((m) => {
+    const profile = memberProfiles.get(m.user_npub);
+    return {
+      ...m,
+      display_name: profile?.display_name || null,
+      picture: profile?.picture || null,
+    };
+  });
+
+  return new Response(renderTeamSettingsPage(session, team, enrichedMembers, invitations, isOwner, groups), {
     headers: { "Content-Type": "text/html" },
   });
 }

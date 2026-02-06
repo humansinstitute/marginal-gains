@@ -2221,6 +2221,42 @@ details summary {
   opacity: 0.9;
 }
 
+/* Video thumbnails in messages */
+.chat-video-container {
+  position: relative;
+  display: inline-block;
+  margin: 0.5rem 0;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-width: 100%;
+}
+.chat-video-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  background: #000;
+}
+.chat-video-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  transition: background 0.15s;
+}
+.chat-video-container:hover .chat-video-play-overlay {
+  background: rgba(0, 0, 0, 0.15);
+}
+.chat-video-play-icon {
+  font-size: 2.5rem;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
 /* File attachments in messages */
 .chat-file-attachment {
   display: inline-flex;
@@ -5843,6 +5879,37 @@ body.team-settings-page {
   text-transform: uppercase;
   letter-spacing: 0.025em;
 }
+/* Enhanced team member row with avatar + name */
+.member-user-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.member-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.member-name-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.member-display-name {
+  font-weight: 500;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.member-npub-sub {
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted, #6b7280);
+}
 .member-npub {
   font-family: monospace;
   font-size: 0.85rem;
@@ -6462,4 +6529,119 @@ button.ghost.danger:hover {
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 500;
+}
+
+/* ============================================================================
+   Profile Card Popover
+   ============================================================================ */
+
+.clickable-avatar {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.clickable-avatar:hover {
+  opacity: 0.8;
+}
+
+.profile-card {
+  position: fixed;
+  z-index: 9999;
+  width: 280px;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: var(--radius-md, 0.5rem);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  padding: 1rem;
+  animation: profile-card-in 0.15s ease-out;
+}
+
+@keyframes profile-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.profile-card-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.profile-card-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.profile-card-info {
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.profile-card-name {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text, #111);
+}
+
+.profile-card-nip05 {
+  font-size: 0.8rem;
+  color: var(--accent, #6b3a6b);
+}
+
+.profile-card-about {
+  font-size: 0.8rem;
+  color: var(--text-muted, #6b7280);
+  line-height: 1.4;
+}
+
+.profile-card-npub-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  background: var(--bg-secondary, #f9fafb);
+  border-radius: var(--radius-sm, 0.25rem);
+  padding: 0.375rem 0.5rem;
+}
+
+.profile-card-npub {
+  flex: 1;
+  font-size: 0.7rem;
+  font-family: monospace;
+  color: var(--text-muted, #6b7280);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+
+.profile-card-copy {
+  flex-shrink: 0;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--bg, #fff);
+  color: var(--text, #111);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.profile-card-copy:hover {
+  background: var(--bg-hover, #f3f4f6);
+}
+
+/* Settings member list styling for profile card trigger */
+.settings-member-avatar.clickable-avatar {
+  cursor: pointer;
 }

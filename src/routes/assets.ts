@@ -25,6 +25,11 @@ const IMAGE_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico",
 ]);
 
+// Video extensions for isVideo flag
+const VIDEO_EXTENSIONS = new Set([
+  ".mp4", ".webm", ".mov", ".ogg", ".m4v",
+]);
+
 function getExtension(filename?: string): string {
   if (!filename) return "";
   return extname(filename).toLowerCase();
@@ -34,6 +39,12 @@ function isImageFile(filename?: string, mime?: string): boolean {
   const ext = getExtension(filename);
   if (IMAGE_EXTENSIONS.has(ext)) return true;
   return mime?.startsWith("image/") ?? false;
+}
+
+function isVideoFile(filename?: string, mime?: string): boolean {
+  const ext = getExtension(filename);
+  if (VIDEO_EXTENSIONS.has(ext)) return true;
+  return mime?.startsWith("video/") ?? false;
 }
 
 function getDateFolder(): string {
@@ -107,6 +118,7 @@ export async function handleAssetUpload(req: Request, session: Session | null): 
     type: mime,
     size: file.size,
     isImage: isImageFile(file.name, mime),
+    isVideo: isVideoFile(file.name, mime),
   });
 }
 

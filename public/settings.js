@@ -21,6 +21,7 @@ import {
   fetchOptikonWorkspaces,
   getNostrSigner,
 } from "./optikon.js";
+import { initProfileCards } from "./profileCard.js";
 import { state } from "./state.js";
 import { initWingmanSettings } from "./wingmanSettings.js";
 
@@ -55,6 +56,15 @@ export async function initSettings() {
       await Promise.all([fetchGroups(), fetchUsers()]);
       renderGroups();
       wireEventListeners();
+
+      // Initialize profile cards for group member avatars
+      initProfileCards({
+        getUserInfo: (npub) => {
+          const user = users.find((u) => u.npub === npub);
+          if (user) return user;
+          return null;
+        },
+      });
       return;
     }
   } catch (err) {
@@ -271,7 +281,7 @@ function renderMembers() {
       const avatarUrl = member.picture || `https://robohash.org/${member.npub}.png?set=set3`;
       return `<div class="settings-member-item">
         <div class="settings-member-info">
-          <img class="settings-member-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
+          <img class="settings-member-avatar clickable-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" data-profile-npub="${escapeHtml(member.npub)}" />
           <div class="settings-member-details">
             <span class="settings-member-name">${escapeHtml(name)}</span>
             <span class="settings-member-npub">${escapeHtml(shortNpub)}</span>

@@ -20,6 +20,21 @@ export function init(deps) {
 // Re-export formatReplyTimestamp for backwards compatibility
 export { formatReplyTimestamp } from "./dateUtils.js";
 
+// Video extensions for inline rendering
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov", "ogg", "m4v"]);
+
+function isVideoUrl(url) {
+  const ext = url.split(".").pop()?.toLowerCase().split("?")[0] || "";
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+function renderVideoThumb(safeUrl, name) {
+  return `<div class="chat-video-container" onclick="window.open('${safeUrl}', '_blank', 'width=960,height=640')">
+    <video class="chat-video-thumb" src="${safeUrl}" preload="metadata" muted playsinline></video>
+    <div class="chat-video-play-overlay"><span class="chat-video-play-icon">&#9654;</span></div>
+  </div>`;
+}
+
 // Get icon for file type
 export function getFileIcon(ext) {
   const icons = {
@@ -28,6 +43,11 @@ export function getFileIcon(ext) {
     csv: "&#128200;", // chart
     json: "&#128196;",
     zip: "&#128230;", // package
+    mp4: "&#127910;", // clapper board
+    webm: "&#127910;",
+    mov: "&#127910;",
+    ogg: "&#127910;",
+    m4v: "&#127910;",
     default: "&#128190;", // floppy disk
   };
   return icons[ext] || icons.default;
@@ -66,10 +86,13 @@ export function renderMessageBody(body, options = {}) {
     return `<span class="mention">@${escapeHtml(displayName)}</span>`;
   });
 
-  // Match markdown images: ![alt](url) - render as actual images
+  // Match markdown images: ![alt](url) - render as images or video thumbnails
   const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
   html = html.replace(imageRegex, (_match, alt, url) => {
     const safeUrl = url.replace(/"/g, "&quot;");
+    if (isVideoUrl(url)) {
+      return renderVideoThumb(safeUrl, alt);
+    }
     const safeAlt = alt || "image";
     return `<div class="chat-image-container"><img class="chat-image" src="${safeUrl}" alt="${safeAlt}" loading="lazy" onclick="window.open('${safeUrl}', '_blank')" /></div>`;
   });
@@ -82,6 +105,10 @@ export function renderMessageBody(body, options = {}) {
 
     // Check if it's an internal asset link
     if (url.startsWith("/assets/")) {
+      // Render video assets as thumbnails
+      if (isVideoUrl(url)) {
+        return renderVideoThumb(safeUrl, name);
+      }
       const ext = url.split(".").pop()?.toLowerCase() || "";
       const icon = getFileIcon(ext);
       return `<a class="chat-file-attachment" href="${safeUrl}" target="_blank" download>
@@ -142,7 +169,7 @@ export function renderMessageCompact(message, { showAvatar = false, isThreadRoot
   const ctx = getContext();
   const currentUserNpub = ctx.session?.npub || "";
   const avatarHtml = showAvatar
-    ? `<img class="chat-message-avatar" src="${escapeHtml(getAuthorAvatarUrl(message.author))}" alt="" loading="lazy" />`
+    ? `<img class="chat-message-avatar clickable-avatar" src="${escapeHtml(getAuthorAvatarUrl(message.author))}" alt="" loading="lazy" data-profile-npub="${escapeHtml(message.author)}" />`
     : "";
   const menuHtml = renderMessageMenu(message, { isThreadRoot, threadRootId });
   const reactionsHtml = renderReactionPills(message.reactions, message.id, currentUserNpub);
@@ -181,7 +208,7 @@ export function renderMessageFull(message, { isThreadRoot = false, threadRootId 
     channelId: message.channelId,
   });
   return `<div class="chat-message chat-message-with-avatar${decryptionClass}" data-message-id="${message.id}">
-    <img class="chat-thread-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
+    <img class="chat-thread-avatar clickable-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" data-profile-npub="${escapeHtml(message.author)}" />
     <div class="chat-message-content">
       <div class="chat-message-meta">
         <span class="chat-message-author">${escapeHtml(getAuthorDisplayName(message.author))}</span>
@@ -203,7 +230,7 @@ export function renderReplyPreview(reply, replyCount) {
   const moreReplies = replyCount > 1 ? `+${replyCount - 1} more` : "";
 
   return `<div class="chat-reply" data-open-thread>
-    <img class="chat-reply-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" />
+    <img class="chat-reply-avatar clickable-avatar" src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" data-profile-npub="${escapeHtml(reply.author)}" />
     <div class="chat-reply-content">
       <div class="chat-reply-meta">
         <span class="chat-reply-author">${escapeHtml(authorName)}</span>

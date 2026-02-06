@@ -145,7 +145,7 @@ function renderChatContent() {
               :class="{ 'active': isChannelActive(dm.id), 'unread': hasUnread(dm.id) }"
               :data-channel-id="dm.id"
               @click="onChannelClick(dm.id)">
-              <img class="dm-avatar" :src="getAvatarUrl(dm.otherNpub)" alt="" loading="lazy" />
+              <img class="dm-avatar clickable-avatar" :src="getAvatarUrl(dm.otherNpub)" :data-profile-npub="dm.otherNpub" alt="" loading="lazy" />
               <div class="dm-info">
                 <div class="chat-channel-name">
                   <span x-text="getDmDisplayName(dm)"></span>
@@ -205,7 +205,7 @@ function renderChatContent() {
               <div class="chat-thread-collapsed">
                 <div class="chat-thread-first">
                   <div class="chat-message chat-message-with-avatar" :data-message-id="thread.id">
-                    <img class="chat-message-avatar" :src="getAvatarUrl(thread.author)" alt="" loading="lazy" />
+                    <img class="chat-message-avatar clickable-avatar" :src="getAvatarUrl(thread.author)" :data-profile-npub="thread.author" alt="" loading="lazy" />
                     <div class="chat-message-content">
                       <div class="chat-message-meta">
                         <span class="chat-message-author" x-text="getAuthorName(thread.author)"></span>
@@ -263,7 +263,7 @@ function renderChatContent() {
                 <!-- Reply preview -->
                 <template x-if="getReplyCount(thread.id) > 0">
                   <div class="chat-reply" data-open-thread>
-                    <img class="chat-reply-avatar" :src="getAvatarUrl(getLastReply(thread.id)?.author)" alt="" loading="lazy" />
+                    <img class="chat-reply-avatar clickable-avatar" :src="getAvatarUrl(getLastReply(thread.id)?.author)" :data-profile-npub="getLastReply(thread.id)?.author" alt="" loading="lazy" />
                     <div class="chat-reply-content">
                       <div class="chat-reply-meta">
                         <span class="chat-reply-author" x-text="getAuthorName(getLastReply(thread.id)?.author)"></span>
@@ -322,7 +322,7 @@ function renderChatContent() {
           <!-- Thread root message -->
           <template x-if="threadRoot">
             <div class="chat-message chat-message-with-avatar thread-root-message" :data-message-id="threadRoot.id">
-              <img class="chat-message-avatar" :src="getAvatarUrl(threadRoot.author)" alt="" loading="lazy" />
+              <img class="chat-message-avatar clickable-avatar" :src="getAvatarUrl(threadRoot.author)" :data-profile-npub="threadRoot.author" alt="" loading="lazy" />
               <div class="chat-message-content">
                 <div class="chat-message-meta">
                   <span class="chat-message-author" x-text="getAuthorName(threadRoot.author)"></span>
@@ -369,7 +369,7 @@ function renderChatContent() {
           <!-- Thread replies -->
           <template x-for="reply in threadMessages" :key="reply.id">
             <div class="chat-message chat-message-with-avatar" :data-message-id="reply.id">
-              <img class="chat-message-avatar" :src="getAvatarUrl(reply.author)" alt="" loading="lazy" />
+              <img class="chat-message-avatar clickable-avatar" :src="getAvatarUrl(reply.author)" :data-profile-npub="reply.author" alt="" loading="lazy" />
               <div class="chat-message-content">
                 <div class="chat-message-meta">
                   <span class="chat-message-author" x-text="getAuthorName(reply.author)"></span>
