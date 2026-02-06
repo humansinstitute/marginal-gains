@@ -320,6 +320,14 @@ const server = Bun.serve({
       const session = sessionFromRequest(req);
 
       if (req.method === "GET") {
+        // OpenAPI spec endpoint (no auth required)
+        if (pathname === "/api/openapi/tasks.json") {
+          const { taskOpenApiSpec } = await import("./openapi-tasks");
+          return Response.json(taskOpenApiSpec, {
+            headers: { "Access-Control-Allow-Origin": "*" },
+          });
+        }
+
         // Dynamic manifest with custom app name
         if (pathname === "/manifest.webmanifest") return handleManifest();
 

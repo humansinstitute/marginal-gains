@@ -30,7 +30,7 @@ export type Session = {
   teamMemberships?: SessionTeamMembership[];
 };
 
-export type LoginMethod = "ephemeral" | "extension" | "bunker" | "secret";
+export type LoginMethod = "ephemeral" | "extension" | "bunker" | "secret" | "nip98";
 
 export type NotificationFrequency = "hourly" | "daily" | "on_update";
 
