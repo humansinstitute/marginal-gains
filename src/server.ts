@@ -163,7 +163,7 @@ import {
   handleTeamUnpinMessage,
   handleTeamUpdateChannel,
   handleTeamUpdateUser,
-} from "./routes/team-chat";
+} from "./routes/team-chat/index";
 import {
   handleTeamCrmPage,
   handleTeamListCompanies,
@@ -261,17 +261,6 @@ import {
   handleAddTeamManager,
   handleUploadTeamIcon,
 } from "./routes/teams";
-import {
-  handleApiTodoPosition,
-  handleApiTodoState,
-  handleCreateSubtask,
-  handleGetSubtasks,
-  handleHasSubtasks,
-  handleTodoCreate,
-  handleTodoDelete,
-  handleTodoState,
-  handleTodoUpdate,
-} from "./routes/todos";
 import {
   handleWalletPage,
   handleWalletConnect,
@@ -650,12 +639,6 @@ const server = Bun.serve({
         const opportunityTasksMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)\/tasks$/);
         if (opportunityTasksMatch) return handleGetOpportunityTasks(session, Number(opportunityTasksMatch[1]));
 
-        // Subtask routes
-        const subtasksMatch = pathname.match(/^\/api\/todos\/(\d+)\/subtasks$/);
-        if (subtasksMatch) return handleGetSubtasks(req, session, Number(subtasksMatch[1]));
-        const hasSubtasksMatch = pathname.match(/^\/api\/todos\/(\d+)\/has-subtasks$/);
-        if (hasSubtasksMatch) return handleHasSubtasks(req, session, Number(hasSubtasksMatch[1]));
-
         // Wingman routes
         if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
         if (pathname === "/api/wingman/costs") return handleGetWingmanCosts(session);
@@ -859,29 +842,6 @@ const server = Bun.serve({
         if (pathname === "/api/assets/upload") return handleAssetUpload(req, session);
         if (pathname === "/ai/summary") return handleSummaryPost(req);
         if (pathname === "/ai/tasks") return handleAiTasksPost(req);
-        if (pathname === "/todos") return handleTodoCreate(req, session);
-
-        const updateMatch = pathname.match(/^\/todos\/(\d+)\/update$/);
-        if (updateMatch) return handleTodoUpdate(req, session, Number(updateMatch[1]));
-
-        const stateMatch = pathname.match(/^\/todos\/(\d+)\/state$/);
-        if (stateMatch) return handleTodoState(req, session, Number(stateMatch[1]));
-
-        // API endpoint for Kanban drag-drop (JSON)
-        const apiStateMatch = pathname.match(/^\/api\/todos\/(\d+)\/state$/);
-        if (apiStateMatch) return handleApiTodoState(req, session, Number(apiStateMatch[1]));
-
-        // API endpoint for position-only updates (Summary card reordering)
-        const apiPositionMatch = pathname.match(/^\/api\/todos\/(\d+)\/position$/);
-        if (apiPositionMatch) return handleApiTodoPosition(req, session, Number(apiPositionMatch[1]));
-
-        // API endpoint for creating subtasks (JSON)
-        const createSubtaskMatch = pathname.match(/^\/api\/todos\/(\d+)\/subtasks$/);
-        if (createSubtaskMatch) return handleCreateSubtask(req, session, Number(createSubtaskMatch[1]));
-
-        const deleteMatch = pathname.match(/^\/todos\/(\d+)\/delete$/);
-        if (deleteMatch) return handleTodoDelete(req, session, Number(deleteMatch[1]));
-
         // Chat routes
         if (pathname === "/chat/channels") return handleCreateChannel(req, session);
         if (pathname === "/chat/dm") return handleCreateDm(req, session);

@@ -21,15 +21,6 @@ beforeEach(async () => {
 });
 
 describe("todo services", () => {
-  test("creates todos and enforces allowed transitions", () => {
-    const created = todos.quickAddTodo(OWNER, "Write tests", "");
-    expect(created).toBeTruthy();
-    const ready = todos.transitionTodoState(OWNER, created!.id, "ready");
-    expect(ready?.state).toBe("ready");
-    const invalid = todos.transitionTodoState(OWNER, created!.id, "new");
-    expect(invalid).toBeNull();
-  });
-
   test("bulk task creation validates input", () => {
     const { created, failed } = todos.createTodosFromTasks(OWNER, [
       { title: "Ship feature", priority: "rock" },
