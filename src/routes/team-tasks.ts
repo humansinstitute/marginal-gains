@@ -13,8 +13,9 @@ import { validateTaskInput } from "../validation";
 import type { Session } from "../types";
 
 // Helper to create and validate team context
+// When no returnPath is given (API routes), use isApi mode for proper 401 JSON responses
 function requireTeamContext(session: Session | null, teamSlug: string, returnPath?: string) {
-  return createTeamRouteContext(session, teamSlug, returnPath);
+  return createTeamRouteContext(session, teamSlug, returnPath ?? { isApi: true });
 }
 
 /**

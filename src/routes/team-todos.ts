@@ -9,6 +9,7 @@ import { createTeamRouteContext } from "../context";
 import { isAllowedTransition } from "../domain/todos";
 import { redirect } from "../http";
 import { renderTeamTodosPage } from "../render/home";
+import { createAndBroadcastActivity } from "../services/activities";
 import { TeamDatabase } from "../team-db";
 import { normalizeStateInput, validateTaskInput, validateTodoForm, validateTodoTitle } from "../validation";
 
@@ -20,8 +21,9 @@ import type { Session } from "../types";
 const jsonHeaders = { "Content-Type": "application/json" };
 
 // Helper to create and validate team context with return path for auth redirect
+// When no returnPath is given (API routes), use isApi mode for proper 401 JSON responses
 function requireTeamContext(session: Session | null, teamSlug: string, returnPath?: string) {
-  return createTeamRouteContext(session, teamSlug, returnPath);
+  return createTeamRouteContext(session, teamSlug, returnPath ?? { isApi: true });
 }
 
 function getRedirectUrl(teamSlug: string, groupId: number | null): string {
@@ -223,6 +225,9 @@ export async function handleTeamTodoUpdate(
     return redirect(getRedirectUrl(teamSlug, groupId));
   }
 
+  // Fetch existing todo before update for comparison
+  const existingTodo = db.getTodoById(id);
+
   if (groupId) {
     const membership = result.ctx.session.teamMemberships?.find(
       (m) => m.teamSlug === teamSlug
@@ -253,6 +258,31 @@ export async function handleTeamTodoUpdate(
       tags: fields.tags,
       assignedTo: fields.assigned_to,
     });
+  }
+
+  // Create activities for task assignment/update
+  if (existingTodo) {
+    const taskTitle = fields.title || existingTodo.title;
+    // Assignment changed
+    if (fields.assigned_to && fields.assigned_to !== existingTodo.assigned_to) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: fields.assigned_to,
+        type: "task_assigned",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `assigned you to "${taskTitle}"`,
+      });
+    }
+    // Notify assignee of update (if updated by someone else)
+    if (existingTodo.assigned_to && existingTodo.assigned_to !== result.ctx.session.npub) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: existingTodo.assigned_to,
+        type: "task_update",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `updated "${taskTitle}"`,
+      });
+    }
   }
 
   // Propagate tags to children if this is a parent task
@@ -303,6 +333,17 @@ export async function handleTeamTodoState(
     db.transitionTodo(id, result.ctx.session.npub, nextState);
   }
 
+  // Notify assignee of state change
+  if (existing.assigned_to && existing.assigned_to !== result.ctx.session.npub) {
+    createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+      targetNpub: existing.assigned_to,
+      type: "task_update",
+      sourceNpub: result.ctx.session.npub,
+      todoId: id,
+      summary: `moved "${existing.title}" to ${nextState}`,
+    });
+  }
+
   return redirect(getRedirectUrl(teamSlug, groupId));
 }
 
@@ -348,12 +389,7 @@ export async function handleTeamApiTodoState(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   try {
     const body = await req.json();
@@ -410,6 +446,17 @@ export async function handleTeamApiTodoState(
       });
     }
 
+    // Notify assignee of state change
+    if (existing.assigned_to && existing.assigned_to !== result.ctx.session.npub) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: existing.assigned_to,
+        type: "task_update",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `moved "${existing.title}" to ${nextState}`,
+      });
+    }
+
     return new Response(JSON.stringify({ success: true, state: nextState, position }), {
       status: 200,
       headers: jsonHeaders,
@@ -432,12 +479,7 @@ export async function handleTeamApiTodoPosition(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   try {
     const body = await req.json();
@@ -491,12 +533,7 @@ export function handleTeamGetTodo(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const todo = db.getTodoById(id);
@@ -524,12 +561,7 @@ export function handleTeamGetSubtasks(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const todo = db.getTodoById(id);
@@ -574,12 +606,7 @@ export async function handleTeamCreateSubtask(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const parent = db.getTodoById(id);
@@ -644,12 +671,7 @@ export function handleTeamDetachFromParent(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const task = db.getTodoById(id);
@@ -704,12 +726,7 @@ export function handleTeamListPotentialParents(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const task = db.getTodoById(id);
@@ -767,12 +784,7 @@ export async function handleTeamSetParent(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
 
@@ -832,12 +844,7 @@ export async function handleTeamApiTodoCreate(
   teamSlug: string
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   try {
     const body = await req.json();
@@ -898,12 +905,7 @@ export async function handleTeamApiTodoUpdate(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   try {
     const body = await req.json();
@@ -965,6 +967,27 @@ export async function handleTeamApiTodoUpdate(
       });
     }
 
+    // Create activities for task assignment/update
+    const taskTitle = fields.title || existing.title;
+    if (fields.assigned_to && fields.assigned_to !== existing.assigned_to) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: fields.assigned_to,
+        type: "task_assigned",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `assigned you to "${taskTitle}"`,
+      });
+    }
+    if (existing.assigned_to && existing.assigned_to !== result.ctx.session.npub) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: existing.assigned_to,
+        type: "task_update",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `updated "${taskTitle}"`,
+      });
+    }
+
     // Propagate tags to children if this is a parent task
     if (db.hasSubtasks(id)) {
       db.propagateTagsToChildren(id, fields.tags);
@@ -994,12 +1017,7 @@ export function handleTeamApiTodoDelete(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
 

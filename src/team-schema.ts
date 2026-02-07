@@ -600,6 +600,28 @@ export function initTeamSchema(db: Database): void {
   createIndex(db, "CREATE INDEX idx_crm_activities_deleted ON crm_activities(deleted)");
 
   // ============================================================================
+  // Activities (notifications)
+  // ============================================================================
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS activities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_npub TEXT NOT NULL,
+      type TEXT NOT NULL,
+      source_npub TEXT NOT NULL,
+      message_id INTEGER,
+      channel_id INTEGER,
+      todo_id INTEGER,
+      summary TEXT NOT NULL DEFAULT '',
+      is_read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  createIndex(db, "CREATE INDEX idx_activities_target_read ON activities(target_npub, is_read)");
+  createIndex(db, "CREATE INDEX idx_activities_target_created ON activities(target_npub, created_at)");
+  createIndex(db, "CREATE INDEX idx_activities_type ON activities(type)");
+
+  // ============================================================================
   // Wallet Transactions
   // ============================================================================
 

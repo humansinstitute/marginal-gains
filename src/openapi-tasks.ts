@@ -8,7 +8,7 @@
 export const taskOpenApiSpec = {
   openapi: "3.1.0",
   info: {
-    title: "Marginal Gains — Task API",
+    title: "Marginal Gains — Task & Activities API",
     version: "1.0.0",
     description:
       "Team-scoped task management API for Marginal Gains. Authenticate with NIP-98 (Authorization: Nostr <base64 event>) or session cookie.",
@@ -61,6 +61,21 @@ export const taskOpenApiSpec = {
           priority: { type: "string" },
           group_id: { type: ["integer", "null"] },
           group_name: { type: ["string", "null"] },
+        },
+      },
+      Activity: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          target_npub: { type: "string" },
+          type: { type: "string", enum: ["mention", "dm", "task_update", "task_assigned"] },
+          source_npub: { type: "string" },
+          message_id: { type: ["integer", "null"] },
+          channel_id: { type: ["integer", "null"] },
+          todo_id: { type: ["integer", "null"] },
+          summary: { type: "string" },
+          is_read: { type: "integer", enum: [0, 1] },
+          created_at: { type: "string", format: "date-time" },
         },
       },
       Error: {
@@ -701,6 +716,73 @@ export const taskOpenApiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    "/t/{slug}/api/activities": {
+      get: {
+        summary: "List activities for the authenticated user",
+        operationId: "listActivities",
+        tags: ["Activities"],
+        parameters: [
+          { name: "slug", in: "path", required: true, schema: { type: "string" }, description: "Team slug" },
+          { name: "since", in: "query", schema: { type: "string", format: "date-time" }, description: "Only return activities created after this ISO timestamp" },
+          { name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 200 }, description: "Max activities to return" },
+        ],
+        responses: {
+          "200": {
+            description: "Activities list with unread count",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    activities: { type: "array", items: { $ref: "#/components/schemas/Activity" } },
+                    unreadCount: { type: "integer" },
+                  },
+                },
+              },
+            },
+          },
+          "401": { description: "Unauthorized" },
+        },
+      },
+    },
+    "/t/{slug}/api/activities/read": {
+      post: {
+        summary: "Mark activities as read",
+        operationId: "markActivitiesRead",
+        tags: ["Activities"],
+        parameters: [
+          { name: "slug", in: "path", required: true, schema: { type: "string" }, description: "Team slug" },
+        ],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  id: { type: "integer", description: "Activity ID to mark as read. Omit to mark all as read." },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Success",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          "401": { description: "Unauthorized" },
         },
       },
     },

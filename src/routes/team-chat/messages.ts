@@ -4,8 +4,10 @@
 
 import { isAdmin } from "../../config";
 import { jsonResponse } from "../../http";
+import { createAndBroadcastActivity } from "../../services/activities";
 import { broadcast } from "../../services/events";
 import { TeamDatabase } from "../../team-db";
+import { parseMentionsFromBody } from "../../utils/mentions";
 
 import { forbidden, requireTeamContext } from "./helpers";
 
@@ -73,7 +75,7 @@ export async function handleTeamSendMessage(
   }
 
   const body = await req.json();
-  const { content, parentId, encrypted } = body;
+  const { content, parentId, encrypted, mentions } = body;
 
   if (!content || typeof content !== "string" || !content.trim()) {
     return jsonResponse({ error: "Message content is required" }, 400);
@@ -116,6 +118,38 @@ export async function handleTeamSendMessage(
     data: { ...message, channelId },
     channelId,
   });
+
+  // Create activities for mentions
+  const mentionedNpubs = encrypted && Array.isArray(mentions)
+    ? mentions as string[]
+    : parseMentionsFromBody(content);
+  for (const npub of mentionedNpubs) {
+    createAndBroadcastActivity(teamSlug, ctx.teamDb, {
+      targetNpub: npub,
+      type: "mention",
+      sourceNpub: ctx.session.npub,
+      messageId: message.id,
+      channelId,
+      summary: `mentioned you in #${channel.name}`,
+    });
+  }
+
+  // Create activities for DMs
+  const dmParticipants = db.getDmParticipants(channelId);
+  if (dmParticipants.length > 0) {
+    for (const participant of dmParticipants) {
+      if (participant !== ctx.session.npub) {
+        createAndBroadcastActivity(teamSlug, ctx.teamDb, {
+          targetNpub: participant,
+          type: "dm",
+          sourceNpub: ctx.session.npub,
+          messageId: message.id,
+          channelId,
+          summary: "sent you a direct message",
+        });
+      }
+    }
+  }
 
   return jsonResponse(message, 201);
 }

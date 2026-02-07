@@ -335,8 +335,8 @@ a {
   padding-top: 0.65rem;
 }
 .avatar-chip {
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: none;
   background: var(--text);
@@ -361,6 +361,7 @@ a {
 }
 .avatar-fallback {
   font-weight: 600;
+  font-size: 0.75rem;
   letter-spacing: 0.02em;
 }
 /* SSE connection status on avatar */
@@ -2651,7 +2652,8 @@ body.chat-page {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  padding: 1rem 2rem;
+  height: var(--header-height);
+  padding: 0 2rem;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
@@ -6644,4 +6646,221 @@ button.ghost.danger:hover {
 /* Settings member list styling for profile card trigger */
 .settings-member-avatar.clickable-avatar {
   cursor: pointer;
+}
+
+/* ========== Home Page Full Screen Layout ========== */
+body.home-page {
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+.home-app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.home-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  height: var(--header-height);
+  padding: 0 2rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1000;
+}
+.home-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+}
+.home-content-inner {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+/* Activity panels - two-column layout on wide screens */
+.activity-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+@media (max-width: 768px) {
+  .activity-panels {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Activity panel */
+.activity-panel {
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.activity-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.activity-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.activity-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #6b3a6b;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.activity-mark-all-read {
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.activity-mark-all-read:hover {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+/* Activity list */
+.activity-list {
+  padding: 0;
+}
+.activity-empty {
+  padding: 2rem 1.25rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* Activity item */
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+.activity-item:last-child {
+  border-bottom: none;
+}
+.activity-item:hover {
+  background: var(--bg);
+}
+.activity-item.activity-unread {
+  background: #f5f0f5;
+}
+.activity-item.activity-unread:hover {
+  background: #ede5ed;
+}
+
+/* Activity icon */
+.activity-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.activity-icon.icon-mention {
+  background: #ede9fe;
+  color: #7c3aed;
+  border-color: #ddd6fe;
+}
+.activity-icon.icon-dm {
+  background: #dbeafe;
+  color: #2563eb;
+  border-color: #bfdbfe;
+}
+.activity-icon.icon-task-assigned {
+  background: #fef3c7;
+  color: #d97706;
+  border-color: #fde68a;
+}
+.activity-icon.icon-task-update {
+  background: #d1fae5;
+  color: #059669;
+  border-color: #a7f3d0;
+}
+
+/* Activity body */
+.activity-body {
+  flex: 1;
+  min-width: 0;
+}
+.activity-source {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.activity-summary {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activity-time {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+}
+
+/* Activity link */
+.activity-link {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.8rem;
+  color: #6b3a6b;
+  text-decoration: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid #6b3a6b;
+}
+.activity-link:hover {
+  background: #6b3a6b;
+  color: #fff;
 }

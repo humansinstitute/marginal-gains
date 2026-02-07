@@ -78,6 +78,20 @@ export type {
   WingmanCost,
 } from "./db";
 
+// Activity type - for cross-cutting notifications
+export type Activity = {
+  id: number;
+  target_npub: string;
+  type: "mention" | "dm" | "task_update" | "task_assigned";
+  source_npub: string;
+  message_id: number | null;
+  channel_id: number | null;
+  todo_id: number | null;
+  summary: string;
+  is_read: number;
+  created_at: string;
+};
+
 // KeyRequest type - for distributing encryption keys to new members
 export type KeyRequest = {
   id: number;
@@ -2049,6 +2063,67 @@ export class TeamDatabase {
     const result = this.db.run(
       "DELETE FROM key_requests WHERE requester_npub = ?",
       [npub]
+    );
+    return result.changes;
+  }
+
+  // ============================================================================
+  // Activities (notifications)
+  // ============================================================================
+
+  createActivity(params: {
+    targetNpub: string;
+    type: Activity["type"];
+    sourceNpub: string;
+    messageId?: number | null;
+    channelId?: number | null;
+    todoId?: number | null;
+    summary?: string;
+  }): Activity | null {
+    return this.db.query<Activity, [string, string, string, number | null, number | null, number | null, string]>(
+      `INSERT INTO activities (target_npub, type, source_npub, message_id, channel_id, todo_id, summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`
+    ).get(
+      params.targetNpub,
+      params.type,
+      params.sourceNpub,
+      params.messageId ?? null,
+      params.channelId ?? null,
+      params.todoId ?? null,
+      params.summary ?? ""
+    ) ?? null;
+  }
+
+  listActivities(targetNpub: string, limit = 50, since?: string): Activity[] {
+    if (since) {
+      return this.db.query<Activity, [string, string, number]>(
+        "SELECT * FROM activities WHERE target_npub = ? AND created_at > ? ORDER BY created_at DESC LIMIT ?"
+      ).all(targetNpub, since, limit);
+    }
+    return this.db.query<Activity, [string, number]>(
+      "SELECT * FROM activities WHERE target_npub = ? ORDER BY created_at DESC LIMIT ?"
+    ).all(targetNpub, limit);
+  }
+
+  getUnreadActivityCount(targetNpub: string): number {
+    const result = this.db.query<{ count: number }, [string]>(
+      "SELECT COUNT(*) as count FROM activities WHERE target_npub = ? AND is_read = 0"
+    ).get(targetNpub);
+    return result?.count ?? 0;
+  }
+
+  markActivityRead(id: number, targetNpub: string): boolean {
+    const result = this.db.run(
+      "UPDATE activities SET is_read = 1 WHERE id = ? AND target_npub = ?",
+      [id, targetNpub]
+    );
+    return result.changes > 0;
+  }
+
+  markAllActivitiesRead(targetNpub: string): number {
+    const result = this.db.run(
+      "UPDATE activities SET is_read = 1 WHERE target_npub = ? AND is_read = 0",
+      [targetNpub]
     );
     return result.changes;
   }

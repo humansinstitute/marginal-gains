@@ -123,6 +123,13 @@ window.createKanbanStore = function(initialTodos, groupId, teamSlug) {
         review: this.columns.review.length,
         done: this.columns.done.length
       });
+
+      // Deep-link: auto-open task modal if ?task= param present
+      var taskParam = new URLSearchParams(window.location.search).get('task');
+      if (taskParam && window.openTaskModal) {
+        // Defer to next tick so Alpine finishes rendering cards
+        setTimeout(function() { window.openTaskModal(taskParam); }, 0);
+      }
     },
 
     // Set up hero form interception for live task creation

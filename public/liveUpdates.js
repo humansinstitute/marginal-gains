@@ -68,6 +68,7 @@ const eventHandlers = {
   "wingman:thinking": [],
   "key_request:new": [],
   "key_request:fulfilled": [],
+  "activity:new": [],
 };
 
 /**
@@ -282,6 +283,17 @@ export async function connect() {
       emitEvent("key_request:fulfilled", data);
     } catch (err) {
       console.error("[LiveUpdates] Error handling key_request:fulfilled:", err);
+    }
+  });
+
+  // Handle new activity (mention, DM, task assignment/update)
+  eventSource.addEventListener("activity:new", (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log("[LiveUpdates] New activity:", data);
+      emitEvent("activity:new", data);
+    } catch (err) {
+      console.error("[LiveUpdates] Error handling activity:new:", err);
     }
   });
 }

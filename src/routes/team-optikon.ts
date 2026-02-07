@@ -24,7 +24,7 @@ export async function handleSetTodoOptikonBoard(
   teamSlug: string,
   todoId: number
 ) {
-  const result = createTeamRouteContext(session, teamSlug);
+  const result = createTeamRouteContext(session, teamSlug, { isApi: true });
   if (!result.ok) return result.response;
 
   let body: { boardId: number; boardUrl: string };
@@ -88,7 +88,7 @@ export function handleClearTodoOptikonBoard(
   teamSlug: string,
   todoId: number
 ) {
-  const result = createTeamRouteContext(session, teamSlug);
+  const result = createTeamRouteContext(session, teamSlug, { isApi: true });
   if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
@@ -125,7 +125,7 @@ export function handleGetGroupOptikonWorkspace(
   teamSlug: string,
   groupId: number
 ) {
-  const result = createTeamRouteContext(session, teamSlug);
+  const result = createTeamRouteContext(session, teamSlug, { isApi: true });
   if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
@@ -148,7 +148,7 @@ export async function handleSetGroupOptikonWorkspace(
   teamSlug: string,
   groupId: number
 ) {
-  const result = createTeamRouteContext(session, teamSlug);
+  const result = createTeamRouteContext(session, teamSlug, { isApi: true });
   if (!result.ok) return result.response;
 
   let body: { workspaceId: number | null };
@@ -201,7 +201,7 @@ export async function handleSetGroupOptikonWorkspace(
  * Get Optikon configuration for the client (URL, etc.)
  */
 export function handleGetOptikonConfig(session: Session | null, teamSlug: string) {
-  const result = createTeamRouteContext(session, teamSlug);
+  const result = createTeamRouteContext(session, teamSlug, { isApi: true });
   if (!result.ok) return result.response;
 
   return new Response(JSON.stringify({ optikonUrl: OPTIKON_URL }), {

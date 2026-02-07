@@ -133,6 +133,7 @@ import {
   handleUnlinkTaskFromCrm,
   handleUnlinkThreadFromTask,
 } from "./routes/tasks";
+import { handleTeamGetActivities, handleTeamMarkActivitiesRead } from "./routes/team-activities";
 import {
   handleTeamAddChannelGroups,
   handleTeamArchiveDm,
@@ -205,6 +206,7 @@ import {
   handleTeamAddGroupMembers,
   handleTeamRemoveGroupMember,
 } from "./routes/team-groups";
+import { handleTeamHomePage } from "./routes/team-home";
 import {
   handleSetTodoOptikonBoard,
   handleClearTodoOptikonBoard,
@@ -347,6 +349,18 @@ const server = Bun.serve({
         // Key Teleport registration endpoint (no auth required)
         if (pathname === "/api/keyteleport/register") return handleKeyTeleportRegister(req);
 
+        // Team-scoped home page
+        const teamHomePageMatch = pathname.match(/^\/t\/([^/]+)\/home$/);
+        if (teamHomePageMatch) {
+          return handleTeamHomePage(session, teamHomePageMatch[1]);
+        }
+
+        // Team-scoped activities API
+        const teamActivitiesMatch = pathname.match(/^\/t\/([^/]+)\/api\/activities$/);
+        if (teamActivitiesMatch) {
+          return handleTeamGetActivities(session, teamActivitiesMatch[1], url);
+        }
+
         // Team-scoped chat page and SSE events
         const teamChatPageMatch = pathname.match(/^\/t\/([^/]+)\/chat$/);
         if (teamChatPageMatch) {
@@ -437,21 +451,21 @@ const server = Bun.serve({
         // Team-level encryption routes (zero-knowledge key distribution)
         const teamEncryptionMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/encryption$/);
         if (teamEncryptionMatch) {
-          const result = createTeamRouteContext(session, teamEncryptionMatch[1]);
+          const result = createTeamRouteContext(session, teamEncryptionMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleGetTeamEncryption(result.ctx);
         }
 
         const teamUserKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/key$/);
         if (teamUserKeyMatch) {
-          const result = createTeamRouteContext(session, teamUserKeyMatch[1]);
+          const result = createTeamRouteContext(session, teamUserKeyMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleGetUserTeamKey(result.ctx);
         }
 
         const teamInviteKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/invite-key$/);
         if (teamInviteKeyMatch) {
-          const result = createTeamRouteContext(session, teamInviteKeyMatch[1]);
+          const result = createTeamRouteContext(session, teamInviteKeyMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleGetInviteKey(result.ctx, url);
         }
@@ -716,6 +730,10 @@ const server = Bun.serve({
         const uploadTeamIconMatch = pathname.match(/^\/api\/teams\/(\d+)\/icon$/);
         if (uploadTeamIconMatch) return handleUploadTeamIcon(req, session, Number(uploadTeamIconMatch[1]));
 
+        // Team-scoped activities POST routes
+        const teamMarkActivitiesReadMatch = pathname.match(/^\/t\/([^/]+)\/api\/activities\/read$/);
+        if (teamMarkActivitiesReadMatch) return handleTeamMarkActivitiesRead(req, session, teamMarkActivitiesReadMatch[1]);
+
         // Team-scoped chat POST routes
         const teamCreateChannelMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels$/);
         if (teamCreateChannelMatch) return handleTeamCreateChannel(req, session, teamCreateChannelMatch[1]);
@@ -768,21 +786,21 @@ const server = Bun.serve({
         // Team-level encryption POST routes (zero-knowledge key distribution)
         const teamInitEncryptionMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/init-encryption$/);
         if (teamInitEncryptionMatch) {
-          const result = createTeamRouteContext(session, teamInitEncryptionMatch[1]);
+          const result = createTeamRouteContext(session, teamInitEncryptionMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleInitTeamEncryption(req, result.ctx);
         }
 
         const teamStoreUserKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/key$/);
         if (teamStoreUserKeyMatch) {
-          const result = createTeamRouteContext(session, teamStoreUserKeyMatch[1]);
+          const result = createTeamRouteContext(session, teamStoreUserKeyMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleStoreUserTeamKey(req, result.ctx);
         }
 
         const teamStoreInviteKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/invite-key$/);
         if (teamStoreInviteKeyMatch) {
-          const result = createTeamRouteContext(session, teamStoreInviteKeyMatch[1]);
+          const result = createTeamRouteContext(session, teamStoreInviteKeyMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleStoreInviteKey(req, result.ctx);
         }

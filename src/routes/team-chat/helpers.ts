@@ -13,12 +13,13 @@ export function forbidden(message = "Forbidden") {
 }
 
 /**
- * Helper to get team context or return error response
+ * Helper to get team context or return error response.
+ * When no returnPath is given (API routes), use isApi mode for proper 401 JSON responses.
  */
 export function requireTeamContext(
   session: Session | null,
   teamSlug: string,
   returnPath?: string
 ): TeamContextResult {
-  return createTeamRouteContext(session, teamSlug, returnPath);
+  return createTeamRouteContext(session, teamSlug, returnPath ?? { isApi: true });
 }

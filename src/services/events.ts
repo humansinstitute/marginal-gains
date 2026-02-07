@@ -22,7 +22,8 @@ export type EventType =
   | "sync:init"
   | "wingman:thinking"
   | "wallet:balance"
-  | "wallet:transaction";
+  | "wallet:transaction"
+  | "activity:new";
 
 export interface BroadcastEvent {
   type: EventType;
