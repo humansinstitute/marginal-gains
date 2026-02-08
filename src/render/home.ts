@@ -819,6 +819,24 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
             <input type="hidden" name="tags" data-task-modal-tags-hidden value="" />
           </div>
         </label>
+        <label data-task-modal-assignee-label hidden>Assigned To
+          <input type="hidden" name="assigned_to" data-task-modal-assignee value="" />
+          <div class="assignee-autocomplete" data-assignee-autocomplete>
+            <input type="text" placeholder="Search members..." data-assignee-input autocomplete="off" />
+            <div class="assignee-selected" data-assignee-selected hidden>
+              <img class="assignee-selected-avatar" data-assignee-avatar src="" alt="" />
+              <span data-assignee-name></span>
+              <button type="button" class="assignee-clear" data-assignee-clear>&times;</button>
+            </div>
+            <div class="assignee-suggestions" data-assignee-suggestions hidden></div>
+          </div>
+        </label>
+        <label data-project-picker-label hidden>Wingman Project
+          <select data-project-picker>
+            <option value="">No project</option>
+          </select>
+          <input type="hidden" name="working_directory" data-task-modal-working-directory value="" />
+        </label>
         <div class="task-modal-links" data-task-modal-links hidden>
           <div class="task-modal-links-header">Links</div>
           <div class="task-modal-links-list" data-task-modal-links-list></div>

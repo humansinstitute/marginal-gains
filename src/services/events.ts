@@ -18,6 +18,7 @@ export type EventType =
   | "channel:new"
   | "channel:update"
   | "channel:delete"
+  | "channel:layout"
   | "dm:new"
   | "sync:init"
   | "wingman:thinking"

@@ -57,3 +57,9 @@ export {
   handleTeamGetPinnedMessages,
   handleTeamCheckMessagePinned,
 } from "./pins";
+
+// Channel Layout
+export {
+  handleTeamGetChannelLayout,
+  handleTeamPutChannelLayout,
+} from "./layout";

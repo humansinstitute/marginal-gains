@@ -2755,6 +2755,155 @@ body.chat-page {
 .chat-channels-sidebar .chat-section-header .text-btn {
   white-space: nowrap;
 }
+.chat-channels-sidebar .chat-section-header .chat-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Arrange cog button */
+.arrange-cog-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.arrange-cog-btn:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+/* Arrange mode banner */
+.arrange-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--chat-accent);
+  color: #fff;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.arrange-banner-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.arrange-banner .text-btn {
+  color: #fff;
+  font-size: 0.7rem;
+  opacity: 0.9;
+}
+.arrange-banner .text-btn:hover {
+  opacity: 1;
+}
+.primary-sm {
+  background: #fff;
+  color: var(--chat-accent);
+  border: none;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.primary-sm:hover {
+  opacity: 0.9;
+}
+
+/* Channel section headings */
+.channel-section {
+  margin-top: 0.5rem;
+}
+.channel-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0;
+}
+.channel-section-name {
+  margin: 0;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  flex: 1;
+}
+.channel-section-actions {
+  display: flex;
+  gap: 0.1rem;
+}
+.icon-btn-sm {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 1px 4px;
+  border-radius: 3px;
+  line-height: 1;
+}
+.icon-btn-sm:hover {
+  background: var(--border);
+  color: var(--text);
+}
+.icon-btn-sm.danger:hover {
+  color: #dc2626;
+}
+.channel-section-channels {
+  min-height: 4px;
+}
+.section-empty-drop {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-align: center;
+  padding: 0.5rem;
+  margin: 0;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* Drag handles */
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin-right: 0.25rem;
+  user-select: none;
+  flex-shrink: 0;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.section-drag-handle {
+  font-size: 0.65rem;
+}
+
+/* Drag states */
+.dragging {
+  opacity: 0.4;
+}
+.drag-over {
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: var(--radius-sm);
+}
+.channel-drop-indicator {
+  height: 2px;
+  background: var(--accent, #2563eb);
+  border-radius: 1px;
+  margin: 0 0.25rem;
+  pointer-events: none;
+}
+.ungrouped-drop-zone {
+  min-height: 4px;
+}
+
 .chat-messages-area {
   display: flex;
   flex-direction: column;
@@ -5766,9 +5915,37 @@ body.team-settings-page {
 }
 .settings-form-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 0.5rem;
+}
+.settings-save-status {
+  font-size: 0.85rem;
+}
+.settings-save-status.success {
+  color: var(--color-success, #16a34a);
+}
+.settings-save-status.error {
+  color: var(--color-danger, #dc2626);
+}
+.wingmen-settings-form label {
+  display: block;
+  margin-bottom: 1rem;
+}
+.wingmen-settings-form label small {
+  display: block;
+  color: var(--text-muted, #6b7280);
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+.wingmen-settings-form input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: var(--radius-md, 0.5rem);
+  font-size: 0.95rem;
+  margin-top: 0.25rem;
 }
 .settings-modal {
   position: fixed;

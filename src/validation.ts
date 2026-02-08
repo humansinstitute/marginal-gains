@@ -42,7 +42,8 @@ export function validateTodoForm(fields: Record<string, FormDataEntryValue | nul
   const tags = String(fields.tags ?? "").trim();
   const assignedRaw = String(fields.assigned_to ?? "").trim();
   const assigned_to = assignedRaw || null;
-  return { title, description, priority, state, scheduled_for, tags, assigned_to };
+  const working_directory = normalizeOptionalText(String(fields.working_directory ?? ""), 500);
+  return { title, description, priority, state, scheduled_for, tags, assigned_to, working_directory };
 }
 
 export function validateTaskInput(task: {
@@ -53,6 +54,7 @@ export function validateTaskInput(task: {
   scheduled_for?: string | null;
   tags?: string;
   assigned_to?: string | null;
+  working_directory?: string | null;
 }) {
   const title = task.title ? validateTodoTitle(task.title) : null;
   if (!title) return null;
@@ -62,7 +64,8 @@ export function validateTaskInput(task: {
   const scheduled_for = task.scheduled_for && isValidDateString(task.scheduled_for) ? task.scheduled_for : null;
   const tags = task.tags?.trim() ?? "";
   const assigned_to = task.assigned_to?.trim() || null;
-  return { title, description, priority, state, scheduled_for, tags, assigned_to };
+  const working_directory = normalizeOptionalText(task.working_directory ?? null, 500);
+  return { title, description, priority, state, scheduled_for, tags, assigned_to, working_directory };
 }
 
 export function validateLoginMethod(method: string | null): method is LoginMethod {

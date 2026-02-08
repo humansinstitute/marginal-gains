@@ -64,10 +64,22 @@ export function handleTeamListChannels(
   // Get unread counts for all channels
   const unreadCounts = db.getUnreadCounts(ctx.session.npub);
 
+  // Include channel layout from app_settings
+  const layoutRaw = db.getSetting("channel.layout");
+  let channelLayout = null;
+  if (layoutRaw) {
+    try {
+      channelLayout = JSON.parse(layoutRaw);
+    } catch {
+      // ignore malformed layout
+    }
+  }
+
   return jsonResponse({
     channels,
     dmChannels,
     personalChannel,
+    channelLayout,
     unreadState: Object.fromEntries(
       unreadCounts.map((u) => [
         u.channel_id,

@@ -203,8 +203,9 @@ export class TeamDatabase {
     tags?: string;
     scheduledFor?: string | null;
     assignedTo?: string | null;
+    workingDirectory?: string | null;
   }): Todo | null {
-    const { id, owner, title, description, priority, state, tags, scheduledFor, assignedTo } = params;
+    const { id, owner, title, description, priority, state, tags, scheduledFor, assignedTo, workingDirectory } = params;
     const sets: string[] = [];
     const values: (string | number | null)[] = [];
 
@@ -215,6 +216,7 @@ export class TeamDatabase {
     if (tags !== undefined) { sets.push("tags = ?"); values.push(tags); }
     if (scheduledFor !== undefined) { sets.push("scheduled_for = ?"); values.push(scheduledFor); }
     if (assignedTo !== undefined) { sets.push("assigned_to = ?"); values.push(assignedTo); }
+    if (workingDirectory !== undefined) { sets.push("working_directory = ?"); values.push(workingDirectory); }
 
     if (sets.length === 0) return this.getTodoById(id);
 
@@ -258,8 +260,9 @@ export class TeamDatabase {
     tags?: string;
     scheduledFor?: string | null;
     assignedTo?: string | null;
+    workingDirectory?: string | null;
   }): Todo | null {
-    const { id, groupId, title, description, priority, state, tags, scheduledFor, assignedTo } = params;
+    const { id, groupId, title, description, priority, state, tags, scheduledFor, assignedTo, workingDirectory } = params;
     const sets: string[] = [];
     const values: (string | number | null)[] = [];
 
@@ -270,6 +273,7 @@ export class TeamDatabase {
     if (tags !== undefined) { sets.push("tags = ?"); values.push(tags); }
     if (scheduledFor !== undefined) { sets.push("scheduled_for = ?"); values.push(scheduledFor); }
     if (assignedTo !== undefined) { sets.push("assigned_to = ?"); values.push(assignedTo); }
+    if (workingDirectory !== undefined) { sets.push("working_directory = ?"); values.push(workingDirectory); }
 
     if (sets.length === 0) return this.getTodoById(id);
 

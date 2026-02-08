@@ -58,6 +58,10 @@ const el = {
   parentPickerClose: null,
   parentPickerFilter: null,
   parentPickerList: null,
+  // Project picker elements
+  projectPickerLabel: null,
+  projectPicker: null,
+  workingDirectory: null,
   // Optikon elements
   optikonSection: null,
   optikonLink: null,
@@ -114,6 +118,10 @@ export function initTaskModal() {
   el.parentPickerClose = document.querySelector("[data-parent-picker-close]");
   el.parentPickerFilter = document.querySelector("[data-parent-picker-filter]");
   el.parentPickerList = document.querySelector("[data-parent-picker-list]");
+  // Project picker elements
+  el.projectPickerLabel = document.querySelector("[data-project-picker-label]");
+  el.projectPicker = document.querySelector("[data-project-picker]");
+  el.workingDirectory = document.querySelector("[data-task-modal-working-directory]");
   // Optikon elements
   el.optikonSection = document.querySelector("[data-task-modal-optikon]");
   el.optikonLink = document.querySelector("[data-optikon-link]");
@@ -153,6 +161,9 @@ export function initTaskModal() {
   // Parent picker handlers
   el.parentPickerClose?.addEventListener("click", closeParentPicker);
   el.parentPickerFilter?.addEventListener("input", handleParentPickerFilter);
+
+  // Project picker handler
+  el.projectPicker?.addEventListener("change", handleProjectPickerChange);
 
   // Optikon handlers
   el.optikonAttach?.addEventListener("click", handleAttachOptikonBoard);
@@ -240,6 +251,9 @@ function openModalForCreate(options = {}) {
   updateAssigneeVisibility(currentGroupId);
   clearAssigneeSelection();
 
+  // Reset project picker
+  hideProjectPicker();
+
   // Clear tag chips
   renderTagChips("");
 
@@ -318,6 +332,7 @@ async function openModalForTask(todoId, card) {
         group_id: task.group_id ? String(task.group_id) : "",
         optikon_board_id: task.optikon_board_id || null,
         optikon_board_url: task.optikon_board_url || null,
+        working_directory: task.working_directory || null,
       });
     } else {
       // Fallback to card data if fetch fails
@@ -370,7 +385,7 @@ function populateModalFromCard(card) {
   const tagChips = card.querySelectorAll(".kanban-card-meta .tag-chip");
   const tags = Array.from(tagChips).map(chip => chip.textContent.trim()).join(",");
 
-  populateModal({ title, description: desc, priority, state, scheduled_for: "", tags, assigned_to, group_id, optikon_board_id: null, optikon_board_url: null });
+  populateModal({ title, description: desc, priority, state, scheduled_for: "", tags, assigned_to, group_id, optikon_board_id: null, optikon_board_url: null, working_directory: null });
 }
 
 async function openModalFromListItem(todoId, details) {
@@ -412,6 +427,7 @@ async function openModalFromListItem(todoId, details) {
         group_id: task.group_id ? String(task.group_id) : "",
         optikon_board_id: task.optikon_board_id || null,
         optikon_board_url: task.optikon_board_url || null,
+        working_directory: task.working_directory || null,
       });
     } else {
       // Fallback to DOM data if fetch fails
@@ -447,10 +463,10 @@ function populateModalFromListItem(details) {
   const assigned_to = editForm.querySelector("[name='assigned_to']")?.value || "";
   const group_id = editForm.querySelector("[name='group_id']")?.value || "";
 
-  populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id, optikon_board_id: null, optikon_board_url: null });
+  populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id, optikon_board_id: null, optikon_board_url: null, working_directory: null });
 }
 
-function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id, optikon_board_id, optikon_board_url }) {
+function populateModal({ title, description, priority, state, scheduled_for, tags, assigned_to, group_id, optikon_board_id, optikon_board_url, working_directory }) {
   if (el.title) el.title.value = title;
   if (el.description) el.description.value = description;
   if (el.priority) el.priority.value = priority;
@@ -469,6 +485,9 @@ function populateModal({ title, description, priority, state, scheduled_for, tag
 
   // Update assignee field visibility based on board
   updateAssigneeVisibility(group_id);
+
+  // Set working_directory hidden input before assignee selection triggers project fetch
+  if (el.workingDirectory) el.workingDirectory.value = working_directory || "";
 
   // Set assignee using autocomplete display
   if (group_id && assigned_to) {
@@ -849,6 +868,7 @@ async function handleSubmit(e) {
         scheduled_for: el.scheduled?.value || null,
         tags: el.tagsHidden?.value || "",
         assigned_to: el.assignee?.value || null,
+        working_directory: el.workingDirectory?.value || null,
       };
 
       const success = await store.updateTask(Number(currentTaskId), fields);
@@ -1124,6 +1144,9 @@ function selectAssignee(npub, displayName, avatarUrl) {
     el.assigneeInput.hidden = true;
   }
   if (el.assigneeSuggestions) el.assigneeSuggestions.hidden = true;
+
+  // Fetch Wingman projects for this assignee
+  fetchAndShowProjects(npub);
 }
 
 function clearAssigneeSelection() {
@@ -1138,6 +1161,9 @@ function clearAssigneeSelection() {
     el.assigneeInput.value = "";
     el.assigneeInput.hidden = false;
   }
+
+  // Hide and reset project picker
+  hideProjectPicker();
 }
 
 async function setAssigneeFromNpub(npub, groupId) {
@@ -1314,6 +1340,91 @@ async function unlinkThreadFromTask(messageId) {
 function escapeHtml(str) {
   const escapes = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   return str.replace(/[&<>"']/g, (c) => escapes[c]);
+}
+
+// ==================== Project Picker Functions ====================
+
+// Cache for wingman projects (keyed by npub)
+let wingmanProjectsCache = {};
+
+async function fetchAndShowProjects(npub) {
+  if (!npub) {
+    hideProjectPicker();
+    return;
+  }
+
+  // Show the picker label while loading
+  if (el.projectPickerLabel) el.projectPickerLabel.hidden = false;
+
+  // Check cache
+  if (wingmanProjectsCache[npub]) {
+    populateProjectPicker(wingmanProjectsCache[npub]);
+    return;
+  }
+
+  try {
+    const teamSlug = el.form?.dataset.teamSlug;
+    if (!teamSlug) {
+      hideProjectPicker();
+      return;
+    }
+
+    const res = await fetch(`/t/${teamSlug}/api/wingman/projects?npub=${encodeURIComponent(npub)}`);
+    if (!res.ok) {
+      console.warn("[TaskModal] Failed to fetch wingman projects:", res.status);
+      hideProjectPicker();
+      return;
+    }
+
+    const data = await res.json();
+    const projects = data.projects || [];
+
+    // Cache the result
+    wingmanProjectsCache[npub] = projects;
+    populateProjectPicker(projects);
+  } catch (err) {
+    console.error("[TaskModal] Error fetching wingman projects:", err);
+    hideProjectPicker();
+  }
+}
+
+function populateProjectPicker(projects) {
+  if (!el.projectPicker) return;
+
+  // Clear existing options
+  el.projectPicker.innerHTML = '<option value="">No project</option>';
+
+  if (projects.length === 0) {
+    hideProjectPicker();
+    return;
+  }
+
+  // Add project options
+  for (const project of projects) {
+    const option = document.createElement("option");
+    option.value = project.directoryPath;
+    option.textContent = project.name || project.directoryPath;
+    el.projectPicker.appendChild(option);
+  }
+
+  // If we have a previously saved working_directory, pre-select it
+  const savedDir = el.workingDirectory?.value;
+  if (savedDir) {
+    el.projectPicker.value = savedDir;
+  }
+
+  if (el.projectPickerLabel) el.projectPickerLabel.hidden = false;
+}
+
+function hideProjectPicker() {
+  if (el.projectPickerLabel) el.projectPickerLabel.hidden = true;
+  if (el.projectPicker) el.projectPicker.value = "";
+  if (el.workingDirectory) el.workingDirectory.value = "";
+}
+
+function handleProjectPickerChange() {
+  const selectedPath = el.projectPicker?.value || "";
+  if (el.workingDirectory) el.workingDirectory.value = selectedPath;
 }
 
 // ==================== Subtask Functions ====================

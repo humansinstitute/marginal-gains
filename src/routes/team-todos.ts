@@ -5,11 +5,16 @@
  * Todos are stored in the team's database, not the main database.
  */
 
+import { finalizeEvent } from "nostr-tools";
+
+import { getWingmanIdentity } from "../config";
 import { createTeamRouteContext } from "../context";
 import { isAllowedTransition } from "../domain/todos";
 import { redirect } from "../http";
+import { findUserByWingmanNpub, getUserSetting } from "../master-db";
 import { renderTeamTodosPage } from "../render/home";
 import { createAndBroadcastActivity } from "../services/activities";
+import { publishTaskAssignment } from "../services/nostr-notify";
 import { TeamDatabase } from "../team-db";
 import { normalizeStateInput, validateTaskInput, validateTodoForm, validateTodoTitle } from "../validation";
 
@@ -219,6 +224,7 @@ export async function handleTeamTodoUpdate(
     state: form.get("state"),
     scheduled_for: form.get("scheduled_for"),
     tags: form.get("tags"),
+    working_directory: form.get("working_directory"),
   });
 
   if (!fields) {
@@ -245,6 +251,7 @@ export async function handleTeamTodoUpdate(
       scheduledFor: fields.scheduled_for,
       tags: fields.tags,
       assignedTo: fields.assigned_to,
+      workingDirectory: fields.working_directory,
     });
   } else {
     db.updateTodo({
@@ -257,6 +264,7 @@ export async function handleTeamTodoUpdate(
       scheduledFor: fields.scheduled_for,
       tags: fields.tags,
       assignedTo: fields.assigned_to,
+      workingDirectory: fields.working_directory,
     });
   }
 
@@ -272,6 +280,16 @@ export async function handleTeamTodoUpdate(
         todoId: id,
         summary: `assigned you to "${taskTitle}"`,
       });
+
+      // Send Nostr notification (fire-and-forget)
+      publishTaskAssignment({
+        assigneeNpub: fields.assigned_to,
+        teamSlug,
+        taskId: id,
+        taskTitle,
+        taskDescription: existingTodo.description || "",
+        workingDirectory: fields.working_directory || existingTodo.working_directory || undefined,
+      }).catch((err) => console.error("[Nostr] Task assignment notification failed:", err));
     }
     // Notify assignee of update (if updated by someone else)
     if (existingTodo.assigned_to && existingTodo.assigned_to !== result.ctx.session.npub) {
@@ -952,6 +970,7 @@ export async function handleTeamApiTodoUpdate(
         scheduledFor: fields.scheduled_for,
         tags: fields.tags,
         assignedTo: fields.assigned_to,
+        workingDirectory: fields.working_directory,
       });
     } else {
       db.updateTodo({
@@ -964,6 +983,7 @@ export async function handleTeamApiTodoUpdate(
         scheduledFor: fields.scheduled_for,
         tags: fields.tags,
         assignedTo: fields.assigned_to,
+        workingDirectory: fields.working_directory,
       });
     }
 
@@ -977,6 +997,16 @@ export async function handleTeamApiTodoUpdate(
         todoId: id,
         summary: `assigned you to "${taskTitle}"`,
       });
+
+      // Send Nostr notification (fire-and-forget)
+      publishTaskAssignment({
+        assigneeNpub: fields.assigned_to,
+        teamSlug,
+        taskId: id,
+        taskTitle,
+        taskDescription: existing.description || "",
+        workingDirectory: fields.working_directory || existing.working_directory || undefined,
+      }).catch((err) => console.error("[Nostr] Task assignment notification failed:", err));
     }
     if (existing.assigned_to && existing.assigned_to !== result.ctx.session.npub) {
       createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
@@ -1052,4 +1082,87 @@ export function handleTeamApiTodoDelete(
     status: 200,
     headers: jsonHeaders,
   });
+}
+
+/**
+ * GET /t/:slug/api/wingman/projects?npub={npub} - Proxy to Wingmen for project list
+ *
+ * Looks up the Wingmen URL from user_settings (the user who configured this
+ * wingman npub), then signs the outbound request with NIP-98 using WINGMAN_KEY.
+ */
+export async function handleTeamWingmanProjects(
+  url: URL,
+  session: Session | null,
+  teamSlug: string
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) return result.response;
+
+  const npub = url.searchParams.get("npub");
+  if (!npub) {
+    return new Response(JSON.stringify({ error: "npub parameter required" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Find which user configured this wingman npub
+  const ownerNpub = findUserByWingmanNpub(npub);
+  if (!ownerNpub) {
+    return new Response(JSON.stringify({ projects: [] }), {
+      status: 200,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Get that user's wingmen_url
+  const wingmenUrl = getUserSetting(ownerNpub, "wingmen_url");
+  if (!wingmenUrl) {
+    return new Response(JSON.stringify({ projects: [] }), {
+      status: 200,
+      headers: jsonHeaders,
+    });
+  }
+
+  const identity = getWingmanIdentity();
+  if (!identity) {
+    return new Response(JSON.stringify({ error: "Server signing key not configured" }), {
+      status: 503,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Build the target URL
+  const targetUrl = `${wingmenUrl}/api/npub-projects?npub=${encodeURIComponent(npub)}`;
+
+  // Sign NIP-98 event for the outbound request
+  const nip98Event = finalizeEvent({
+    kind: 27235,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ["u", targetUrl],
+      ["method", "GET"],
+    ],
+    content: "",
+  }, identity.secretKey);
+
+  const token = `Nostr ${btoa(JSON.stringify(nip98Event))}`;
+
+  try {
+    const res = await fetch(targetUrl, {
+      headers: { Authorization: token },
+    });
+
+    const data = await res.json();
+    return new Response(JSON.stringify(data), {
+      status: res.status,
+      headers: jsonHeaders,
+    });
+  } catch (err) {
+    console.error("[Wingman Proxy] Failed to fetch projects:", err);
+    return new Response(JSON.stringify({ error: "Failed to fetch projects from Wingmen" }), {
+      status: 502,
+      headers: jsonHeaders,
+    });
+  }
 }

@@ -38,6 +38,7 @@ export async function initSettings() {
     if (window.__PERSONAL_SETTINGS_PAGE__) {
       initAccountSection();
       await initNotifications();
+      initWingmenUserSettings();
       return;
     }
 
@@ -919,5 +920,85 @@ async function handleRunMigration() {
   } finally {
     btn.disabled = false;
     btn.textContent = "Encrypt Existing Messages";
+  }
+}
+
+// ============================================================
+// Wingmen User Settings (personal settings page)
+// ============================================================
+
+async function initWingmenUserSettings() {
+  const form = document.querySelector("[data-wingmen-settings-form]");
+  if (!form) return;
+
+  const urlInput = form.querySelector("[data-wingmen-url]");
+  const npubInput = form.querySelector("[data-wingman-npub]");
+  const statusEl = form.querySelector("[data-wingmen-status]");
+
+  // Load existing settings
+  try {
+    const res = await fetch("/api/user-settings");
+    if (res.ok) {
+      const data = await res.json();
+      const settings = data.settings || {};
+      if (urlInput && settings.wingmen_url) urlInput.value = settings.wingmen_url;
+      if (npubInput && settings.wingman_npub) npubInput.value = settings.wingman_npub;
+    }
+  } catch (err) {
+    console.error("[Settings] Failed to load wingmen settings:", err);
+  }
+
+  // Save handler
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const wingmenUrl = urlInput?.value?.trim() || "";
+    const wingmanNpub = npubInput?.value?.trim() || "";
+
+    // Basic validation
+    if (wingmanNpub && !wingmanNpub.startsWith("npub1")) {
+      showWingmenStatus(statusEl, "Wingman npub must start with 'npub1'", true);
+      return;
+    }
+
+    if (wingmenUrl && !wingmenUrl.startsWith("http")) {
+      showWingmenStatus(statusEl, "URL must start with http:// or https://", true);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/user-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: {
+            wingmen_url: wingmenUrl || null,
+            wingman_npub: wingmanNpub || null,
+          },
+        }),
+      });
+
+      if (res.ok) {
+        showWingmenStatus(statusEl, "Saved", false);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showWingmenStatus(statusEl, data.error || "Failed to save", true);
+      }
+    } catch (err) {
+      console.error("[Settings] Failed to save wingmen settings:", err);
+      showWingmenStatus(statusEl, "Failed to save", true);
+    }
+  });
+}
+
+function showWingmenStatus(el, message, isError) {
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = false;
+  el.classList.toggle("error", isError);
+  el.classList.toggle("success", !isError);
+
+  if (!isError) {
+    setTimeout(() => { el.hidden = true; }, 3000);
   }
 }

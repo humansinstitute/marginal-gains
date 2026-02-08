@@ -37,6 +37,11 @@ window.createChatStore = function (initialData) {
       ? String(initialData.selectedChannelId)
       : null,
 
+    // ========== Channel Layout (Sections) ==========
+    channelLayout: null, // { sections: [{ id, name, channelIds }] }
+    arrangeMode: false,
+    _editLayout: null, // working copy during arrange mode
+
     // ========== Message State (Windowed) ==========
     messages: [], // Currently visible messages (windowed)
     messageCount: 0, // Total messages in channel
@@ -200,6 +205,217 @@ window.createChatStore = function (initialData) {
       } else {
         self.channels = mapped;
       }
+    },
+
+    // ========== Channel Layout Methods ==========
+
+    /**
+     * Set layout from server response
+     */
+    setChannelLayout: function (layout) {
+      this.channelLayout = layout || null;
+    },
+
+    /**
+     * Get sections for display. Returns array of { id, name, channels[] }.
+     * Uses _editLayout during arrange mode, channelLayout otherwise.
+     */
+    getChannelSections: function () {
+      var layout = this.arrangeMode ? this._editLayout : this.channelLayout;
+      if (!layout || !layout.sections || layout.sections.length === 0) return [];
+      var self = this;
+      return layout.sections.map(function (section) {
+        var sectionChannels = [];
+        (section.channelIds || []).forEach(function (cid) {
+          var ch = self.channels.find(function (c) {
+            return c.id === String(cid);
+          });
+          if (ch) sectionChannels.push(ch);
+        });
+        return { id: section.id, name: section.name, channels: sectionChannels };
+      });
+    },
+
+    /**
+     * Get channels not in any section (shown at top as "Ungrouped"),
+     * ordered by channelOrder if available.
+     */
+    getUngroupedChannels: function () {
+      var layout = this.arrangeMode ? this._editLayout : this.channelLayout;
+      // Collect IDs placed in sections
+      var placed = new Set();
+      if (layout && layout.sections) {
+        layout.sections.forEach(function (s) {
+          (s.channelIds || []).forEach(function (cid) {
+            placed.add(String(cid));
+          });
+        });
+      }
+      var ungrouped = this.channels.filter(function (ch) {
+        return !placed.has(ch.id);
+      });
+      // Sort by channelOrder if available
+      if (layout && layout.channelOrder && layout.channelOrder.length > 0) {
+        var orderMap = {};
+        layout.channelOrder.forEach(function (id, idx) {
+          orderMap[String(id)] = idx;
+        });
+        ungrouped.sort(function (a, b) {
+          var ai = orderMap[a.id] !== undefined ? orderMap[a.id] : 99999;
+          var bi = orderMap[b.id] !== undefined ? orderMap[b.id] : 99999;
+          return ai - bi;
+        });
+      }
+      return ungrouped;
+    },
+
+    /**
+     * Check if layout has any sections
+     */
+    hasLayout: function () {
+      var layout = this.arrangeMode ? this._editLayout : this.channelLayout;
+      return layout && layout.sections && layout.sections.length > 0;
+    },
+
+    /**
+     * Enter arrange mode (admin only)
+     */
+    enterArrangeMode: function () {
+      this.arrangeMode = true;
+      this._editLayout = this.channelLayout
+        ? JSON.parse(JSON.stringify(this.channelLayout))
+        : { sections: [] };
+      // Initialize channelOrder from current ungrouped channel order if not set
+      if (!this._editLayout.channelOrder) {
+        var placed = new Set();
+        (this._editLayout.sections || []).forEach(function (s) {
+          (s.channelIds || []).forEach(function (cid) { placed.add(String(cid)); });
+        });
+        this._editLayout.channelOrder = this.channels
+          .filter(function (ch) { return !placed.has(ch.id); })
+          .map(function (ch) { return Number(ch.id); });
+      }
+    },
+
+    /**
+     * Cancel arrange mode without saving
+     */
+    cancelArrangeMode: function () {
+      this.arrangeMode = false;
+      this._editLayout = null;
+    },
+
+    /**
+     * Add a new section during arrange mode
+     */
+    addSection: function (name) {
+      if (!this._editLayout) return;
+      this._editLayout.sections.push({
+        id: "s" + Date.now(),
+        name: name || "New Section",
+        channelIds: [],
+      });
+    },
+
+    /**
+     * Rename a section during arrange mode
+     */
+    renameSection: function (sectionId, newName) {
+      if (!this._editLayout) return;
+      var section = this._editLayout.sections.find(function (s) {
+        return s.id === sectionId;
+      });
+      if (section) section.name = newName;
+    },
+
+    /**
+     * Remove a section during arrange mode (channels go back to ungrouped)
+     */
+    removeSection: function (sectionId) {
+      if (!this._editLayout) return;
+      this._editLayout.sections = this._editLayout.sections.filter(function (s) {
+        return s.id !== sectionId;
+      });
+    },
+
+    /**
+     * Move a channel into a section at a given position during arrange mode
+     */
+    moveChannelToSection: function (channelId, sectionId, position) {
+      if (!this._editLayout) return;
+      var cid = Number(channelId);
+      // Remove from all sections first
+      this._editLayout.sections.forEach(function (s) {
+        s.channelIds = s.channelIds.filter(function (id) {
+          return id !== cid;
+        });
+      });
+      // Remove from channelOrder
+      if (this._editLayout.channelOrder) {
+        this._editLayout.channelOrder = this._editLayout.channelOrder.filter(function (id) {
+          return id !== cid;
+        });
+      }
+      // Handle ungrouped drop
+      if (sectionId === "__ungrouped__" || sectionId === "ungrouped") {
+        if (!this._editLayout.channelOrder) this._editLayout.channelOrder = [];
+        if (typeof position === "number") {
+          this._editLayout.channelOrder.splice(position, 0, cid);
+        } else {
+          this._editLayout.channelOrder.push(cid);
+        }
+        return;
+      }
+      var target = this._editLayout.sections.find(function (s) {
+        return s.id === sectionId;
+      });
+      if (!target) return;
+      if (typeof position === "number") {
+        target.channelIds.splice(position, 0, cid);
+      } else {
+        target.channelIds.push(cid);
+      }
+    },
+
+    /**
+     * Move a section to a new position during arrange mode
+     */
+    moveSectionTo: function (sectionId, newIndex) {
+      if (!this._editLayout) return;
+      var sections = this._editLayout.sections;
+      var idx = sections.findIndex(function (s) { return s.id === sectionId; });
+      if (idx < 0) return;
+      var removed = sections.splice(idx, 1)[0];
+      sections.splice(newIndex, 0, removed);
+    },
+
+    /**
+     * Save arrangement - calls the PUT endpoint. Returns a promise.
+     */
+    saveArrangement: function () {
+      var self = this;
+      if (!self._editLayout) return Promise.resolve();
+      var teamSlug = window.__TEAM_SLUG__;
+      if (!teamSlug) return Promise.resolve();
+      return fetch("/t/" + teamSlug + "/api/channel-layout", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sections: self._editLayout.sections,
+          channelOrder: self._editLayout.channelOrder || [],
+        }),
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.layout) {
+            self.channelLayout = data.layout;
+          }
+          self.arrangeMode = false;
+          self._editLayout = null;
+        })
+        .catch(function (err) {
+          console.error("[ChatStore] Failed to save layout:", err);
+        });
     },
 
     // ========== Message Methods ==========

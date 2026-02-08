@@ -116,7 +116,7 @@ import {
   handlePushUpdateFrequency,
   handleSendTestNotification,
 } from "./routes/push";
-import { handleSettings, handleAppSettingsPage, handleTeamConfigPage } from "./routes/settings";
+import { handleSettings, handleAppSettingsPage, handleTeamConfigPage, handleGetUserSettings, handleUpdateUserSettings } from "./routes/settings";
 import {
   handleCreateTask,
   handleGetActivityTasks,
@@ -164,6 +164,8 @@ import {
   handleTeamUnpinMessage,
   handleTeamUpdateChannel,
   handleTeamUpdateUser,
+  handleTeamGetChannelLayout,
+  handleTeamPutChannelLayout,
 } from "./routes/team-chat/index";
 import {
   handleTeamCrmPage,
@@ -240,6 +242,7 @@ import {
   handleTeamGetTodo,
   handleTeamGetSubtasks,
   handleTeamCreateSubtask,
+  handleTeamWingmanProjects,
 } from "./routes/team-todos";
 import {
   handleTeamsPage,
@@ -388,6 +391,9 @@ const server = Bun.serve({
         // Team-scoped API routes
         const teamChannelsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels$/);
         if (teamChannelsMatch) return handleTeamListChannels(session, teamChannelsMatch[1]);
+
+        const teamChannelLayoutMatch = pathname.match(/^\/t\/([^/]+)\/api\/channel-layout$/);
+        if (teamChannelLayoutMatch) return handleTeamGetChannelLayout(session, teamChannelLayoutMatch[1]);
 
         const teamUsersMatch = pathname.match(/^\/t\/([^/]+)\/chat\/users$/);
         if (teamUsersMatch) return handleTeamListUsers(session, teamUsersMatch[1]);
@@ -547,6 +553,10 @@ const server = Bun.serve({
         const teamGroupMembersMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/members$/);
         if (teamGroupMembersMatch) return handleTeamListGroupMembers(session, teamGroupMembersMatch[1], Number(teamGroupMembersMatch[2]));
 
+        // Team-scoped Wingman projects proxy
+        const teamWingmanProjectsMatch = pathname.match(/^\/t\/([^/]+)\/api\/wingman\/projects$/);
+        if (teamWingmanProjectsMatch) return handleTeamWingmanProjects(url, session, teamWingmanProjectsMatch[1]);
+
         // Team-scoped Optikon routes
         const teamOptikonConfigMatch = pathname.match(/^\/t\/([^/]+)\/api\/optikon\/config$/);
         if (teamOptikonConfigMatch) return handleGetOptikonConfig(session, teamOptikonConfigMatch[1]);
@@ -657,6 +667,9 @@ const server = Bun.serve({
         if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
         if (pathname === "/api/wingman/costs") return handleGetWingmanCosts(session);
         if (pathname === "/api/slashcommands") return handleGetSlashCommands(session);
+
+        // User settings routes (personal)
+        if (pathname === "/api/user-settings") return handleGetUserSettings(session);
 
         // App settings routes (admin only)
         if (pathname === "/api/app/settings") return handleGetAppSettings(session);
@@ -1003,6 +1016,14 @@ const server = Bun.serve({
         if (teamTodoOptikonMatch) return handleSetTodoOptikonBoard(req, session, teamTodoOptikonMatch[1], Number(teamTodoOptikonMatch[2]));
         const teamGroupOptikonWorkspacePatchMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/optikon-workspace$/);
         if (teamGroupOptikonWorkspacePatchMatch) return handleSetGroupOptikonWorkspace(req, session, teamGroupOptikonWorkspacePatchMatch[1], Number(teamGroupOptikonWorkspacePatchMatch[2]));
+      }
+
+      if (req.method === "PUT") {
+        // User settings
+        if (pathname === "/api/user-settings") return handleUpdateUserSettings(req, session);
+
+        const teamPutChannelLayoutMatch = pathname.match(/^\/t\/([^/]+)\/api\/channel-layout$/);
+        if (teamPutChannelLayoutMatch) return handleTeamPutChannelLayout(req, session, teamPutChannelLayoutMatch[1]);
       }
 
       if (req.method === "DELETE") {
