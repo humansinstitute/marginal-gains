@@ -111,15 +111,34 @@ function renderChatContent() {
       <aside class="chat-channels-sidebar">
         <div class="chat-section-header">
           <h3>Channels</h3>
-          <button type="button" class="text-btn" data-new-channel-trigger>+ New</button>
+          <div class="chat-section-actions">
+            <button x-show="_deps.isAdmin && !arrangeMode" type="button" class="icon-btn arrange-cog-btn" @click="enterArrangeMode()" title="Arrange channels">&#9881;</button>
+            <button type="button" class="text-btn" data-new-channel-trigger>+ New</button>
+          </div>
         </div>
+        <!-- Arrange mode banner -->
+        <template x-if="arrangeMode">
+          <div class="arrange-banner">
+            <span>Arrange channels</span>
+            <div class="arrange-banner-actions">
+              <button type="button" class="text-btn" @click="addSection(prompt('Section name:'))">+ Section</button>
+              <button type="button" class="text-btn" @click="cancelArrangeMode()">Cancel</button>
+              <button type="button" class="primary-sm" @click="saveArrangement()">Done</button>
+            </div>
+          </div>
+        </template>
         <div class="chat-list" data-channel-list>
-          <template x-for="channel in channels" :key="channel.id">
+          <!-- Ungrouped channels (always at top) -->
+          <div class="ungrouped-drop-zone" data-section-drop="__ungrouped__">
+          <template x-for="channel in getUngroupedChannels()" :key="'u-' + channel.id">
             <button class="chat-channel"
               :class="{ 'active': isChannelActive(channel.id), 'unread': hasUnread(channel.id) }"
               :data-channel-id="channel.id"
+              :data-drag-channel="channel.id"
+              :draggable="arrangeMode"
               :title="channel.displayName || channel.name"
               @click="onChannelClick(channel.id)">
+              <span x-show="arrangeMode" class="drag-handle">&#9776;</span>
               <div class="chat-channel-name">
                 <span x-text="'#' + channel.name"></span>
                 <span x-show="channel.encrypted" class="channel-encrypted" title="E2E Encrypted">&#128737;</span>
@@ -130,6 +149,50 @@ function renderChatContent() {
                   x-text="'(' + (getMentionCount(channel.id) > 99 ? '99+' : getMentionCount(channel.id)) + ')'"></span>
               </div>
             </button>
+          </template>
+          <template x-if="arrangeMode && getUngroupedChannels().length === 0">
+            <p class="section-empty-drop">Drop channels here</p>
+          </template>
+          </div>
+          <!-- Sections -->
+          <template x-for="section in getChannelSections()" :key="section.id">
+            <div class="channel-section" :data-section-id="section.id" :data-drag-section="section.id" :draggable="arrangeMode">
+              <div class="channel-section-header">
+                <span x-show="arrangeMode" class="drag-handle section-drag-handle">&#9776;</span>
+                <h4 class="channel-section-name" x-text="section.name"></h4>
+                <template x-if="arrangeMode">
+                  <div class="channel-section-actions">
+                    <button type="button" class="icon-btn-sm" @click="renameSection(section.id, prompt('Rename section:', section.name))" title="Rename">&#9998;</button>
+                    <button type="button" class="icon-btn-sm danger" @click="removeSection(section.id)" title="Remove section">&times;</button>
+                  </div>
+                </template>
+              </div>
+              <div class="channel-section-channels" :data-section-drop="section.id">
+                <template x-for="channel in section.channels" :key="'s-' + channel.id">
+                  <button class="chat-channel"
+                    :class="{ 'active': isChannelActive(channel.id), 'unread': hasUnread(channel.id) }"
+                    :data-channel-id="channel.id"
+                    :data-drag-channel="channel.id"
+                    :draggable="arrangeMode"
+                    :title="channel.displayName || channel.name"
+                    @click="onChannelClick(channel.id)">
+                    <span x-show="arrangeMode" class="drag-handle">&#9776;</span>
+                    <div class="chat-channel-name">
+                      <span x-text="'#' + channel.name"></span>
+                      <span x-show="channel.encrypted" class="channel-encrypted" title="E2E Encrypted">&#128737;</span>
+                      <span x-show="!channel.encrypted && !channel.isPublic" class="channel-lock" title="Private">&#128274;</span>
+                      <img x-show="channel.hasWingmanAccess" src="/wingman-icon.png" class="channel-wingman-icon" title="Wingman has access" alt="Wingman" />
+                      <span x-show="getMentionCount(channel.id) > 0 && !isChannelActive(channel.id)"
+                        class="unread-badge mention"
+                        x-text="'(' + (getMentionCount(channel.id) > 99 ? '99+' : getMentionCount(channel.id)) + ')'"></span>
+                    </div>
+                  </button>
+                </template>
+                <template x-if="arrangeMode && section.channels.length === 0">
+                  <p class="section-empty-drop">Drop channels here</p>
+                </template>
+              </div>
+            </div>
           </template>
         </div>
         <div class="chat-section-header dm-section-header">

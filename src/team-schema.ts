@@ -69,6 +69,7 @@ export function initTeamSchema(db: Database): void {
   addColumn(db, "ALTER TABLE todos ADD COLUMN updated_at TEXT DEFAULT NULL");
   addColumn(db, "ALTER TABLE todos ADD COLUMN optikon_board_id INTEGER DEFAULT NULL");
   addColumn(db, "ALTER TABLE todos ADD COLUMN optikon_board_url TEXT DEFAULT NULL");
+  addColumn(db, "ALTER TABLE todos ADD COLUMN working_directory TEXT DEFAULT NULL");
   createIndex(db, "CREATE INDEX idx_todos_group_id ON todos(group_id)");
   createIndex(db, "CREATE INDEX idx_todos_assigned_to ON todos(assigned_to)");
   createIndex(db, "CREATE INDEX idx_todos_parent_id ON todos(parent_id)");
@@ -598,6 +599,28 @@ export function initTeamSchema(db: Database): void {
   createIndex(db, "CREATE INDEX idx_crm_activities_type ON crm_activities(type)");
   createIndex(db, "CREATE INDEX idx_crm_activities_date ON crm_activities(activity_date)");
   createIndex(db, "CREATE INDEX idx_crm_activities_deleted ON crm_activities(deleted)");
+
+  // ============================================================================
+  // Activities (notifications)
+  // ============================================================================
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS activities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_npub TEXT NOT NULL,
+      type TEXT NOT NULL,
+      source_npub TEXT NOT NULL,
+      message_id INTEGER,
+      channel_id INTEGER,
+      todo_id INTEGER,
+      summary TEXT NOT NULL DEFAULT '',
+      is_read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  createIndex(db, "CREATE INDEX idx_activities_target_read ON activities(target_npub, is_read)");
+  createIndex(db, "CREATE INDEX idx_activities_target_created ON activities(target_npub, created_at)");
+  createIndex(db, "CREATE INDEX idx_activities_type ON activities(type)");
 
   // ============================================================================
   // Wallet Transactions

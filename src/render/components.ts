@@ -3,7 +3,7 @@ import { getTeamBySlug } from "../master-db";
 
 import type { Session } from "../types";
 
-export type ActivePage = "teams" | "settings" | "team-settings" | "app-settings" | "chat" | "tasks" | "crm";
+export type ActivePage = "teams" | "settings" | "team-settings" | "app-settings" | "home" | "chat" | "tasks" | "crm";
 
 export function renderPinModal() {
   const numpadButtons = [1, 2, 3, 4, 5, 6, 7, 8, 9, "clear", 0, "back"]
@@ -105,6 +105,7 @@ export function renderAppMenu(
 
   // Build team-scoped links if team is selected
   const teamSlug = session?.currentTeamSlug;
+  const homeHref = teamSlug ? `/t/${teamSlug}/home` : null;
   const chatHref = teamSlug ? `/t/${teamSlug}/chat` : "/chat";
   const tasksHref = teamSlug ? `/t/${teamSlug}/todo` : "/todo";
   const teamConfigHref = teamSlug ? `/t/${teamSlug}/config` : null;
@@ -164,6 +165,7 @@ export function renderAppMenu(
       </div>
       ${teamSelector}
       <ul class="app-menu-list">
+        ${homeHref ? `<li><a href="${homeHref}" class="app-menu-item${activePage === "home" ? " active" : ""}">Home</a></li>` : ""}
         <li><a href="${chatHref}" class="app-menu-item${activePage === "chat" ? " active" : ""}">Chat</a></li>
         ${tasksLink}
         ${crmLink}

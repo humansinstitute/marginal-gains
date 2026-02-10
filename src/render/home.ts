@@ -5,243 +5,37 @@ import { escapeHtml } from "../utils/html";
 
 import { renderAppMenu, renderKeyTeleportSetupModal, renderPinModal, renderUnlockCodeModal } from "./components";
 
-import type { Group, GroupMember, Todo } from "../db";
+import type { Group, Todo } from "../db";
 import type { TeamBranding } from "../routes/app-settings";
 import type { ViewMode } from "../routes/home";
 import type { Session, TodoPriority, TodoState } from "../types";
 
-// Extended todo type that may include board info (for All Tasks view)
-type TodoDisplay = Todo & { group_name?: string | null };
+// ==================== Shared Helpers ====================
 
-type GroupMemberWithProfile = GroupMember & { display_name: string | null; picture: string | null };
-
-type RenderArgs = {
-  showArchive: boolean;
-  session: Session | null;
-  filterTags?: string[];
-  todos?: TodoDisplay[];
-  userGroups?: Group[];
-  selectedGroup?: Group | null;
-  canManage?: boolean;
-  isAllTasksView?: boolean;
-  mineFilter?: boolean;
-  groupMembers?: GroupMemberWithProfile[];
-  viewMode?: ViewMode;
-};
-
-type PageState = {
-  archiveHref: string;
-  archiveLabel: string;
-  remainingText: string;
-  tagFilterBar: string;
-  activeTodos: TodoDisplay[];
-  doneTodos: TodoDisplay[];
-  emptyActiveMessage: string;
-  emptyArchiveMessage: string;
-  showArchive: boolean;
-  groupId: number | null;
-  canManage: boolean;
-  contextSwitcher: string;
-  isAllTasksView: boolean;
-  mineFilter: boolean;
-  mineFilterToggle: string;
-  groupMembers: GroupMemberWithProfile[];
-  currentUserNpub: string | null;
-  userGroups: Group[];
-  viewMode: ViewMode;
-};
-
-export function renderHomePage({
-  showArchive,
-  session,
-  filterTags = [],
-  todos = [],
-  userGroups = [],
-  selectedGroup = null,
-  canManage = true,
-  isAllTasksView = false,
-  mineFilter = false,
-  groupMembers = [],
-  viewMode = "kanban",
-}: RenderArgs) {
-  const filteredTodos = filterTodos(todos, filterTags);
-  const pageState = buildPageState(filteredTodos, filterTags, showArchive, session, userGroups, selectedGroup, canManage, isAllTasksView, mineFilter, groupMembers, viewMode);
-
-  return `<!doctype html>
-<html lang="en">
-${renderHead()}
-<body class="tasks-page">
-  <main class="tasks-app-shell">
-    ${renderHeader(session)}
-    <div class="tasks-content" data-tasks-content>
-      <div class="tasks-content-inner">
-        ${renderAuth(session)}
-        ${renderHero(session, pageState.groupId, pageState.canManage)}
-        ${renderWork(pageState)}
-        ${renderSummaries()}
-      </div>
-    </div>
-    ${renderQrModal()}
-    ${renderProfileModal()}
-    ${renderPinModal()}
-    ${renderUnlockCodeModal()}
-    ${renderKeyTeleportSetupModal()}
-    ${renderTaskEditModal(pageState.groupId, pageState.groupMembers, pageState.userGroups)}
-  </main>
-  ${renderSessionSeed(session, pageState.groupId, pageState.activeTodos)}
-  <script src="/kanban-store.js"></script>
-  <script src="/lib/alpine.min.js" defer></script>
-  <script type="module" src="/app.js?v=3"></script>
-</body>
-</html>`;
+function filterTodos(allTodos: Todo[], filterTags: string[]) {
+  if (filterTags.length === 0) return allTodos;
+  return allTodos.filter((todo) => {
+    const todoTags = todo.tags ? todo.tags.split(",").map((t) => t.trim().toLowerCase()) : [];
+    return filterTags.some((ft) => todoTags.includes(ft.toLowerCase()));
+  });
 }
 
-function renderHead() {
-  const appName = getAppName();
-  const faviconUrl = getFaviconUrl() || "/favicon.png";
-  return `<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>${appName}</title>
-  <meta name="theme-color" content="#6b3a6b" />
-  <meta name="application-name" content="${appName}" />
-  <link rel="icon" type="image/png" href="${faviconUrl}" />
-  <link rel="apple-touch-icon" href="${faviconUrl}" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="/app.css?v=3" />
-</head>`;
+function collectTags(todos: Todo[]) {
+  const allTags = new Set<string>();
+  for (const todo of todos) {
+    if (!todo.tags) continue;
+    todo.tags
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+      .forEach((t) => allTags.add(t));
+  }
+  return Array.from(allTags);
 }
 
-function renderHeader(session: Session | null) {
-  const appName = getAppName();
-  return `<header class="tasks-page-header">
-    <div class="header-left">
-      <button class="hamburger-btn" type="button" data-hamburger-toggle aria-label="Menu">
-        <span class="hamburger-icon"></span>
-      </button>
-      <h1 class="app-title">${appName}</h1>
-    </div>
-    <div class="header-right">
-      <div class="session-controls" data-session-controls ${session ? "" : "hidden"}>
-        <button class="avatar-chip" type="button" data-avatar ${session ? "" : "hidden"} title="Account menu">
-          <span class="avatar-fallback" data-avatar-fallback>${session ? formatAvatarFallback(session.npub) : "MG"}</span>
-          <img data-avatar-img alt="Profile photo" loading="lazy" ${session ? "" : "hidden"} />
-        </button>
-        <div class="avatar-menu" data-avatar-menu hidden>
-          <button type="button" data-view-profile>View Profile</button>
-          <button type="button" data-export-secret ${session?.method === "ephemeral" ? "" : "hidden"}>Export Secret</button>
-          <button type="button" data-show-login-qr ${session?.method === "ephemeral" ? "" : "hidden"}>Show Login QR</button>
-          <button type="button" data-copy-id ${session ? "" : "hidden"}>Copy ID</button>
-          <a href="/wallet" class="avatar-menu-link" ${session ? "" : "hidden"}>Wallet</a>
-          <button type="button" data-logout>Log out</button>
-        </div>
-      </div>
-    </div>
-    ${renderAppMenu(session, "tasks")}
-  </header>`;
-}
-
-function renderAuth(session: Session | null) {
-  return `<section class="auth-panel" data-login-panel ${session ? "hidden" : ""}>
-    <div class="keyteleport-overlay" data-keyteleport-overlay hidden>
-      <div class="keyteleport-spinner"></div>
-      <p>Key Teleport in Progress</p>
-    </div>
-    <h2>Sign in with Nostr to get started</h2>
-    <p class="auth-description">Start with a quick Ephemeral ID or bring your own signer.</p>
-    <div class="auth-actions">
-      <button class="auth-option" type="button" data-login-method="ephemeral">Sign Up</button>
-      <button class="auth-option auth-extension" type="button" data-login-method="extension">Log in with Nostr Extension</button>
-    </div>
-    <details class="auth-advanced">
-      <summary>Advanced Options (nsec, bunker://...)</summary>
-      <p>Connect to a remote bunker or sign in with your secret key.</p>
-      <form data-bunker-form>
-        <input name="bunker" placeholder="nostrconnect://… or name@example.com" autocomplete="off" />
-        <button class="bunker-submit" type="submit">Connect bunker</button>
-      </form>
-      <form data-secret-form>
-        <div class="secret-input-wrapper">
-          <input type="password" name="secret" placeholder="nsec1…" autocomplete="off" />
-          <button type="button" class="secret-toggle" data-toggle-secret aria-label="Show secret">&#128065;</button>
-        </div>
-        <button class="bunker-submit" type="submit">Sign in with secret</button>
-      </form>
-      <div class="keyteleport-setup-section">
-        <p class="keyteleport-setup-label">Have a Welcome key manager?</p>
-        <button class="keyteleport-setup-btn" type="button" data-keyteleport-setup>Setup Key Teleport</button>
-      </div>
-    </details>
-    <p class="auth-error" data-login-error hidden></p>
-  </section>`;
-}
-
-function renderHero(session: Session | null, groupId: number | null, canManage: boolean) {
-  const isDisabled = !session || !canManage;
-  const placeholder = !session ? "Add a task" : !canManage ? "View only" : "Add something else…";
-  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
-
-  return `<section class="hero-entry" data-hero-section ${canManage ? "" : "hidden"}>
-    <form class="todo-form" method="post" action="/todos">
-      ${groupIdField}
-      <label for="title" class="sr-only">Add a task</label>
-      <div class="hero-input-wrapper">
-        <input class="hero-input" data-hero-input id="title" name="title" placeholder="${placeholder}" autocomplete="off" autofocus required ${isDisabled ? "disabled" : ""} />
-      </div>
-      <p class="hero-hint" data-hero-hint hidden>Sign in above to add tasks.</p>
-    </form>
-  </section>`;
-}
-
-function renderWork(state: PageState) {
-  // Build view switcher URLs preserving query params
-  const buildViewUrl = (mode: ViewMode) => {
-    const params: string[] = [];
-    if (state.isAllTasksView) params.push("view=all");
-    else if (state.groupId) params.push(`group=${state.groupId}`);
-    if (state.mineFilter && state.groupId) params.push("mine=1");
-    if (state.showArchive) params.push("archive=1");
-    const query = params.length > 0 ? `?${params.join("&")}` : "";
-    return `/todo/${mode}${query}`;
-  };
-
-  const listUrl = buildViewUrl("list");
-  const kanbanUrl = buildViewUrl("kanban");
-  const isKanban = state.viewMode === "kanban";
-  const isList = state.viewMode === "list";
-
-  // Only render the active view
-  // Kanban uses Alpine.js for reactive updates, list view uses server-rendered HTML
-  const viewContent = isKanban
-    ? `<div class="kanban-view" data-kanban-view>
-        ${renderKanbanBoardAlpine(state.groupId, state.canManage, state.isAllTasksView)}
-      </div>`
-    : `<div class="todo-list-view" data-list-view>
-        ${renderTodoList(state.activeTodos, state.emptyActiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub)}
-      </div>`;
-
-  return `<section class="work" data-work-section>
-    <div class="work-header">
-      <h2>Work</h2>
-      <div class="work-header-actions">
-        ${state.contextSwitcher}
-        ${state.mineFilterToggle}
-        <div class="view-switcher" data-view-switcher>
-          <a href="${listUrl}" class="view-btn${isList ? " active" : ""}" title="List view">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 4h12v1H2V4zm0 3.5h12v1H2v-1zm0 3.5h12v1H2v-1z"/></svg>
-          </a>
-          <a href="${kanbanUrl}" class="view-btn${isKanban ? " active" : ""}" title="Kanban view">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2h4v12H1V2zm5 0h4v8H6V2zm5 0h4v10h-4V2z"/></svg>
-          </a>
-        </div>
-        <a class="archive-toggle" href="${state.archiveHref}">${state.archiveLabel}</a>
-      </div>
-    </div>
-    <p class="remaining-summary">${state.remainingText}</p>
-    ${isList ? state.tagFilterBar : ""}
-    ${viewContent}
-    ${state.showArchive ? renderArchiveSection(state.doneTodos, state.emptyArchiveMessage, state.groupId, state.canManage, state.isAllTasksView, state.currentUserNpub) : ""}
-  </section>`;
+function toggleTag(activeTags: string[], tag: string, isActive: boolean) {
+  if (isActive) return activeTags.filter((t) => t.toLowerCase() !== tag.toLowerCase());
+  return [...activeTags, tag];
 }
 
 function renderSummaries() {
@@ -316,205 +110,6 @@ function renderProfileModal() {
         <p class="profile-edit-status" data-profile-edit-status hidden></p>
       </form>
     </div>
-  </div>`;
-}
-
-function renderSessionSeed(session: Session | null, groupId: number | null, todos: TodoDisplay[] = []) {
-  // Enrich todos with thread counts for client-side rendering
-  const todosWithThreads = todos.map(todo => ({
-    ...todo,
-    threadCount: getThreadLinkCount(todo.id),
-  }));
-
-  return `<script>
-    window.__NOSTR_SESSION__ = ${JSON.stringify(session ?? null)};
-    window.__GROUP_ID__ = ${groupId ?? "null"};
-    window.__INITIAL_TODOS__ = ${JSON.stringify(todosWithThreads)};
-  </script>`;
-}
-
-function buildPageState(
-  todos: TodoDisplay[],
-  filterTags: string[],
-  showArchive: boolean,
-  session: Session | null,
-  userGroups: Group[],
-  selectedGroup: Group | null,
-  canManage: boolean,
-  isAllTasksView: boolean,
-  mineFilter: boolean,
-  groupMembers: GroupMemberWithProfile[],
-  viewMode: ViewMode
-): PageState {
-  const groupId = selectedGroup?.id ?? null;
-  // Active todos: everything except archived (done is still active, just completed)
-  const activeTodos = todos.filter((t) => t.state !== "archived");
-  // Archive section shows only archived tasks
-  const doneTodos = todos.filter((t) => t.state === "archived");
-
-  // Build URLs with view mode route and group context preserved
-  const viewPath = `/todo/${viewMode}`;
-  let baseUrl: string;
-  if (isAllTasksView) {
-    baseUrl = `${viewPath}?view=all`;
-  } else if (groupId) {
-    baseUrl = `${viewPath}?group=${groupId}${mineFilter ? "&mine=1" : ""}`;
-  } else {
-    baseUrl = viewPath;
-  }
-  const archiveHref = showArchive ? baseUrl : `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}archive=1`;
-  const archiveLabel = showArchive ? "Hide archive" : `Archive (${doneTodos.length})`;
-  const tagFilterBar = session ? renderTagFilterBar(todos, filterTags, showArchive, groupId, isAllTasksView, mineFilter, viewMode) : "";
-  const emptyActiveMessage = session ? "No active work. Add something new!" : "Sign in to view your todos.";
-  const emptyArchiveMessage = session ? "Nothing archived yet." : "Sign in to view your archive.";
-  const remainingText = session ? (activeTodos.length === 0 ? "All clear." : `${activeTodos.length} left to go.`) : "";
-  const contextSwitcher = session ? renderContextSwitcher(userGroups, selectedGroup, isAllTasksView, viewMode) : "";
-  const mineFilterToggle = session && groupId && !isAllTasksView ? renderMineFilterToggle(groupId, mineFilter, showArchive, viewMode) : "";
-  const currentUserNpub = session?.npub ?? null;
-
-  return {
-    archiveHref,
-    archiveLabel,
-    remainingText,
-    tagFilterBar,
-    activeTodos,
-    doneTodos,
-    emptyActiveMessage,
-    emptyArchiveMessage,
-    showArchive,
-    groupId,
-    canManage,
-    contextSwitcher,
-    isAllTasksView,
-    mineFilter,
-    mineFilterToggle,
-    groupMembers,
-    currentUserNpub,
-    userGroups,
-    viewMode,
-  };
-}
-
-function renderContextSwitcher(userGroups: Group[], selectedGroup: Group | null, isAllTasksView: boolean, viewMode: ViewMode): string {
-  if (userGroups.length === 0) return "";
-
-  const isPersonal = !selectedGroup && !isAllTasksView;
-  const viewPath = `/todo/${viewMode}`;
-  const options = [
-    `<option value="${viewPath}" ${isPersonal ? "selected" : ""}>Personal</option>`,
-    `<option value="${viewPath}?view=all" ${isAllTasksView ? "selected" : ""}>All My Tasks</option>`,
-    ...userGroups.map(
-      (g) => `<option value="${viewPath}?group=${g.id}" ${selectedGroup?.id === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`
-    ),
-  ].join("");
-
-  return `<select class="context-switcher" data-context-switcher title="Switch context">${options}</select>`;
-}
-
-function renderMineFilterToggle(groupId: number, mineFilter: boolean, showArchive: boolean, viewMode: ViewMode): string {
-  const baseUrl = `/todo/${viewMode}?group=${groupId}`;
-  const archiveParam = showArchive ? "&archive=1" : "";
-  const href = mineFilter ? `${baseUrl}${archiveParam}` : `${baseUrl}&mine=1${archiveParam}`;
-  return `<a href="${href}" class="mine-filter-toggle${mineFilter ? " active" : ""}" title="${mineFilter ? "Show all tasks" : "Show only my tasks"}">
-    <span class="mine-filter-icon">&#128100;</span>
-    <span class="mine-filter-label">${mineFilter ? "My Tasks" : "All"}</span>
-  </a>`;
-}
-
-function filterTodos(allTodos: Todo[], filterTags: string[]) {
-  if (filterTags.length === 0) return allTodos;
-  return allTodos.filter((todo) => {
-    const todoTags = todo.tags ? todo.tags.split(",").map((t) => t.trim().toLowerCase()) : [];
-    return filterTags.some((ft) => todoTags.includes(ft.toLowerCase()));
-  });
-}
-
-function renderTagFilterBar(allTodos: Todo[], activeTags: string[], showArchive: boolean, groupId: number | null, isAllTasksView: boolean, mineFilter: boolean, viewMode: ViewMode) {
-  // Build base URL with all context preserved
-  const viewPath = `/todo/${viewMode}`;
-  const viewParam = isAllTasksView ? "view=all" : "";
-  const groupParam = !isAllTasksView && groupId ? `group=${groupId}` : "";
-  const mineParam = !isAllTasksView && groupId && mineFilter ? "mine=1" : "";
-  const archiveParam = showArchive ? "archive=1" : "";
-  const params = [viewParam, groupParam, mineParam, archiveParam].filter(Boolean);
-  const baseUrl = params.length > 0 ? `${viewPath}?${params.join("&")}` : viewPath;
-  const separator = params.length > 0 ? "&" : "?";
-
-  const tags = collectTags(allTodos);
-  if (tags.length === 0) return "";
-
-  const chips = tags
-    .sort()
-    .map((tag) => {
-      const isActive = activeTags.some((t) => t.toLowerCase() === tag.toLowerCase());
-      const nextTags = toggleTag(activeTags, tag, isActive);
-      const href = nextTags.length > 0 ? `${baseUrl}${separator}tags=${nextTags.join(",")}` : baseUrl;
-      return `<a href="${href}" class="tag-chip${isActive ? " active" : ""}">${escapeHtml(tag)}</a>`;
-    })
-    .join("");
-
-  const clearLink = activeTags.length > 0 ? `<a href="${baseUrl}" class="clear-filters">Clear filters</a>` : "";
-  return `<div class="tag-filter-bar"><span class="label">Filter by tag:</span>${chips}${clearLink}</div>`;
-}
-
-function toggleTag(activeTags: string[], tag: string, isActive: boolean) {
-  if (isActive) return activeTags.filter((t) => t.toLowerCase() !== tag.toLowerCase());
-  return [...activeTags, tag];
-}
-
-function collectTags(todos: Todo[]) {
-  const allTags = new Set<string>();
-  for (const todo of todos) {
-    if (!todo.tags) continue;
-    todo.tags
-      .split(",")
-      .map((t) => t.trim().toLowerCase())
-      .filter(Boolean)
-      .forEach((t) => allTags.add(t));
-  }
-  return Array.from(allTags);
-}
-
-function renderTodoList(todos: TodoDisplay[], emptyMessage: string, groupId: number | null, canManage: boolean, isAllTasksView = false, currentUserNpub: string | null = null) {
-  if (todos.length === 0) {
-    return `<ul class="todo-list"><li>${emptyMessage}</li></ul>`;
-  }
-  return `<ul class="todo-list">${todos.map((todo) => renderTodoItem(todo, groupId, canManage, isAllTasksView, currentUserNpub)).join("")}</ul>`;
-}
-
-// Legacy server-rendered kanban (kept as fallback, now using Alpine version)
-function _renderKanbanBoard(todos: TodoDisplay[], _emptyMessage: string, groupId: number | null, canManage: boolean, isAllTasksView = false, currentUserNpub: string | null = null) {
-  const columns: { state: string; label: string; todos: TodoDisplay[] }[] = [
-    { state: "new", label: "New", todos: [] },
-    { state: "ready", label: "Ready", todos: [] },
-    { state: "in_progress", label: "In Progress", todos: [] },
-    { state: "review", label: "Review", todos: [] },
-    { state: "done", label: "Done", todos: [] },
-  ];
-
-  for (const todo of todos) {
-    const col = columns.find((c) => c.state === todo.state);
-    if (col) col.todos.push(todo);
-  }
-
-  const columnHtml = columns
-    .map(
-      (col) => `
-      <div class="kanban-column" data-kanban-column="${col.state}">
-        <div class="kanban-column-header">
-          <h3>${col.label}</h3>
-          <span class="kanban-count">${col.todos.length}</span>
-        </div>
-        <div class="kanban-cards" data-kanban-cards="${col.state}" ${canManage ? "" : 'data-readonly="true"'}>
-          ${col.todos.length === 0 ? `<p class="kanban-empty">No tasks</p>` : col.todos.map((todo) => renderKanbanCard(todo, groupId, isAllTasksView, currentUserNpub)).join("")}
-        </div>
-      </div>`
-    )
-    .join("");
-
-  return `<div class="kanban-scroll-container">
-    <div class="kanban-scroll-top" data-kanban-scroll-top><div class="kanban-scroll-top-inner"></div></div>
-    <div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""}>${columnHtml}</div>
   </div>`;
 }
 
@@ -718,197 +313,9 @@ function renderKanbanBoardAlpine(groupId: number | null, canManage: boolean, isA
     </div>`;
 }
 
-function renderKanbanCard(todo: TodoDisplay, groupId: number | null, isAllTasksView = false, _currentUserNpub: string | null = null) {
-  const priorityClass = `priority-${todo.priority}`;
-  const tagsHtml = todo.tags
-    ? todo.tags
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .map((t) => `<span class="tag-chip">${escapeHtml(t)}</span>`)
-        .join("")
-    : "";
-  const threadCount = getThreadLinkCount(todo.id);
-  const threadBadge = threadCount > 0
-    ? `<button type="button" class="thread-link-badge" data-view-threads="${todo.id}" title="View linked threads">&#128172; ${threadCount}</button>`
-    : "";
-
-  // Determine effective assignee - for personal tasks, show owner as assignee
-  const isPersonalTask = todo.group_id === null;
-  const effectiveAssignee = todo.assigned_to || (isPersonalTask ? todo.owner : null);
-
-  // Assignee avatar - show initials from npub, image loaded client-side
-  const assigneeHtml = effectiveAssignee
-    ? `<span class="assignee-avatar" data-assignee-npub="${effectiveAssignee}" title="Assigned">
-        <img class="avatar-img" data-avatar-img hidden alt="" loading="lazy" />
-        <span class="avatar-initials">${formatAvatarFallback(effectiveAssignee)}</span>
-      </span>`
-    : "";
-
-  // Board name badge for All Tasks view
-  const boardName = isAllTasksView
-    ? (todo.group_name ? escapeHtml(todo.group_name) : "Personal")
-    : "";
-  const boardBadge = boardName
-    ? `<span class="badge board-badge" title="Board">${boardName}</span>`
-    : "";
-
-  // Use todo's actual group_id for data attribute (for proper API routing)
-  const cardGroupId = todo.group_id ?? groupId;
-
-  return `
-    <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}" ${todo.position !== null ? `data-todo-position="${todo.position}"` : ""} ${cardGroupId ? `data-group-id="${cardGroupId}"` : ""} ${effectiveAssignee ? `data-assigned-to="${effectiveAssignee}"` : ""}>
-      <div class="kanban-card-header">
-        <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
-        ${assigneeHtml}
-      </div>
-      ${todo.description ? `<p class="kanban-card-desc">${escapeHtml(todo.description.slice(0, 100))}${todo.description.length > 100 ? "..." : ""}</p>` : ""}
-      <div class="kanban-card-meta">
-        ${boardBadge}
-        <span class="badge ${priorityClass}">${formatPriorityLabel(todo.priority)}</span>
-        ${tagsHtml}
-        ${threadBadge}
-      </div>
-    </div>`;
-}
-
-function renderArchiveSection(todos: TodoDisplay[], emptyMessage: string, groupId: number | null, canManage: boolean, isAllTasksView = false, currentUserNpub: string | null = null) {
-  return `
-    <section class="archive-section">
-      <div class="section-heading"><h2>Archive</h2></div>
-      ${renderTodoList(todos, emptyMessage, groupId, canManage, isAllTasksView, currentUserNpub)}
-    </section>`;
-}
-
 function formatAvatarFallback(npub: string) {
   if (!npub) return "•••";
   return npub.replace(/^npub1/, "").slice(0, 2).toUpperCase();
-}
-
-function renderTodoItem(todo: TodoDisplay, groupId: number | null, canManage: boolean, isAllTasksView = false, _currentUserNpub: string | null = null) {
-  const description = todo.description ? `<p class="todo-description">${escapeHtml(todo.description)}</p>` : "";
-  const scheduled = todo.scheduled_for
-    ? `<p class="todo-description"><strong>Scheduled for:</strong> ${escapeHtml(todo.scheduled_for)}</p>`
-    : "";
-  const tagsDisplay = renderTagsDisplay(todo.tags);
-
-  // Use todo's actual group_id for proper API routing
-  const effectiveGroupId = todo.group_id ?? groupId;
-  const groupIdField = effectiveGroupId ? `<input type="hidden" name="group_id" value="${effectiveGroupId}" />` : "";
-
-  const threadCount = getThreadLinkCount(todo.id);
-  const threadBadge = threadCount > 0
-    ? `<button type="button" class="thread-link-badge" data-view-threads="${todo.id}" title="View linked threads">&#128172; ${threadCount}</button>`
-    : "";
-
-  // Determine effective assignee - for personal tasks, show owner as assignee
-  const isPersonalTask = todo.group_id === null;
-  const effectiveAssignee = todo.assigned_to || (isPersonalTask ? todo.owner : null);
-
-  // Assignee avatar for list view - image loaded client-side
-  const assigneeHtml = effectiveAssignee
-    ? `<span class="assignee-avatar" data-assignee-npub="${effectiveAssignee}" title="Assigned">
-        <img class="avatar-img" data-avatar-img hidden alt="" loading="lazy" />
-        <span class="avatar-initials">${formatAvatarFallback(effectiveAssignee)}</span>
-      </span>`
-    : "";
-
-  // Board name badge for All Tasks view
-  const boardName = isAllTasksView
-    ? (todo.group_name ? escapeHtml(todo.group_name) : "Personal")
-    : "";
-  const boardBadge = boardName
-    ? `<span class="badge board-badge" title="Board">${boardName}</span>`
-    : "";
-
-  if (!canManage) {
-    // Read-only view for non-managers
-    return `
-    <li>
-      <details>
-        <summary>
-          <span class="todo-title">${escapeHtml(todo.title)}</span>
-          <span class="badges">
-            ${boardBadge}
-            <span class="badge priority-${todo.priority}">${formatPriorityLabel(todo.priority)}</span>
-            <span class="badge state-${todo.state}">${formatStateLabel(todo.state)}</span>
-            ${tagsDisplay}
-            ${threadBadge}
-            ${assigneeHtml}
-          </span>
-        </summary>
-        <div class="todo-body">
-          ${description}
-          ${scheduled}
-        </div>
-      </details>
-    </li>`;
-  }
-
-  return `
-    <li>
-      <details>
-        <summary>
-          <span class="todo-title">${escapeHtml(todo.title)}</span>
-          <span class="badges">
-            ${boardBadge}
-            <span class="badge priority-${todo.priority}">${formatPriorityLabel(todo.priority)}</span>
-            <span class="badge state-${todo.state}">${formatStateLabel(todo.state)}</span>
-            ${tagsDisplay}
-            ${threadBadge}
-            ${assigneeHtml}
-          </span>
-        </summary>
-        <div class="todo-body">
-          ${description}
-          ${scheduled}
-          <form class="edit-form" method="post" action="/todos/${todo.id}/update">
-            ${groupIdField}
-            <label>Title
-              <input name="title" value="${escapeHtml(todo.title)}" required />
-            </label>
-            <label>Description
-              <textarea name="description" rows="3">${escapeHtml(todo.description ?? "")}</textarea>
-            </label>
-            <label>Priority
-              <select name="priority">
-                ${renderPriorityOption("rock", todo.priority)}
-                ${renderPriorityOption("pebble", todo.priority)}
-                ${renderPriorityOption("sand", todo.priority)}
-              </select>
-            </label>
-            <label>State
-              <select name="state">
-                ${renderStateOption("new", todo.state)}
-                ${renderStateOption("ready", todo.state)}
-                ${renderStateOption("in_progress", todo.state)}
-                ${renderStateOption("review", todo.state)}
-                ${renderStateOption("done", todo.state)}
-              </select>
-            </label>
-            <label>Scheduled For
-              <input type="date" name="scheduled_for" value="${todo.scheduled_for ? escapeHtml(todo.scheduled_for) : ""}" />
-            </label>
-            ${renderTagsInput(todo.tags)}
-            <button type="submit">Update</button>
-          </form>
-          ${renderLifecycleActions(todo, effectiveGroupId)}
-        </div>
-      </details>
-    </li>`;
-}
-
-function renderLifecycleActions(todo: Todo, groupId: number | null) {
-  const transitions = ALLOWED_STATE_TRANSITIONS[todo.state] ?? [];
-  const transitionForms = transitions.map((next) =>
-    renderStateActionForm(todo.id, next, formatTransitionLabel(todo.state, next), groupId)
-  );
-
-  return `
-    <div class="todo-actions">
-      ${transitionForms.join("")}
-      ${renderDeleteForm(todo.id, groupId)}
-    </div>`;
 }
 
 function formatTransitionLabel(current: TodoState, next: TodoState) {
@@ -917,25 +324,6 @@ function formatTransitionLabel(current: TodoState, next: TodoState) {
   if (next === "done") return "Complete";
   if (next === "ready") return "Mark Ready";
   return formatStateLabel(next);
-}
-
-function renderStateActionForm(id: number, nextState: TodoState, label: string, groupId: number | null) {
-  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
-  return `
-    <form method="post" action="/todos/${id}/state">
-      ${groupIdField}
-      <input type="hidden" name="state" value="${nextState}" />
-      <button type="submit">${label}</button>
-    </form>`;
-}
-
-function renderDeleteForm(id: number, groupId: number | null) {
-  const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
-  return `
-    <form method="post" action="/todos/${id}/delete">
-      ${groupIdField}
-      <button type="submit">Delete</button>
-    </form>`;
 }
 
 function renderPriorityOption(value: TodoPriority, current: string) {
@@ -970,123 +358,38 @@ function renderTagsInput(tags: string) {
     </label>`;
 }
 
-function renderTaskEditModal(groupId: number | null, _groupMembers: GroupMemberWithProfile[] = [], userGroups: Group[] = []) {
-  // Board selector options - Personal + all user's groups
-  const boardOptions = [
-    `<option value="">Personal</option>`,
-    ...userGroups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`),
-  ].join("");
-
-  return `<div class="task-modal-overlay" data-task-modal hidden>
-    <div class="task-modal">
-      <div class="task-modal-header">
-        <h2 data-task-modal-heading>Edit Task</h2>
-        <button class="task-modal-close" type="button" data-task-modal-close aria-label="Close">&times;</button>
-      </div>
-      <form class="task-modal-form" method="post" data-task-modal-form>
-        <input type="hidden" name="group_id" data-task-modal-group-id value="" />
-        <input type="hidden" name="parent_id" data-task-modal-parent-id value="" />
-        <label>Board
-          <select name="board" data-task-modal-board>
-            ${boardOptions}
-          </select>
-        </label>
-        <label>Title
-          <input name="title" data-task-modal-title required />
-        </label>
-        <label>Description
-          <textarea name="description" data-task-modal-description rows="8"></textarea>
-        </label>
-        <div class="task-modal-parent-wrapper" data-task-modal-parent-wrapper hidden>
-          <span class="task-modal-parent-label">Parent:</span>
-          <span class="task-modal-parent-title" data-task-modal-parent-title hidden></span>
-          <button type="button" class="task-modal-detach-parent" data-task-modal-detach-parent title="Remove from parent" hidden>&times;</button>
-          <button type="button" class="task-modal-assign-parent" data-task-modal-assign-parent hidden>(none) - click to assign</button>
-        </div>
-        <div class="task-modal-subtasks" data-task-modal-subtasks hidden>
-          <div class="task-modal-subtasks-header">Subtasks</div>
-          <div class="task-modal-subtasks-list" data-task-modal-subtasks-list></div>
-          <button type="button" class="task-modal-add-subtask" data-task-modal-add-subtask>+ Add Subtask</button>
-        </div>
-        <div class="task-modal-row">
-          <label>Priority
-            <select name="priority" data-task-modal-priority>
-              <option value="rock">${formatPriorityLabel("rock")}</option>
-              <option value="pebble">${formatPriorityLabel("pebble")}</option>
-              <option value="sand">${formatPriorityLabel("sand")}</option>
-            </select>
-          </label>
-          <label>State
-            <select name="state" data-task-modal-state>
-              <option value="new">${formatStateLabel("new")}</option>
-              <option value="ready">${formatStateLabel("ready")}</option>
-              <option value="in_progress">${formatStateLabel("in_progress")}</option>
-              <option value="review">${formatStateLabel("review")}</option>
-              <option value="done">${formatStateLabel("done")}</option>
-              <option value="archived">${formatStateLabel("archived")}</option>
-            </select>
-          </label>
-        </div>
-        <label data-task-modal-assignee-label ${userGroups.length === 0 ? 'hidden' : ''}>Assignee
-          <div class="assignee-autocomplete" data-assignee-autocomplete>
-            <div class="assignee-selected" data-assignee-selected hidden>
-              <img class="assignee-avatar" data-assignee-avatar src="" alt="" />
-              <span class="assignee-name" data-assignee-name></span>
-              <button type="button" class="assignee-clear" data-assignee-clear aria-label="Clear assignee">&times;</button>
-            </div>
-            <input type="text" class="assignee-input" data-assignee-input placeholder="Search members..." autocomplete="off" />
-            <input type="hidden" name="assigned_to" data-task-modal-assignee value="" />
-            <div class="assignee-suggestions" data-assignee-suggestions hidden></div>
-          </div>
-        </label>
-        <label>Scheduled For
-          <input type="date" name="scheduled_for" data-task-modal-scheduled />
-        </label>
-        <label>Tags
-          <div class="tag-input-wrapper" data-task-modal-tags-wrapper>
-            <input type="text" placeholder="Type and press comma..." />
-            <input type="hidden" name="tags" data-task-modal-tags-hidden value="" />
-          </div>
-        </label>
-        <div class="task-modal-links" data-task-modal-links hidden>
-          <div class="task-modal-links-header">Links</div>
-          <div class="task-modal-links-list" data-task-modal-links-list></div>
-        </div>
-        <div class="task-modal-actions">
-          <button type="button" class="task-modal-delete" data-task-modal-delete>Delete</button>
-          <button type="button" class="task-modal-archive" data-task-modal-archive hidden>Archive</button>
-          <div class="task-modal-actions-right">
-            <button type="button" data-task-modal-cancel>Cancel</button>
-            <button type="submit" class="primary">Save</button>
-          </div>
-        </div>
-      </form>
-      <div class="parent-picker-modal" data-parent-picker hidden>
-        <div class="parent-picker-header">
-          <span>Select Parent Task</span>
-          <button type="button" class="parent-picker-close" data-parent-picker-close>&times;</button>
-        </div>
-        <div class="parent-picker-search">
-          <input type="text" placeholder="Filter tasks..." data-parent-picker-filter />
-        </div>
-        <div class="parent-picker-list" data-parent-picker-list>
-          <div class="parent-picker-loading">Loading...</div>
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
-
 // ==================== Team-scoped Todo Page ====================
 
-type TeamRenderArgs = RenderArgs & {
+type TeamRenderArgs = {
+  showArchive: boolean;
+  session: Session | null;
+  filterTags?: string[];
+  todos?: Todo[];
+  userGroups?: Group[];
+  selectedGroup?: Group | null;
+  canManage?: boolean;
   teamSlug: string;
+  viewMode?: ViewMode;
   branding?: TeamBranding;
 };
 
-type TeamPageState = PageState & {
+type TeamPageState = {
+  archiveHref: string;
+  archiveLabel: string;
+  remainingText: string;
+  tagFilterBar: string;
+  activeTodos: Todo[];
+  doneTodos: Todo[];
+  emptyActiveMessage: string;
+  emptyArchiveMessage: string;
+  showArchive: boolean;
+  groupId: number | null;
+  canManage: boolean;
+  contextSwitcher: string;
   teamSlug: string;
   viewMode: ViewMode;
+  currentUserNpub: string | null;
+  userGroups: Group[];
 };
 
 /**
@@ -1244,11 +547,6 @@ function buildTeamPageState(
     contextSwitcher,
     teamSlug,
     viewMode,
-    // Required by PageState but not used in team context
-    isAllTasksView: false,
-    mineFilter: false,
-    mineFilterToggle: "",
-    groupMembers: [],
     currentUserNpub: session?.npub ?? null,
     userGroups,
   };
@@ -1347,66 +645,6 @@ function renderTeamTodoList(todos: Todo[], emptyMessage: string, groupId: number
   return `<ul class="todo-list">${todos.map((todo) => renderTeamTodoItem(todo, groupId, canManage, teamSlug)).join("")}</ul>`;
 }
 
-function _renderTeamKanbanBoard(todos: Todo[], _emptyMessage: string, groupId: number | null, canManage: boolean, teamSlug: string) {
-  const columns: { state: string; label: string; todos: Todo[] }[] = [
-    { state: "new", label: "New", todos: [] },
-    { state: "ready", label: "Ready", todos: [] },
-    { state: "in_progress", label: "In Progress", todos: [] },
-    { state: "done", label: "Done", todos: [] },
-  ];
-
-  for (const todo of todos) {
-    const col = columns.find((c) => c.state === todo.state);
-    if (col) col.todos.push(todo);
-  }
-
-  const columnHtml = columns
-    .map(
-      (col) => `
-      <div class="kanban-column" data-kanban-column="${col.state}">
-        <div class="kanban-column-header">
-          <h3>${col.label}</h3>
-          <span class="kanban-count">${col.todos.length}</span>
-        </div>
-        <div class="kanban-cards" data-kanban-cards="${col.state}" ${canManage ? "" : 'data-readonly="true"'}>
-          ${col.todos.length === 0 ? `<p class="kanban-empty">No tasks</p>` : col.todos.map((todo) => renderTeamKanbanCard(todo, groupId, teamSlug)).join("")}
-        </div>
-      </div>`
-    )
-    .join("");
-
-  return `<div class="kanban-scroll-container">
-    <div class="kanban-scroll-top" data-kanban-scroll-top><div class="kanban-scroll-top-inner"></div></div>
-    <div class="kanban-board" data-kanban-board ${groupId ? `data-group-id="${groupId}"` : ""} data-team-slug="${teamSlug}">${columnHtml}</div>
-  </div>`;
-}
-
-function renderTeamKanbanCard(todo: Todo, groupId: number | null, teamSlug: string) {
-  const priorityClass = `priority-${todo.priority}`;
-  const tagsHtml = todo.tags
-    ? todo.tags
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .map((t) => `<span class="tag-chip">${escapeHtml(t)}</span>`)
-        .join("")
-    : "";
-  // Note: Thread links are team-scoped, so we'd need team DB access
-  // For now, skip the thread badge in team context
-  const threadBadge = "";
-
-  return `
-    <div class="kanban-card" draggable="true" data-todo-id="${todo.id}" data-todo-state="${todo.state}" ${groupId ? `data-group-id="${groupId}"` : ""} data-team-slug="${teamSlug}">
-      <span class="kanban-card-title">${escapeHtml(todo.title)}</span>
-      ${todo.description ? `<p class="kanban-card-desc">${escapeHtml(todo.description.slice(0, 100))}${todo.description.length > 100 ? "..." : ""}</p>` : ""}
-      <div class="kanban-card-meta">
-        <span class="badge ${priorityClass}">${formatPriorityLabel(todo.priority)}</span>
-        ${tagsHtml}
-        ${threadBadge}
-      </div>
-    </div>`;
-}
-
 function renderTeamArchiveSection(todos: Todo[], emptyMessage: string, groupId: number | null, canManage: boolean, teamSlug: string) {
   return `
     <section class="archive-section">
@@ -1422,7 +660,6 @@ function renderTeamTodoItem(todo: Todo, groupId: number | null, canManage: boole
     : "";
   const tagsDisplay = renderTagsDisplay(todo.tags);
   const groupIdField = groupId ? `<input type="hidden" name="group_id" value="${groupId}" />` : "";
-  // Thread badges skipped for team context
 
   if (!canManage) {
     // Read-only view for non-managers
@@ -1582,6 +819,24 @@ function renderTeamTaskEditModal(groupId: number | null, teamSlug: string) {
             <input type="hidden" name="tags" data-task-modal-tags-hidden value="" />
           </div>
         </label>
+        <label data-task-modal-assignee-label hidden>Assigned To
+          <input type="hidden" name="assigned_to" data-task-modal-assignee value="" />
+          <div class="assignee-autocomplete" data-assignee-autocomplete>
+            <input type="text" placeholder="Search members..." data-assignee-input autocomplete="off" />
+            <div class="assignee-selected" data-assignee-selected hidden>
+              <img class="assignee-selected-avatar" data-assignee-avatar src="" alt="" />
+              <span data-assignee-name></span>
+              <button type="button" class="assignee-clear" data-assignee-clear>&times;</button>
+            </div>
+            <div class="assignee-suggestions" data-assignee-suggestions hidden></div>
+          </div>
+        </label>
+        <label data-project-picker-label hidden>Wingman Project
+          <select data-project-picker>
+            <option value="">No project</option>
+          </select>
+          <input type="hidden" name="working_directory" data-task-modal-working-directory value="" />
+        </label>
         <div class="task-modal-links" data-task-modal-links hidden>
           <div class="task-modal-links-header">Links</div>
           <div class="task-modal-links-list" data-task-modal-links-list></div>
@@ -1640,4 +895,3 @@ function renderTeamSessionSeed(session: Session | null, groupId: number | null, 
     window.__INITIAL_TODOS__ = ${JSON.stringify(todosWithThreads)};
   </script>`;
 }
-

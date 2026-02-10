@@ -180,6 +180,16 @@ export type TeamContextResult =
   | { ok: false; response: Response };
 
 /**
+ * Options for createTeamRouteContext
+ */
+interface TeamRouteOptions {
+  /** Full path to return to after login (e.g., "/t/myteam/chat"). Only used for page routes. */
+  returnPath?: string;
+  /** When true, auth failure returns 401 JSON instead of 302 redirect. Use for API endpoints. */
+  isApi?: boolean;
+}
+
+/**
  * Create context for a team-scoped route (/t/{team}/*)
  *
  * Validates:
@@ -189,17 +199,30 @@ export type TeamContextResult =
  *
  * Updates session with team context
  *
- * @param returnPath - Optional full path to return to after login (e.g., "/t/myteam/chat")
+ * @param options - Either a returnPath string (backward compat) or an options object
  */
 export function createTeamRouteContext(
   session: Session | null,
   teamSlug: string,
-  returnPath?: string
+  options?: string | TeamRouteOptions
 ): TeamContextResult {
+  const opts: TeamRouteOptions = typeof options === "string"
+    ? { returnPath: options }
+    : options ?? {};
+
   // Check authentication
   if (!session) {
+    if (opts.isApi) {
+      return {
+        ok: false,
+        response: new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      };
+    }
     // Default return path to the team root if not specified
-    const path = returnPath ?? `/t/${teamSlug}`;
+    const path = opts.returnPath ?? `/t/${teamSlug}`;
     const encodedReturn = encodeURIComponent(path);
     return {
       ok: false,
@@ -215,7 +238,12 @@ export function createTeamRouteContext(
   if (!team) {
     return {
       ok: false,
-      response: new Response("Team not found", { status: 404 }),
+      response: opts.isApi
+        ? new Response(JSON.stringify({ error: "Team not found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          })
+        : new Response("Team not found", { status: 404 }),
     };
   }
 
@@ -223,7 +251,12 @@ export function createTeamRouteContext(
   if (!isAdmin(session.npub) && !isUserTeamMember(team.id, session.npub)) {
     return {
       ok: false,
-      response: new Response("You are not a member of this team", { status: 403 }),
+      response: opts.isApi
+        ? new Response(JSON.stringify({ error: "You are not a member of this team" }), {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          })
+        : new Response("You are not a member of this team", { status: 403 }),
     };
   }
 

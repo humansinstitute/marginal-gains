@@ -39,6 +39,7 @@ import { checkEncryptionSupport } from "./crypto.js";
 import { fetchCommunityKey, getCommunityStatus } from "./communityCrypto.js";
 import { autoFulfillPendingKeyRequests } from "./teams.js";
 import { initProfileCards } from "./profileCard.js";
+import { initChannelDnd, teardownChannelDnd } from "./channelDnd.js";
 
 // Local user cache - populated from server database
 const localUserCache = new Map();
@@ -618,6 +619,20 @@ function setupLiveUpdateHandlers() {
     }
   });
 
+  // When channel layout is updated (sections/ordering)
+  onEvent("channel:layout", (data) => {
+    if (window.__FEATURE_FLAGS__?.alpineChat) {
+      const chatShell = document.querySelector("[data-chat-shell]");
+      if (chatShell && chatShell._x_dataStack) {
+        const alpineStore = chatShell._x_dataStack[0];
+        // Only update if not currently in arrange mode (don't override local edits)
+        if (!alpineStore.arrangeMode) {
+          alpineStore.setChannelLayout(data.layout || null);
+        }
+      }
+    }
+  });
+
   // When a new DM is created
   onEvent("dm:new", () => {
     renderChannels();
@@ -831,8 +846,8 @@ export const initChat = async () => {
           formatTimestamp: (ts) => formatReplyTimestamp(ts),
           renderMessageBody,
           currentUserNpub: state.session?.npub || null,
-          isAdmin: state.session?.isAdmin || false,
-          canPin: state.session?.isAdmin || false, // For now, only admins can pin
+          isAdmin: state.isAdmin,
+          canPin: state.isAdmin, // For now, only admins can pin
           getDmDisplayName,
           onChannelSelect: async (channelId) => {
             // Called by Alpine store when user clicks a channel
@@ -844,6 +859,24 @@ export const initChat = async () => {
             setMobileView("messages");
           },
         });
+
+        // Wrap arrange mode methods to init/teardown DnD
+        const origEnter = alpineStore.enterArrangeMode.bind(alpineStore);
+        const origCancel = alpineStore.cancelArrangeMode.bind(alpineStore);
+        const origSave = alpineStore.saveArrangement.bind(alpineStore);
+        alpineStore.enterArrangeMode = function () {
+          origEnter();
+          // Init DnD after Alpine re-renders the draggable elements
+          requestAnimationFrame(() => initChannelDnd());
+        };
+        alpineStore.cancelArrangeMode = function () {
+          teardownChannelDnd();
+          origCancel();
+        };
+        alpineStore.saveArrangement = function () {
+          teardownChannelDnd();
+          return origSave();
+        };
 
         console.log("[Chat] Alpine chat store initialized");
       }
@@ -1013,6 +1046,7 @@ async function fetchChannels() {
         alpineStore.channels = channels;
         alpineStore.dmChannels = dmChannels;
         alpineStore.personalChannel = personalChannel;
+        alpineStore.setChannelLayout(data.channelLayout || null);
         if (data.unreadState) {
           Object.keys(data.unreadState).forEach(id => {
             alpineStore.unreadCounts[id] = data.unreadState[id].unread || 0;

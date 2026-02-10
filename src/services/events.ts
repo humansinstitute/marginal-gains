@@ -18,11 +18,13 @@ export type EventType =
   | "channel:new"
   | "channel:update"
   | "channel:delete"
+  | "channel:layout"
   | "dm:new"
   | "sync:init"
   | "wingman:thinking"
   | "wallet:balance"
-  | "wallet:transaction";
+  | "wallet:transaction"
+  | "activity:new";
 
 export interface BroadcastEvent {
   type: EventType;

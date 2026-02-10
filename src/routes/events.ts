@@ -23,7 +23,7 @@ export function handleTeamChatEvents(
   session: Session | null,
   teamSlug: string
 ): Response {
-  const result = createTeamRouteContext(session, teamSlug);
+  const result = createTeamRouteContext(session, teamSlug, { isApi: true });
   if (!result.ok) return result.response;
 
   return handleChatEvents(req, result.ctx);

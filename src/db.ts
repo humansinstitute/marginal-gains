@@ -20,6 +20,7 @@ export type Todo = {
   parent_id: number | null;
   optikon_board_id: number | null;
   optikon_board_url: string | null;
+  working_directory: string | null;
 };
 
 export type TodoWithBoard = Todo & {

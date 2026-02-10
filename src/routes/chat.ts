@@ -49,28 +49,13 @@ import {
 import { broadcastLegacy as broadcast } from "../services/events";
 import { notifyChannelMessage } from "../services/push";
 import { executeSlashCommands } from "../services/slashCommands";
+import { parseMentionsFromBody } from "../utils/mentions";
 
 import type { DeepLink, Session } from "../types";
 
+
 function forbidden(message = "Forbidden") {
   return jsonResponse({ error: message }, 403);
-}
-
-/**
- * Parse @mentions from plaintext message body
- * Returns array of npub strings
- */
-function parseMentionsFromBody(body: string): string[] {
-  const mentions: string[] = [];
-  const mentionPattern = /nostr:(npub1[a-z0-9]{58})/gi;
-  let match;
-  while ((match = mentionPattern.exec(body)) !== null) {
-    const npub = match[1].toLowerCase();
-    if (!mentions.includes(npub)) {
-      mentions.push(npub);
-    }
-  }
-  return mentions;
 }
 
 export function handleChatPage(session: Session | null, deepLink?: DeepLink) {

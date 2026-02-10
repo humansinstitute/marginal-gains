@@ -88,6 +88,8 @@ function renderSettingsContent() {
       <p class="settings-empty">Loading...</p>
     </section>
 
+    ${renderWingmenSection()}
+
     <section class="settings-section">
       <div class="settings-section-header">
         <h2>Preferences</h2>
@@ -95,6 +97,29 @@ function renderSettingsContent() {
       <p class="settings-empty">Coming soon - theme, display settings, etc.</p>
     </section>
   </div>`;
+}
+
+function renderWingmenSection() {
+  return `<section class="settings-section" data-wingmen-section>
+      <div class="settings-section-header">
+        <h2>Wingmen</h2>
+      </div>
+      <p class="settings-description">Configure your Wingmen agent server for task assignment. When tasks are assigned to your Wingman's npub, the agent will automatically pick them up.</p>
+      <form class="wingmen-settings-form" data-wingmen-settings-form>
+        <label>Wingmen Server URL
+          <input type="url" name="wingmen_url" data-wingmen-url placeholder="https://wingmen.example.com" />
+          <small>The URL of your Wingmen server instance</small>
+        </label>
+        <label>Wingman npub
+          <input type="text" name="wingman_npub" data-wingman-npub placeholder="npub1..." />
+          <small>The npub of your Wingman agent (tasks assigned to this npub will be picked up by your Wingmen server)</small>
+        </label>
+        <div class="settings-form-actions">
+          <button type="submit" class="primary">Save</button>
+          <span class="settings-save-status" data-wingmen-status hidden></span>
+        </div>
+      </form>
+    </section>`;
 }
 
 function renderAccountSection() {

@@ -116,7 +116,7 @@ import {
   handlePushUpdateFrequency,
   handleSendTestNotification,
 } from "./routes/push";
-import { handleSettings, handleAppSettingsPage, handleTeamConfigPage } from "./routes/settings";
+import { handleSettings, handleAppSettingsPage, handleTeamConfigPage, handleGetUserSettings, handleUpdateUserSettings } from "./routes/settings";
 import {
   handleCreateTask,
   handleGetActivityTasks,
@@ -133,6 +133,7 @@ import {
   handleUnlinkTaskFromCrm,
   handleUnlinkThreadFromTask,
 } from "./routes/tasks";
+import { handleTeamGetActivities, handleTeamMarkActivitiesRead } from "./routes/team-activities";
 import {
   handleTeamAddChannelGroups,
   handleTeamArchiveDm,
@@ -163,7 +164,9 @@ import {
   handleTeamUnpinMessage,
   handleTeamUpdateChannel,
   handleTeamUpdateUser,
-} from "./routes/team-chat";
+  handleTeamGetChannelLayout,
+  handleTeamPutChannelLayout,
+} from "./routes/team-chat/index";
 import {
   handleTeamCrmPage,
   handleTeamListCompanies,
@@ -205,6 +208,7 @@ import {
   handleTeamAddGroupMembers,
   handleTeamRemoveGroupMember,
 } from "./routes/team-groups";
+import { handleTeamHomePage } from "./routes/team-home";
 import {
   handleSetTodoOptikonBoard,
   handleClearTodoOptikonBoard,
@@ -238,6 +242,7 @@ import {
   handleTeamGetTodo,
   handleTeamGetSubtasks,
   handleTeamCreateSubtask,
+  handleTeamWingmanProjects,
 } from "./routes/team-todos";
 import {
   handleTeamsPage,
@@ -261,17 +266,6 @@ import {
   handleAddTeamManager,
   handleUploadTeamIcon,
 } from "./routes/teams";
-import {
-  handleApiTodoPosition,
-  handleApiTodoState,
-  handleCreateSubtask,
-  handleGetSubtasks,
-  handleHasSubtasks,
-  handleTodoCreate,
-  handleTodoDelete,
-  handleTodoState,
-  handleTodoUpdate,
-} from "./routes/todos";
 import {
   handleWalletPage,
   handleWalletConnect,
@@ -358,6 +352,18 @@ const server = Bun.serve({
         // Key Teleport registration endpoint (no auth required)
         if (pathname === "/api/keyteleport/register") return handleKeyTeleportRegister(req);
 
+        // Team-scoped home page
+        const teamHomePageMatch = pathname.match(/^\/t\/([^/]+)\/home$/);
+        if (teamHomePageMatch) {
+          return handleTeamHomePage(session, teamHomePageMatch[1]);
+        }
+
+        // Team-scoped activities API
+        const teamActivitiesMatch = pathname.match(/^\/t\/([^/]+)\/api\/activities$/);
+        if (teamActivitiesMatch) {
+          return handleTeamGetActivities(session, teamActivitiesMatch[1], url);
+        }
+
         // Team-scoped chat page and SSE events
         const teamChatPageMatch = pathname.match(/^\/t\/([^/]+)\/chat$/);
         if (teamChatPageMatch) {
@@ -385,6 +391,9 @@ const server = Bun.serve({
         // Team-scoped API routes
         const teamChannelsMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels$/);
         if (teamChannelsMatch) return handleTeamListChannels(session, teamChannelsMatch[1]);
+
+        const teamChannelLayoutMatch = pathname.match(/^\/t\/([^/]+)\/api\/channel-layout$/);
+        if (teamChannelLayoutMatch) return handleTeamGetChannelLayout(session, teamChannelLayoutMatch[1]);
 
         const teamUsersMatch = pathname.match(/^\/t\/([^/]+)\/chat\/users$/);
         if (teamUsersMatch) return handleTeamListUsers(session, teamUsersMatch[1]);
@@ -448,21 +457,21 @@ const server = Bun.serve({
         // Team-level encryption routes (zero-knowledge key distribution)
         const teamEncryptionMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/encryption$/);
         if (teamEncryptionMatch) {
-          const result = createTeamRouteContext(session, teamEncryptionMatch[1]);
+          const result = createTeamRouteContext(session, teamEncryptionMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleGetTeamEncryption(result.ctx);
         }
 
         const teamUserKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/key$/);
         if (teamUserKeyMatch) {
-          const result = createTeamRouteContext(session, teamUserKeyMatch[1]);
+          const result = createTeamRouteContext(session, teamUserKeyMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleGetUserTeamKey(result.ctx);
         }
 
         const teamInviteKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/invite-key$/);
         if (teamInviteKeyMatch) {
-          const result = createTeamRouteContext(session, teamInviteKeyMatch[1]);
+          const result = createTeamRouteContext(session, teamInviteKeyMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleGetInviteKey(result.ctx, url);
         }
@@ -543,6 +552,10 @@ const server = Bun.serve({
         if (teamGroupMatch) return handleTeamGetGroup(session, teamGroupMatch[1], Number(teamGroupMatch[2]));
         const teamGroupMembersMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/members$/);
         if (teamGroupMembersMatch) return handleTeamListGroupMembers(session, teamGroupMembersMatch[1], Number(teamGroupMembersMatch[2]));
+
+        // Team-scoped Wingman projects proxy
+        const teamWingmanProjectsMatch = pathname.match(/^\/t\/([^/]+)\/api\/wingman\/projects$/);
+        if (teamWingmanProjectsMatch) return handleTeamWingmanProjects(url, session, teamWingmanProjectsMatch[1]);
 
         // Team-scoped Optikon routes
         const teamOptikonConfigMatch = pathname.match(/^\/t\/([^/]+)\/api\/optikon\/config$/);
@@ -650,16 +663,13 @@ const server = Bun.serve({
         const opportunityTasksMatch = pathname.match(/^\/api\/crm\/opportunities\/(\d+)\/tasks$/);
         if (opportunityTasksMatch) return handleGetOpportunityTasks(session, Number(opportunityTasksMatch[1]));
 
-        // Subtask routes
-        const subtasksMatch = pathname.match(/^\/api\/todos\/(\d+)\/subtasks$/);
-        if (subtasksMatch) return handleGetSubtasks(req, session, Number(subtasksMatch[1]));
-        const hasSubtasksMatch = pathname.match(/^\/api\/todos\/(\d+)\/has-subtasks$/);
-        if (hasSubtasksMatch) return handleHasSubtasks(req, session, Number(hasSubtasksMatch[1]));
-
         // Wingman routes
         if (pathname === "/api/wingman/settings") return handleGetWingmanSettings(session);
         if (pathname === "/api/wingman/costs") return handleGetWingmanCosts(session);
         if (pathname === "/api/slashcommands") return handleGetSlashCommands(session);
+
+        // User settings routes (personal)
+        if (pathname === "/api/user-settings") return handleGetUserSettings(session);
 
         // App settings routes (admin only)
         if (pathname === "/api/app/settings") return handleGetAppSettings(session);
@@ -733,6 +743,10 @@ const server = Bun.serve({
         const uploadTeamIconMatch = pathname.match(/^\/api\/teams\/(\d+)\/icon$/);
         if (uploadTeamIconMatch) return handleUploadTeamIcon(req, session, Number(uploadTeamIconMatch[1]));
 
+        // Team-scoped activities POST routes
+        const teamMarkActivitiesReadMatch = pathname.match(/^\/t\/([^/]+)\/api\/activities\/read$/);
+        if (teamMarkActivitiesReadMatch) return handleTeamMarkActivitiesRead(req, session, teamMarkActivitiesReadMatch[1]);
+
         // Team-scoped chat POST routes
         const teamCreateChannelMatch = pathname.match(/^\/t\/([^/]+)\/chat\/channels$/);
         if (teamCreateChannelMatch) return handleTeamCreateChannel(req, session, teamCreateChannelMatch[1]);
@@ -785,21 +799,21 @@ const server = Bun.serve({
         // Team-level encryption POST routes (zero-knowledge key distribution)
         const teamInitEncryptionMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/init-encryption$/);
         if (teamInitEncryptionMatch) {
-          const result = createTeamRouteContext(session, teamInitEncryptionMatch[1]);
+          const result = createTeamRouteContext(session, teamInitEncryptionMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleInitTeamEncryption(req, result.ctx);
         }
 
         const teamStoreUserKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/key$/);
         if (teamStoreUserKeyMatch) {
-          const result = createTeamRouteContext(session, teamStoreUserKeyMatch[1]);
+          const result = createTeamRouteContext(session, teamStoreUserKeyMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleStoreUserTeamKey(req, result.ctx);
         }
 
         const teamStoreInviteKeyMatch = pathname.match(/^\/t\/([^/]+)\/api\/team\/invite-key$/);
         if (teamStoreInviteKeyMatch) {
-          const result = createTeamRouteContext(session, teamStoreInviteKeyMatch[1]);
+          const result = createTeamRouteContext(session, teamStoreInviteKeyMatch[1], { isApi: true });
           if (!result.ok) return result.response;
           return handleStoreInviteKey(req, result.ctx);
         }
@@ -859,29 +873,6 @@ const server = Bun.serve({
         if (pathname === "/api/assets/upload") return handleAssetUpload(req, session);
         if (pathname === "/ai/summary") return handleSummaryPost(req);
         if (pathname === "/ai/tasks") return handleAiTasksPost(req);
-        if (pathname === "/todos") return handleTodoCreate(req, session);
-
-        const updateMatch = pathname.match(/^\/todos\/(\d+)\/update$/);
-        if (updateMatch) return handleTodoUpdate(req, session, Number(updateMatch[1]));
-
-        const stateMatch = pathname.match(/^\/todos\/(\d+)\/state$/);
-        if (stateMatch) return handleTodoState(req, session, Number(stateMatch[1]));
-
-        // API endpoint for Kanban drag-drop (JSON)
-        const apiStateMatch = pathname.match(/^\/api\/todos\/(\d+)\/state$/);
-        if (apiStateMatch) return handleApiTodoState(req, session, Number(apiStateMatch[1]));
-
-        // API endpoint for position-only updates (Summary card reordering)
-        const apiPositionMatch = pathname.match(/^\/api\/todos\/(\d+)\/position$/);
-        if (apiPositionMatch) return handleApiTodoPosition(req, session, Number(apiPositionMatch[1]));
-
-        // API endpoint for creating subtasks (JSON)
-        const createSubtaskMatch = pathname.match(/^\/api\/todos\/(\d+)\/subtasks$/);
-        if (createSubtaskMatch) return handleCreateSubtask(req, session, Number(createSubtaskMatch[1]));
-
-        const deleteMatch = pathname.match(/^\/todos\/(\d+)\/delete$/);
-        if (deleteMatch) return handleTodoDelete(req, session, Number(deleteMatch[1]));
-
         // Chat routes
         if (pathname === "/chat/channels") return handleCreateChannel(req, session);
         if (pathname === "/chat/dm") return handleCreateDm(req, session);
@@ -1025,6 +1016,14 @@ const server = Bun.serve({
         if (teamTodoOptikonMatch) return handleSetTodoOptikonBoard(req, session, teamTodoOptikonMatch[1], Number(teamTodoOptikonMatch[2]));
         const teamGroupOptikonWorkspacePatchMatch = pathname.match(/^\/t\/([^/]+)\/groups\/(\d+)\/optikon-workspace$/);
         if (teamGroupOptikonWorkspacePatchMatch) return handleSetGroupOptikonWorkspace(req, session, teamGroupOptikonWorkspacePatchMatch[1], Number(teamGroupOptikonWorkspacePatchMatch[2]));
+      }
+
+      if (req.method === "PUT") {
+        // User settings
+        if (pathname === "/api/user-settings") return handleUpdateUserSettings(req, session);
+
+        const teamPutChannelLayoutMatch = pathname.match(/^\/t\/([^/]+)\/api\/channel-layout$/);
+        if (teamPutChannelLayoutMatch) return handleTeamPutChannelLayout(req, session, teamPutChannelLayoutMatch[1]);
       }
 
       if (req.method === "DELETE") {

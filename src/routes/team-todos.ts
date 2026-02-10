@@ -5,10 +5,16 @@
  * Todos are stored in the team's database, not the main database.
  */
 
+import { finalizeEvent } from "nostr-tools";
+
+import { getWingmanIdentity } from "../config";
 import { createTeamRouteContext } from "../context";
 import { isAllowedTransition } from "../domain/todos";
 import { redirect } from "../http";
+import { findUserByWingmanNpub, getUserSetting } from "../master-db";
 import { renderTeamTodosPage } from "../render/home";
+import { createAndBroadcastActivity } from "../services/activities";
+import { publishTaskAssignment } from "../services/nostr-notify";
 import { TeamDatabase } from "../team-db";
 import { normalizeStateInput, validateTaskInput, validateTodoForm, validateTodoTitle } from "../validation";
 
@@ -20,8 +26,9 @@ import type { Session } from "../types";
 const jsonHeaders = { "Content-Type": "application/json" };
 
 // Helper to create and validate team context with return path for auth redirect
+// When no returnPath is given (API routes), use isApi mode for proper 401 JSON responses
 function requireTeamContext(session: Session | null, teamSlug: string, returnPath?: string) {
-  return createTeamRouteContext(session, teamSlug, returnPath);
+  return createTeamRouteContext(session, teamSlug, returnPath ?? { isApi: true });
 }
 
 function getRedirectUrl(teamSlug: string, groupId: number | null): string {
@@ -217,11 +224,15 @@ export async function handleTeamTodoUpdate(
     state: form.get("state"),
     scheduled_for: form.get("scheduled_for"),
     tags: form.get("tags"),
+    working_directory: form.get("working_directory"),
   });
 
   if (!fields) {
     return redirect(getRedirectUrl(teamSlug, groupId));
   }
+
+  // Fetch existing todo before update for comparison
+  const existingTodo = db.getTodoById(id);
 
   if (groupId) {
     const membership = result.ctx.session.teamMemberships?.find(
@@ -240,6 +251,7 @@ export async function handleTeamTodoUpdate(
       scheduledFor: fields.scheduled_for,
       tags: fields.tags,
       assignedTo: fields.assigned_to,
+      workingDirectory: fields.working_directory,
     });
   } else {
     db.updateTodo({
@@ -252,7 +264,43 @@ export async function handleTeamTodoUpdate(
       scheduledFor: fields.scheduled_for,
       tags: fields.tags,
       assignedTo: fields.assigned_to,
+      workingDirectory: fields.working_directory,
     });
+  }
+
+  // Create activities for task assignment/update
+  if (existingTodo) {
+    const taskTitle = fields.title || existingTodo.title;
+    // Assignment changed
+    if (fields.assigned_to && fields.assigned_to !== existingTodo.assigned_to) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: fields.assigned_to,
+        type: "task_assigned",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `assigned you to "${taskTitle}"`,
+      });
+
+      // Send Nostr notification (fire-and-forget)
+      publishTaskAssignment({
+        assigneeNpub: fields.assigned_to,
+        teamSlug,
+        taskId: id,
+        taskTitle,
+        taskDescription: existingTodo.description || "",
+        workingDirectory: fields.working_directory || existingTodo.working_directory || undefined,
+      }).catch((err) => console.error("[Nostr] Task assignment notification failed:", err));
+    }
+    // Notify assignee of update (if updated by someone else)
+    if (existingTodo.assigned_to && existingTodo.assigned_to !== result.ctx.session.npub) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: existingTodo.assigned_to,
+        type: "task_update",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `updated "${taskTitle}"`,
+      });
+    }
   }
 
   // Propagate tags to children if this is a parent task
@@ -303,6 +351,17 @@ export async function handleTeamTodoState(
     db.transitionTodo(id, result.ctx.session.npub, nextState);
   }
 
+  // Notify assignee of state change
+  if (existing.assigned_to && existing.assigned_to !== result.ctx.session.npub) {
+    createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+      targetNpub: existing.assigned_to,
+      type: "task_update",
+      sourceNpub: result.ctx.session.npub,
+      todoId: id,
+      summary: `moved "${existing.title}" to ${nextState}`,
+    });
+  }
+
   return redirect(getRedirectUrl(teamSlug, groupId));
 }
 
@@ -348,12 +407,7 @@ export async function handleTeamApiTodoState(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   try {
     const body = await req.json();
@@ -410,6 +464,17 @@ export async function handleTeamApiTodoState(
       });
     }
 
+    // Notify assignee of state change
+    if (existing.assigned_to && existing.assigned_to !== result.ctx.session.npub) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: existing.assigned_to,
+        type: "task_update",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `moved "${existing.title}" to ${nextState}`,
+      });
+    }
+
     return new Response(JSON.stringify({ success: true, state: nextState, position }), {
       status: 200,
       headers: jsonHeaders,
@@ -432,12 +497,7 @@ export async function handleTeamApiTodoPosition(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   try {
     const body = await req.json();
@@ -491,12 +551,7 @@ export function handleTeamGetTodo(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const todo = db.getTodoById(id);
@@ -524,12 +579,7 @@ export function handleTeamGetSubtasks(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const todo = db.getTodoById(id);
@@ -574,12 +624,7 @@ export async function handleTeamCreateSubtask(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const parent = db.getTodoById(id);
@@ -644,12 +689,7 @@ export function handleTeamDetachFromParent(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const task = db.getTodoById(id);
@@ -704,12 +744,7 @@ export function handleTeamListPotentialParents(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
   const task = db.getTodoById(id);
@@ -767,12 +802,7 @@ export async function handleTeamSetParent(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
 
@@ -832,12 +862,7 @@ export async function handleTeamApiTodoCreate(
   teamSlug: string
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   try {
     const body = await req.json();
@@ -898,12 +923,7 @@ export async function handleTeamApiTodoUpdate(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   try {
     const body = await req.json();
@@ -950,6 +970,7 @@ export async function handleTeamApiTodoUpdate(
         scheduledFor: fields.scheduled_for,
         tags: fields.tags,
         assignedTo: fields.assigned_to,
+        workingDirectory: fields.working_directory,
       });
     } else {
       db.updateTodo({
@@ -962,6 +983,38 @@ export async function handleTeamApiTodoUpdate(
         scheduledFor: fields.scheduled_for,
         tags: fields.tags,
         assignedTo: fields.assigned_to,
+        workingDirectory: fields.working_directory,
+      });
+    }
+
+    // Create activities for task assignment/update
+    const taskTitle = fields.title || existing.title;
+    if (fields.assigned_to && fields.assigned_to !== existing.assigned_to) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: fields.assigned_to,
+        type: "task_assigned",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `assigned you to "${taskTitle}"`,
+      });
+
+      // Send Nostr notification (fire-and-forget)
+      publishTaskAssignment({
+        assigneeNpub: fields.assigned_to,
+        teamSlug,
+        taskId: id,
+        taskTitle,
+        taskDescription: existing.description || "",
+        workingDirectory: fields.working_directory || existing.working_directory || undefined,
+      }).catch((err) => console.error("[Nostr] Task assignment notification failed:", err));
+    }
+    if (existing.assigned_to && existing.assigned_to !== result.ctx.session.npub) {
+      createAndBroadcastActivity(teamSlug, result.ctx.teamDb, {
+        targetNpub: existing.assigned_to,
+        type: "task_update",
+        sourceNpub: result.ctx.session.npub,
+        todoId: id,
+        summary: `updated "${taskTitle}"`,
       });
     }
 
@@ -994,12 +1047,7 @@ export function handleTeamApiTodoDelete(
   id: number
 ) {
   const result = requireTeamContext(session, teamSlug);
-  if (!result.ok) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: jsonHeaders,
-    });
-  }
+  if (!result.ok) return result.response;
 
   const db = new TeamDatabase(result.ctx.teamDb);
 
@@ -1034,4 +1082,87 @@ export function handleTeamApiTodoDelete(
     status: 200,
     headers: jsonHeaders,
   });
+}
+
+/**
+ * GET /t/:slug/api/wingman/projects?npub={npub} - Proxy to Wingmen for project list
+ *
+ * Looks up the Wingmen URL from user_settings (the user who configured this
+ * wingman npub), then signs the outbound request with NIP-98 using WINGMAN_KEY.
+ */
+export async function handleTeamWingmanProjects(
+  url: URL,
+  session: Session | null,
+  teamSlug: string
+) {
+  const result = requireTeamContext(session, teamSlug);
+  if (!result.ok) return result.response;
+
+  const npub = url.searchParams.get("npub");
+  if (!npub) {
+    return new Response(JSON.stringify({ error: "npub parameter required" }), {
+      status: 400,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Find which user configured this wingman npub
+  const ownerNpub = findUserByWingmanNpub(npub);
+  if (!ownerNpub) {
+    return new Response(JSON.stringify({ projects: [] }), {
+      status: 200,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Get that user's wingmen_url
+  const wingmenUrl = getUserSetting(ownerNpub, "wingmen_url");
+  if (!wingmenUrl) {
+    return new Response(JSON.stringify({ projects: [] }), {
+      status: 200,
+      headers: jsonHeaders,
+    });
+  }
+
+  const identity = getWingmanIdentity();
+  if (!identity) {
+    return new Response(JSON.stringify({ error: "Server signing key not configured" }), {
+      status: 503,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Build the target URL
+  const targetUrl = `${wingmenUrl}/api/npub-projects?npub=${encodeURIComponent(npub)}`;
+
+  // Sign NIP-98 event for the outbound request
+  const nip98Event = finalizeEvent({
+    kind: 27235,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ["u", targetUrl],
+      ["method", "GET"],
+    ],
+    content: "",
+  }, identity.secretKey);
+
+  const token = `Nostr ${btoa(JSON.stringify(nip98Event))}`;
+
+  try {
+    const res = await fetch(targetUrl, {
+      headers: { Authorization: token },
+    });
+
+    const data = await res.json();
+    return new Response(JSON.stringify(data), {
+      status: res.status,
+      headers: jsonHeaders,
+    });
+  } catch (err) {
+    console.error("[Wingman Proxy] Failed to fetch projects:", err);
+    return new Response(JSON.stringify({ error: "Failed to fetch projects from Wingmen" }), {
+      status: 502,
+      headers: jsonHeaders,
+    });
+  }
 }

@@ -191,6 +191,18 @@ function initMasterSchema(db: Database): void {
     )
   `);
   db.run("CREATE INDEX IF NOT EXISTS idx_invite_groups_invitation ON invite_groups(invitation_id)");
+
+  // User settings (per-individual key-value store)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      npub TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (npub, key)
+    )
+  `);
+  db.run("CREATE INDEX IF NOT EXISTS idx_user_settings_npub ON user_settings(npub)");
 }
 
 /**

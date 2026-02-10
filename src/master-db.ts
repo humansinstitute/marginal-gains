@@ -632,3 +632,73 @@ export function listTeamManagers(): TeamMembership[] {
   if (!systemTeam) return [];
   return getTeamMembers(systemTeam.id);
 }
+
+// ============================================================================
+// User Settings Operations
+// ============================================================================
+
+/**
+ * Get a single user setting
+ */
+export function getUserSetting(npub: string, key: string): string | null {
+  const db = getMasterDb();
+  const stmt = db.prepare<{ value: string }, [string, string]>(
+    "SELECT value FROM user_settings WHERE npub = ? AND key = ?"
+  );
+  const row = stmt.get(npub, key);
+  return row?.value ?? null;
+}
+
+/**
+ * Get all settings for a user
+ */
+export function getUserSettings(npub: string): Record<string, string> {
+  const db = getMasterDb();
+  const stmt = db.prepare<{ key: string; value: string }, [string]>(
+    "SELECT key, value FROM user_settings WHERE npub = ?"
+  );
+  const rows = stmt.all(npub);
+  const settings: Record<string, string> = {};
+  for (const row of rows) {
+    settings[row.key] = row.value;
+  }
+  return settings;
+}
+
+/**
+ * Set a user setting (upsert)
+ */
+export function setUserSetting(npub: string, key: string, value: string): void {
+  const db = getMasterDb();
+  const stmt = db.prepare(`
+    INSERT INTO user_settings (npub, key, value, updated_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(npub, key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  stmt.run(npub, key, value);
+}
+
+/**
+ * Delete a user setting
+ */
+export function deleteUserSetting(npub: string, key: string): boolean {
+  const db = getMasterDb();
+  const stmt = db.prepare("DELETE FROM user_settings WHERE npub = ? AND key = ?");
+  const result = stmt.run(npub, key);
+  return result.changes > 0;
+}
+
+/**
+ * Look up a user's npub by their configured wingman_npub
+ * Returns the npub of the user who has this wingman_npub in their settings
+ */
+export function findUserByWingmanNpub(wingmanNpub: string): string | null {
+  const db = getMasterDb();
+  const stmt = db.prepare<{ npub: string }, [string]>(
+    "SELECT npub FROM user_settings WHERE key = 'wingman_npub' AND value = ?"
+  );
+  const row = stmt.get(wingmanNpub);
+  return row?.npub ?? null;
+}

@@ -177,6 +177,9 @@ if (KEYTELEPORT_PRIVKEY) {
   }
 }
 
+// Base URL for this MG instance (used in task assignment notifications, etc.)
+export const MG_BASE_URL = Bun.env.MG_BASE_URL ?? "https://mg.otherstuff.ai";
+
 // Startup logging for Welcome API config
 if (WELCOME_API_URL) {
   console.log(`[Welcome API] URL: ${WELCOME_API_URL}`);
